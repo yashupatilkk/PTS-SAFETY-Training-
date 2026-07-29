@@ -11,6 +11,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root{--amber:#ffb020;--amber-d:#e0961a;--amber-light:rgba(255,176,32,.12);--red:#e8483a;--green:#3ecf8e;--orange:#f0883e;--purple:#8b6de8;--blue:#3ea0e8;--r:12px;--r-sm:8px;--r-lg:18px;--sidebar-w:260px;--stripe:repeating-linear-gradient(45deg,#151515 0 14px,var(--amber) 14px 28px);--trans:.2s ease;}
 html[data-theme="dark"]{--bg:#0d1117;--bg2:#090b0e;--sur:#161b22;--sur2:#1c2333;--sur3:#22293a;--sur4:#2a3347;--txt:#e6edf3;--txt2:#c9d1d9;--muted:#7d8590;--bdr:#2d333b;--bdr2:#3d444d;--shadow:0 8px 32px rgba(0,0,0,.55);--card-hover:0 0 0 1px var(--amber),0 12px 40px rgba(255,176,32,.08);--glass:rgba(22,27,34,.85);}
@@ -388,7 +391,7 @@ select.form-control-sm{background:var(--sur2);}
         <label class="checkbox-label"><input type="checkbox" id="rememberMe"> Remember me</label>
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
-      <button class="btn-primary-full" onclick="doLogin()">PTS SAFETY SIGN IN</button>
+      <button class="btn-primary-full" id="loginBtn" onclick="doLogin()">PTS SAFETY SIGN IN</button>
       <div class="demo-hint">
         <div style="margin-bottom:6px;"><b>Admin:</b> <span style="color:var(--txt);">Admin User</span> — username: <b>admin</b> | password: <b>admin123</b></div>
         <div><b>Employee:</b> <span style="color:var(--txt);">Rajesh Kumar</span> — ID: <b>EMP001</b> | password: <b>emp123</b></div>
@@ -839,6 +842,79 @@ let DB={
 };
 
 /* ============================================================
+   FIREBASE CONFIG
+============================================================ */
+const firebaseConfig={
+  apiKey:"AIzaSyDummyReplaceWithYourOwnKey",
+  authDomain:"pts-safety-training.firebaseapp.com",
+  projectId:"pts-safety-training",
+  storageBucket:"pts-safety-training.appspot.com",
+  messagingSenderId:"123456789",
+  appId:"1:123456789:web:abcdef123456"
+};
+firebase.initializeApp(firebaseConfig);
+const fbAuth=firebase.auth();
+const fbDB=firebase.firestore();
+let firebaseReady=false;
+let dbLoadPromise=null;
+
+function toEmail(user){
+  if(!user)return null;
+  return user.toLowerCase().replace(/[^a-z0-9]/g,'')+'@pts-safety.app';
+}
+
+async function fbSaveCollection(collName,items,keyField){
+  if(!firebaseReady)return;
+  try{
+    const batch=fbDB.batch();
+    const chunkSize=400;
+    for(let i=0;i<items.length;i+=chunkSize){
+      const chunk=items.slice(i,i+chunkSize);
+      for(const item of chunk){
+        const docId=item[keyField]||item.id||item.username||item.num;
+        if(!docId)continue;
+        const ref=fbDB.collection(collName).doc(String(docId));
+        const data={...item};
+        batch.set(ref,data,{merge:true});
+      }
+      await batch.commit();
+    }
+  }catch(e){console.warn('fbSaveCollection error ('+collName+'):',e);}
+}
+
+async function fbSaveSettings(){
+  if(!firebaseReady)return;
+  try{await fbDB.collection('config').doc('settings').set(DB.settings,{merge:true});}catch(e){console.warn('fbSaveSettings error:',e);}
+}
+
+async function seedFirestore(){
+  if(!firebaseReady)return;
+  try{
+    const metaDoc=await fbDB.collection('config').doc('meta').get();
+    if(metaDoc.exists)return;
+    console.log('Seeding Firestore with default data...');
+    await fbDB.collection('config').doc('meta').set({seeded:true,version:2});
+    await fbSaveCollection('employees',DB.employees,'id');
+    await fbSaveCollection('admins',DB.admins,'username');
+    await fbSaveCollection('trainings',DB.trainings,'id');
+    await fbSaveCollection('testResults',DB.testResults,'id');
+    await fbSaveCollection('certificates',DB.certificates,'num');
+    await fbSaveCollection('notifications',DB.notifications,'id');
+    await fbSaveCollection('videos',DB.videos,'id');
+    await fbSaveCollection('sops',DB.sops,'id');
+    await fbSaveSettings();
+    // Create default Firebase Auth accounts
+    try{
+      await fbAuth.createUserWithEmailAndPassword(toEmail('admin'),'admin123');
+    }catch(e){}
+    try{
+      await fbAuth.createUserWithEmailAndPassword(toEmail('EMP001'),'emp123');
+    }catch(e){}
+    console.log('Firestore seeded successfully');
+  }catch(e){console.warn('Seed error:',e);}
+}
+
+/* ============================================================
    APP STATE
 ============================================================ */
 let currentUser=null,isAdmin=false,currentView="dashboard";
@@ -905,31 +981,71 @@ function togglePw(){
   inp.type=inp.type==="password"?"text":"password";
   ico.textContent=inp.type==="password"?"visibility":"visibility_off";
 }
-function doLogin(){
+async function doLogin(){
   const id=document.getElementById("loginId").value.trim();
   const pw=document.getElementById("loginPw").value;
   if(!id||!pw){toast("Please enter credentials","error");return;}
   // Auto-detect login type based on input
   if(loginType==="admin"&&id.toUpperCase().startsWith("EMP")){setLoginType("employee");}
   if(loginType==="employee"&&(id.toLowerCase()==="admin")){setLoginType("admin");}
-  if(loginType==="admin"){
-    const admin=DB.admins.find(a=>a.username===id&&a.password===pw);
-    if(!admin){toast("Invalid admin credentials","error");return;}
-    currentUser={...admin,type:"admin"};isAdmin=true;
-  }else{
-    const emp=DB.employees.find(e=>e.id===id&&e.password===pw);
-    if(!emp){toast("Invalid Employee ID or password","error");return;}
-    currentUser={...emp,type:"employee"};isAdmin=false;
+  document.getElementById("loginBtn").disabled=true;
+  document.getElementById("loginBtn").innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Signing in...';
+  try{
+    // Try Firebase Auth first (if available and configured)
+    if(firebaseReady){
+      try{
+        const email=toEmail(id);
+        await fbAuth.signInWithEmailAndPassword(email,pw);
+      }catch(fbErr){
+        console.warn('Firebase Auth failed, using local DB fallback:',fbErr.code);
+        // Fall through to local DB check below
+      }
+    }
+    // Always verify against local DB (source of truth)
+    if(loginType==="admin"){
+      const admin=DB.admins.find(a=>a.username===id);
+      if(!admin){toast("Invalid admin credentials","error");return;}
+      if(admin.password!==pw){toast("Invalid admin credentials","error");return;}
+      currentUser={...admin,type:"admin"};isAdmin=true;
+    }else{
+      const emp=DB.employees.find(e=>e.id===id);
+      if(!emp){toast("Invalid Employee ID or password","error");return;}
+      if(emp.password!==pw){toast("Invalid Employee ID or password","error");return;}
+      currentUser={...emp,type:"employee"};isAdmin=false;
+    }
+    // If Firebase is ready but auth failed above (wrong pw in Firebase), update it
+    if(firebaseReady&&fbAuth.currentUser){
+      // Already signed in via Firebase Auth - good
+    }else if(firebaseReady){
+      // Firebase Auth didn't work but local DB verified - create/update Firebase account silently
+      const email=toEmail(id);
+      try{
+        await fbAuth.signInWithEmailAndPassword(email,pw);
+      }catch(signInErr){
+        try{
+          await fbAuth.createUserWithEmailAndPassword(email,pw);
+        }catch(createErr){
+          if(createErr.code!=='auth/email-already-in-use')console.warn('Firebase account sync error:',createErr.message);
+        }
+      }
+    }
+    const safeUser={...currentUser};delete safeUser.password;
+    if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
+    startApp();
+  }catch(e){
+    toast("Login failed. Please try again.","error");
+  }finally{
+    const btn=document.getElementById("loginBtn");
+    if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
   }
-  // Save session without password for security
-  const safeUser={...currentUser};delete safeUser.password;
-  if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
-  startApp();
 }
 function showForgot(){toast("Please contact your system administrator","info");}
 function doLogout(){
   currentUser=null;isAdmin=false;
   localStorage.removeItem("mep_user");
+  fbAuth.signOut().catch(()=>{});
+  if(quizState.timer)clearInterval(quizState.timer);
+  quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0};
   document.getElementById("loginPage").style.display="flex";
   document.getElementById("mainArea").style.display="none";
   document.getElementById("loginId").value="";
@@ -1362,7 +1478,19 @@ function saveEmployee(){
   if(!id||!name||!mobile){toast("ID, Name and Mobile required","error");return;}
   if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");return;}
   DB.employees.push({id,name,dept:document.getElementById("ne_dept").value,desig:document.getElementById("ne_desig").value,shift:document.getElementById("ne_shift").value,mobile,email:document.getElementById("ne_email").value,status:"active",joining:document.getElementById("ne_join").value||new Date().toISOString().split("T")[0],location:document.getElementById("ne_loc").value||"Site",password:document.getElementById("ne_pw").value||"emp123",company:DB.settings.companyName,photo:""});
-  closeModal();renderEmployees();updateBadges();saveDB();toast(`Employee ${name} added`,"success");
+  closeModal();renderEmployees();updateBadges();saveDB();toast(`Employee ${name} added`,`success`);
+  // Create Firebase Auth account for this employee (async)
+  if(firebaseReady){
+    const empEmail=toEmail(id);
+    const empPw=document.getElementById("ne_pw").value||"emp123";
+    fbAuth.signInWithEmailAndPassword(empEmail,empPw)
+      .then(()=>console.log('Auth account exists for',id))
+      .catch(()=>{
+        fbAuth.createUserWithEmailAndPassword(empEmail,empPw)
+          .then(()=>console.log('Auth account created for',id))
+          .catch(e=>{if(e.code!=='auth/email-already-in-use')console.warn('Auth create error for',id,e.message);});
+      });
+  }
 }
 function editEmp(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
@@ -1418,7 +1546,7 @@ function viewEmpHistory(id){
     <div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">Close</button></div>
   `,"700px");
 }
-function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(pw){const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;toast("Password changed","success");saveDB();}}}
+function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
 function deleteEmp(id){
   if(!confirm("Delete this employee? This cannot be undone."))return;
   DB.employees=DB.employees.filter(e=>e.id!==id);
@@ -2344,7 +2472,11 @@ function renderReports(){
         <div><strong style="font-size:12px;text-transform:uppercase;">All Test Results</strong>
           <span style="font-size:11px;color:var(--muted);margin-left:8px;">(${DB.testResults.length} records · <span style="color:var(--green)">${passCount} PASS</span> · <span style="color:var(--red)">${failCount} FAIL</span>)</span>
         </div>
-        <button class="btn btn-sm btn-outline" onclick="exportTestReport()"><span class="mat-ico" style="font-size:12px;">download</span> Export Excel</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-outline" onclick="recalcPassFail()"><span class="mat-ico" style="font-size:12px;">sync</span> Recalculate</button>
+          <button class="btn btn-sm" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="clearAllTestResults()"><span class="mat-ico" style="font-size:12px;">delete_sweep</span> Clear All</button>
+          <button class="btn btn-sm btn-outline" onclick="exportTestReport()"><span class="mat-ico" style="font-size:12px;">download</span> Export</button>
+        </div>
       </div>
       <table>
         <thead><tr><th>Date</th><th>Emp ID</th><th>Name</th><th>Dept</th><th>Training</th><th>Score</th><th>Correct</th><th>Wrong</th><th>Total Q</th><th>Attempt</th><th>Result</th><th>Certificate No</th></tr></thead>
@@ -2434,6 +2566,24 @@ function exportMonthlyReport(){
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Monthly");
   XLSX.writeFile(wb,"MEP_Monthly_"+new Date().toISOString().split("T")[0]+".xlsx");toast("Monthly report exported","success");
 }
+function recalcPassFail(){
+  let fixed=0;
+  DB.testResults.forEach(r=>{
+    const trn=DB.trainings.find(t=>t.name===r.training);
+    const passing=trn?.passing||70;
+    const shouldPass=r.score>=passing;
+    if(r.pass!==shouldPass){r.pass=shouldPass;fixed++;}
+  });
+  saveDB();renderReports();toast(fixed?"Recalculated: "+fixed+" records corrected":"All PASS/FAIL values are correct",fixed?"success":"info");
+}
+function clearAllTestResults(){
+  if(!confirm("DELETE all "+DB.testResults.length+" test results and "+DB.certificates.length+" certificates? This cannot be undone!"))return;
+  if(!confirm("Are you ABSOLUTELY sure? All test history and certificates will be permanently deleted."))return;
+  DB.testResults=[];DB.certificates=[];
+  // Also clear completed status from trainings
+  DB.trainings.forEach(t=>{t.completed=[];t.completedDates={};});
+  saveDB();renderReports();updateBadges();toast("All test results and certificates cleared","warning");
+}
 
 /* ============================================================
    NOTIFICATIONS
@@ -2465,6 +2615,11 @@ function renderSettings(){
   document.getElementById("view-settings").innerHTML=`
     <div class="section-header"><div class="section-title">System <span>Settings</span></div>
       ${isAdmin?`<button class="btn btn-amber" onclick="saveSettings()"><span class="mat-ico">save</span> Save Settings</button>`:""}
+    </div>
+    <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Status: <span id="fbStatusText" style="color:${firebaseReady?'var(--green)':'var(--red)'};"><span class="mat-ico" style="font-size:14px;">${firebaseReady?'check_circle':'cloud_off'}</span> ${firebaseReady?'Connected — data syncs across devices':'Not Connected — using local storage only'}</span></div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone/device. Admin-added data syncs automatically via Firebase. New employees get Firebase Auth accounts created automatically.</div>
     </div>
     <div class="settings-grid">
       <div class="form-section">
@@ -2583,6 +2738,7 @@ function saveAdmin(){
   if(DB.admins.find(a=>a.username===u)){toast("Username already exists","error");return;}
   DB.admins.push({username:u,name:n,password:p,role:document.getElementById("na_role").value});
   closeModal();renderSettings();saveDB();toast("Admin added","success");
+  if(firebaseReady){const aEmail=toEmail(u);fbAuth.signInWithEmailAndPassword(aEmail,p).catch(()=>{fbAuth.createUserWithEmailAndPassword(aEmail,p).catch(()=>{});});}
 }
 function backupData(){
   const blob=new Blob([JSON.stringify(DB,null,2)],{type:"application/json"});
@@ -2818,9 +2974,21 @@ function saveDB(){
   try{
     const data=JSON.parse(JSON.stringify(DB));
     localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(data));
-  }catch(e){console.warn("DB save failed:",e);}
+  }catch(e){}
+  // Async Firebase sync (fire-and-forget)
+  if(firebaseReady){
+    fbSaveCollection('employees',DB.employees,'id');
+    fbSaveCollection('admins',DB.admins,'username');
+    fbSaveCollection('trainings',DB.trainings,'id');
+    fbSaveCollection('testResults',DB.testResults,'id');
+    fbSaveCollection('certificates',DB.certificates,'num');
+    fbSaveCollection('notifications',DB.notifications,'id');
+    fbSaveCollection('videos',DB.videos,'id');
+    fbSaveCollection('sops',DB.sops,'id');
+    fbSaveSettings();
+  }
 }
-function loadDB(){
+function loadDBFromLocal(){
   try{
     const raw=localStorage.getItem(DB_STORAGE_KEY);
     if(!raw)return false;
@@ -2833,23 +3001,69 @@ function loadDB(){
     if(saved.sops&&Array.isArray(saved.sops))DB.sops=saved.sops;
     if(saved.notifications&&Array.isArray(saved.notifications))DB.notifications=saved.notifications;
     if(saved.settings&&typeof saved.settings==="object")Object.assign(DB.settings,saved.settings);
-    // Always ensure default admin exists
     if(saved.admins&&Array.isArray(saved.admins)&&saved.admins.length>0){
       DB.admins=saved.admins;
     }
-    if(!DB.admins.find(a=>a.username==="admin")){
-      DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
-    }
-    // Always ensure default employee EMP001 exists
-    if(!DB.employees.find(e=>e.id==="EMP001")){
-      DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
-    }
     return true;
-  }catch(e){console.warn("DB load failed:",e);localStorage.removeItem(DB_STORAGE_KEY);return false;}
+  }catch(e){console.warn("Local load failed:",e);return false;}
 }
-function resetDBToDefault(){
+
+async function loadDBFromFirestore(){
+  try{
+    const [empSnap,trnSnap,testSnap,certSnap,vidSnap,sopSnap,notifSnap,adminSnap,setSnap]=await Promise.all([
+      fbDB.collection('employees').get(),
+      fbDB.collection('trainings').get(),
+      fbDB.collection('testResults').get(),
+      fbDB.collection('certificates').get(),
+      fbDB.collection('videos').get(),
+      fbDB.collection('sops').get(),
+      fbDB.collection('notifications').orderBy('id','desc').get(),
+      fbDB.collection('admins').get(),
+      fbDB.collection('config').doc('settings').get()
+    ]);
+    if(empSnap.size>0)DB.employees=empSnap.docs.map(d=>d.data());
+    if(trnSnap.size>0)DB.trainings=trnSnap.docs.map(d=>d.data());
+    if(testSnap.size>0)DB.testResults=testSnap.docs.map(d=>d.data());
+    if(certSnap.size>0)DB.certificates=certSnap.docs.map(d=>d.data());
+    if(vidSnap.size>0)DB.videos=vidSnap.docs.map(d=>d.data());
+    if(sopSnap.size>0)DB.sops=sopSnap.docs.map(d=>d.data());
+    if(notifSnap.size>0)DB.notifications=notifSnap.docs.map(d=>d.data());
+    if(adminSnap.size>0)DB.admins=adminSnap.docs.map(d=>d.data());
+    if(setSnap.exists)Object.assign(DB.settings,setSnap.data());
+    console.log('Firestore loaded: employees='+DB.employees.length+' trainings='+DB.trainings.length+' results='+DB.testResults.length);
+    return true;
+  }catch(e){
+    console.warn('Firestore load error:',e);
+    return false;
+  }
+}
+
+function loadDB(){
+  // Synchronous: load from localStorage for immediate use
+  loadDBFromLocal();
+  // Always ensure defaults exist
+  if(!DB.admins.find(a=>a.username==="admin")){
+    DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
+  }
+  if(!DB.employees.find(e=>e.id==="EMP001")){
+    DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
+  }
+}
+async function resetDBToDefault(){
   if(!confirm("Reset ALL data to defaults? This will delete all employees, trainings, test results, and certificates you added. This cannot be undone."))return;
   localStorage.removeItem(DB_STORAGE_KEY);
+  if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
+    try{
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config'];
+      for(const c of cols){
+        const snap=await fbDB.collection(c).get();
+        const batch=fbDB.batch();
+        snap.docs.forEach(d=>batch.delete(d.ref));
+        if(snap.size)await batch.commit();
+      }
+      toast('Firebase data cleared','success');
+    }catch(e){toast('Firebase clear error: '+e.message,'error');}
+  }
   location.reload();
 }
 
@@ -2863,9 +3077,43 @@ function resetDBToDefault(){
     if(old){const p=JSON.parse(old);if(!p.type||(p.type!=="admin"&&p.type!=="employee")){localStorage.removeItem("mep_user");}}
   }catch(e){localStorage.removeItem("mep_user");}
 })();
-(function init(){
+
+async function initApp(){
+  // Show loading state
+  const loginForm=document.querySelector('.login-wrap');
+  const loadMsg=document.getElementById('fbLoadStatus');
+  if(loadMsg)loadMsg.style.display='block';
+
+  // 1. Load from localStorage immediately (sync)
   loadDB();
-  // Double-check: guarantee default admin always present after load
+
+  // 2. Try Firebase/Firestore
+  try{
+    firebaseReady=true;
+    const loaded=await loadDBFromFirestore();
+    if(loaded){
+      // Merge: Firestore data takes priority, but keep defaults
+      if(!DB.admins.find(a=>a.username==="admin")){
+        DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
+      }
+      if(!DB.employees.find(e=>e.id==="EMP001")){
+        DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
+      }
+      saveDB(); // sync localStorage with Firestore data
+      // Seed if empty
+      await seedFirestore();
+    }else{
+      console.log('Firestore unavailable, using localStorage only');
+      firebaseReady=false;
+    }
+  }catch(e){
+    console.warn('Firebase init error:',e);
+    firebaseReady=false;
+  }
+
+  if(loadMsg)loadMsg.style.display='none';
+
+  // Double-check: guarantee default admin always present
   if(!DB.admins.find(a=>a.username==="admin")){
     DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
     saveDB();
@@ -2874,7 +3122,28 @@ function resetDBToDefault(){
   document.documentElement.setAttribute("data-theme",t);
   DB.settings.theme=t;
   document.getElementById("themeBtn").querySelector(".mat-ico").textContent=t==="dark"?"dark_mode":"light_mode";
-  // Validate saved session against current DB credentials
+
+  // Try Firebase Auth persistence first
+  try{
+    if(firebaseReady){
+      await new Promise(r=>{const unsub=fbAuth.onAuthStateChanged(r);setTimeout(unsub,3000);});
+      const fbUser=fbAuth.currentUser;
+      if(fbUser){
+        const uid=fbUser.email.split('@')[0].toUpperCase();
+        let found=false;
+        if(uid==='ADMIN'){
+          const admin=DB.admins.find(a=>a.username==='admin');
+          if(admin){currentUser={...admin,type:"admin"};isAdmin=true;found=true;}
+        }else{
+          const emp=DB.employees.find(e=>e.id===uid);
+          if(emp){currentUser={...emp,type:"employee"};isAdmin=false;found=true;}
+        }
+        if(found){startApp();return;}
+      }
+    }
+  }catch(e){console.warn('Auth persistence check error:',e);}
+
+  // Fallback: check localStorage session
   const saved=localStorage.getItem("mep_user");
   if(saved){
     try{
@@ -2890,7 +3159,9 @@ function resetDBToDefault(){
       if(valid){startApp();}else{localStorage.removeItem("mep_user");}
     }catch{localStorage.removeItem("mep_user");}
   }
-})();
+}
+
+initApp();
 document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPw").focus();});
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
