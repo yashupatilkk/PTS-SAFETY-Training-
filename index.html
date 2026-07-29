@@ -1477,9 +1477,10 @@ function renderTrainings(){
               <span style="font-size:10.5px;color:var(--muted);">${completedCount}/${enrolledCount} completed (${pct}%)</span>
               <span class="badge badge-${t.cert?"amber":"info"}">${t.cert?"📜 Cert":"No Cert"}</span>
             </div>
-            <div style="display:flex;gap:5px;margin-top:8px;">
+            <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();assignEmployees('${t.id}')"><span class="mat-ico" style="font-size:11px;">person_add</span> Assign</button>
               <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openTrainingDetail('${t.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span> View</button>
+              <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               <button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">delete</span></button>
             </div>
           </div>
@@ -1760,7 +1761,7 @@ function renderEquipment(){
             <div class="eq-spec">${e.s}</div>
             <div class="eq-actions">
               <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();openEquipDetail(${EQUIPMENT_DATA.indexOf(e)})"><span class="mat-ico" style="font-size:11px;">info</span> Details</button>
-              <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();startQuiz(resolveQuizCategory('${e.c}'),'${e.n} — Equipment Quiz')"><span class="mat-ico" style="font-size:11px;">quiz</span> Quiz</button>
+              <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz(resolveQuizCategory('${e.c}'),'${e.n} — Equipment Quiz')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               <button class="btn btn-sm" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="event.stopPropagation();youtubeSearch('${e.n}')" target="_blank"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</button>
             </div>
           </div>
@@ -1810,7 +1811,7 @@ function openEquipDetail(idx){
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-amber" onclick="startQuiz(resolveQuizCategory('${e.c}'),'${e.n} Equipment Quiz')"><span class="mat-ico">quiz</span> Take Quiz</button>
+      <button class="btn" style="background:rgba(62,207,142,.15);border:1px solid var(--green);color:var(--green);" onclick="startQuiz(resolveQuizCategory('${e.c}'),'${e.n} Equipment Quiz')"><span class="mat-ico">quiz</span> Take Test</button>
       <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> Search YouTube</button>
       <button class="btn btn-outline" onclick="closeModal()">Close</button>
     </div>
@@ -2052,6 +2053,13 @@ function renderQuizMenu(){
 }
 function startQuiz(category,trainingName){
   if(!currentUser){toast("Please login first","error");return;}
+  closeModal();
+  document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
+  document.getElementById("view-quiz").classList.add("active");
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view==="quiz"));
+  currentView="quiz";
+  document.getElementById("pageTitle").textContent="Online Tests";
+  document.getElementById("mainContent").scrollTop=0;
   category=resolveQuizCategory(category);
   let allQs=QUESTION_BANK[category]||[];
   if(!allQs.length){allQs=generateCategoryQuestions(category);QUESTION_BANK[category]=allQs;}
