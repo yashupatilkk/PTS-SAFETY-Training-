@@ -84,6 +84,9 @@ select option{background:var(--sur);}
 .demo-hint b{color:#e8483a;}
 .demo-hint div{margin-bottom:2px;}
 .demo-hint div:last-child{margin-bottom:0;}
+
+@keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(62,207,142,.4);}50%{box-shadow:0 0 0 8px rgba(62,207,142,0);}}
+.pulse-glow{animation:pulseGlow 1.5s ease-in-out infinite;}
 /* SIDEBAR */
 .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:59;}
 .sidebar-backdrop.show{display:block;}
@@ -348,10 +351,6 @@ select.form-control-sm{background:var(--sur2);}
   .quick-actions{grid-template-columns:1fr 1fr;}
   .topbar-search input{width:140px;}
 }
-
-.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:4px 0;}.collapsible-header:hover .collapsible-arrow{color:var(--amber);}.collapsible-arrow{transition:transform .25s ease;color:var(--muted);font-size:18px;}.collapsible-arrow.open{transform:rotate(90deg);}.collapsible-body{max-height:0;overflow:hidden;transition:max-height .35s ease;}.collapsible-body.open{max-height:5000px;}
-
-.video-progress-wrap{margin-top:8px;}.video-progress-bar{width:100%;height:6px;background:var(--sur3);border-radius:99px;overflow:hidden;position:relative;}.video-progress-fill{height:100%;background:linear-gradient(90deg,var(--red),var(--amber),var(--green));border-radius:99px;transition:width .5s ease;width:0%;}.video-progress-info{display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:11px;color:var(--muted);}.video-progress-info .pct{font-weight:700;color:var(--amber);font-family:'JetBrains Mono',monospace;}.video-lock-msg{display:flex;align-items:center;gap:6px;padding:8px 12px;background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);font-size:11.5px;color:var(--red);margin-top:8px;}
 </style>
 </head>
 <body>
@@ -397,8 +396,10 @@ select.form-control-sm{background:var(--sur2);}
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
       <button class="btn-primary-full" id="loginBtn" onclick="doLogin()">PTS SAFETY SIGN IN</button>
+
     </div>
     <div class="login-footer">PTS SAFETY — Training Management System</div>
+
   </div>
 </div>
 
@@ -458,6 +459,10 @@ select.form-control-sm{background:var(--sur2);}
       <input type="text" id="globalSearch" placeholder="Search everything..." oninput="onGlobalSearch(this.value)">
     </div>
     <div class="topbar-actions">
+      <div id="syncIndicator" style="display:flex;align-items:center;gap:4px;font-size:11px;padding:4px 10px;border-radius:99px;border:1px solid var(--bdr);background:var(--sur2);cursor:pointer;transition:all .3s;" onclick="forceSyncToCloud()" title="Click to force sync to cloud">
+        <span class="mat-ico" id="syncIcon" style="font-size:15px;color:var(--green);">cloud_done</span>
+        <span id="syncText" style="color:var(--muted);font-weight:600;">Synced</span>
+      </div>
       <div class="notif-btn" onclick="toggleNotifPanel()">
         <span class="mat-ico" style="font-size:18px;">notifications</span>
         <div class="notif-dot" id="notifDot"></div>
@@ -760,22 +765,86 @@ TRAINING_CATS.forEach(cat=>{
    DATABASE
 ============================================================ */
 let DB={
-  employees:[],
-  trainings:[],
-  testResults:[],
-  certificates:[],
-  videos:[],
-  sops:[],
+  employees:[
+    {id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP002",name:"Suresh Patel",dept:"Fire Fighting",desig:"Fire Marshal",shift:"Day",mobile:"9876543211",email:"suresh@site.com",status:"active",joining:"2021-06-01",manager:"MGR001",location:"Zone A",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP003",name:"Priya Sharma",dept:"HVAC",desig:"HVAC Technician",shift:"Night",mobile:"9876543212",email:"priya@site.com",status:"active",joining:"2023-03-10",manager:"MGR002",location:"Plant Room",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP004",name:"Amit Singh",dept:"Plumbing",desig:"Plumber",shift:"Day",mobile:"9876543213",email:"amit@site.com",status:"inactive",joining:"2020-11-20",manager:"MGR001",location:"Pump Room",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP005",name:"Kavya Reddy",dept:"Soft Services",desig:"Housekeeper",shift:"Morning",mobile:"9876543214",email:"kavya@site.com",status:"active",joining:"2023-07-01",manager:"MGR003",location:"All Floors",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP006",name:"Mohammed Ali",dept:"Security",desig:"Security Guard",shift:"Night",mobile:"9876543215",email:"mali@site.com",status:"active",joining:"2022-09-15",manager:"MGR003",location:"Entry Gate",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP007",name:"Deepa Nair",dept:"Admin",desig:"Admin Executive",shift:"Day",mobile:"9876543216",email:"deepa@site.com",status:"active",joining:"2021-04-05",manager:"MGR001",location:"Admin Office",photo:"",password:"emp123",company:"MEP Solutions"},
+    {id:"EMP008",name:"Venkat Rao",dept:"STP",desig:"STP Operator",shift:"Rotating",mobile:"9876543217",email:"venkat@site.com",status:"active",joining:"2022-12-01",manager:"MGR002",location:"STP Room",photo:"",password:"emp123",company:"MEP Solutions"},
+  ],
+  trainings:[
+    {id:"TRN001",name:"Fire Safety Induction",cat:"Fire Fighting",dept:"All",trainer:"Safety Officer",date:"2025-08-10",duration:"4 hrs",passing:75,validity:"1 Year",cert:true,desc:"Basic fire safety awareness and extinguisher usage",enrolled:[],completed:[],completedDates:{}},
+    {id:"TRN002",name:"Electrical Safety & LOTO",cat:"Electrical Safety",dept:"Electrical",trainer:"EHS Manager",date:"2025-08-15",duration:"8 hrs",passing:80,validity:"1 Year",cert:true,desc:"Lockout Tagout procedures and electrical hazards",enrolled:["EMP001","EMP004"],completed:["EMP001"],completedDates:{"EMP001":"2025-08-01"}},
+    {id:"TRN003",name:"Working at Heights",cat:"Work at Height",dept:"Engineering",trainer:"External Trainer",date:"2025-08-20",duration:"8 hrs",passing:75,validity:"1 Year",cert:true,desc:"Fall protection, harness inspection, permit procedures",enrolled:["EMP002","EMP003"],completed:[],completedDates:{}},
+    {id:"TRN004",name:"Confined Space Entry",cat:"Confined Space",dept:"MEP",trainer:"Safety Officer",date:"2025-09-01",duration:"8 hrs",passing:75,validity:"6 Months",cert:true,desc:"Gas testing, standby person, rescue procedures",enrolled:["EMP008"],completed:["EMP008"],completedDates:{"EMP008":"2025-07-28"}},
+    {id:"TRN005",name:"PPE Usage & Inspection",cat:"PPE Usage",dept:"All",trainer:"Safety Supervisor",date:"2025-09-05",duration:"2 hrs",passing:70,validity:"1 Year",cert:false,desc:"Correct usage, inspection and storage of all PPE",enrolled:["EMP005","EMP006","EMP007"],completed:["EMP005","EMP007"],completedDates:{"EMP005":"2025-08-05","EMP007":"2025-08-05"}},
+    {id:"TRN006",name:"HVAC Chiller Operation",cat:"Chiller Operation",dept:"HVAC",trainer:"OEM Trainer",date:"2025-09-10",duration:"16 hrs",passing:80,validity:"2 Years",cert:true,desc:"Chiller startup, shutdown, alarms and troubleshooting",enrolled:["EMP003"],completed:[],completedDates:{}},
+  ],
+  testResults:[
+    {id:"TST001",empId:"EMP001",empName:"Rajesh Kumar",training:"Electrical Safety & LOTO",cat:"Electrical Safety",score:85,correct:17,wrong:3,total:20,pass:true,date:"2025-08-01",cert:"CERT-2025-001",attempt:1,dept:"Electrical",trainer:"EHS Manager"},
+    {id:"TST002",empId:"EMP002",empName:"Suresh Patel",training:"Fire Safety Induction",cat:"Fire Fighting",score:90,correct:18,wrong:2,total:20,pass:true,date:"2025-07-20",cert:"CERT-2025-002",attempt:1,dept:"Fire Fighting",trainer:"Safety Officer"},
+    {id:"TST003",empId:"EMP008",empName:"Venkat Rao",training:"Confined Space Entry",cat:"Confined Space",score:78,correct:14,wrong:4,total:18,pass:true,date:"2025-07-28",cert:"CERT-2025-003",attempt:1,dept:"STP",trainer:"Safety Officer"},
+    {id:"TST004",empId:"EMP005",empName:"Kavya Reddy",training:"PPE Usage & Inspection",cat:"PPE Usage",score:62,correct:9,wrong:5,total:14,pass:false,date:"2025-08-05",cert:"",attempt:1,dept:"Soft Services",trainer:"Safety Supervisor"},
+    {id:"TST005",empId:"EMP007",empName:"Deepa Nair",training:"PPE Usage & Inspection",cat:"PPE Usage",score:79,correct:11,wrong:3,total:14,pass:true,date:"2025-08-05",cert:"CERT-2025-004",attempt:1,dept:"Admin",trainer:"Safety Supervisor"},
+  ],
+  certificates:[
+    {num:"CERT-2025-001",empId:"EMP001",empName:"Rajesh Kumar",training:"Electrical Safety & LOTO",score:85,dept:"Electrical",trainer:"EHS Manager",issued:"2025-08-01",expiry:"2026-08-01",completedDate:"2025-08-01"},
+    {num:"CERT-2025-002",empId:"EMP002",empName:"Suresh Patel",training:"Fire Safety Induction",score:90,dept:"Fire Fighting",trainer:"Safety Officer",issued:"2025-07-20",expiry:"2026-07-20",completedDate:"2025-07-20"},
+    {num:"CERT-2025-003",empId:"EMP008",empName:"Venkat Rao",training:"Confined Space Entry",score:78,dept:"STP",trainer:"Safety Officer",issued:"2025-07-28",expiry:"2026-01-28",completedDate:"2025-07-28"},
+    {num:"CERT-2025-004",empId:"EMP007",empName:"Deepa Nair",training:"PPE Usage & Inspection",score:79,dept:"Admin",trainer:"Safety Supervisor",issued:"2025-08-05",expiry:"2026-08-05",completedDate:"2025-08-05"},
+  ],
+  videos:[
+    {id:"VID001",title:"Fire Extinguisher Operation — PASS Technique",cat:"Fire Fighting",type:"youtube",url:"https://www.youtube.com/watch?v=H5-qHlN1I8",youtubeId:"H5-qHlN1I8",duration:"4:23",views:142,likes:[],added:"2025-07-01"},
+    {id:"VID002",title:"Electrical Safety & LOTO Full Procedure",cat:"Electrical Safety",type:"youtube",url:"https://www.youtube.com/watch?v=qG6VqGW2Z0",youtubeId:"qG6VqGW2Z0",duration:"6:15",views:98,likes:[],added:"2025-07-05"},
+    {id:"VID003",title:"Working at Heights — Full Body Harness Inspection",cat:"Work at Height",type:"youtube",url:"https://www.youtube.com/watch?v=WlF-ct05mXI",youtubeId:"WlF-ct05mXI",duration:"8:42",views:76,likes:[],added:"2025-07-10"},
+    {id:"VID004",title:"Confined Space Entry — Permit & Rescue",cat:"Confined Space",type:"youtube",url:"https://www.youtube.com/watch?v=eOqGJJg1dE",youtubeId:"eOqGJJg1dE",duration:"10:05",views:54,likes:[],added:"2025-07-15"},
+    {id:"VID005",title:"PPE Selection, Inspection & Correct Usage",cat:"PPE Usage",type:"youtube",url:"https://www.youtube.com/watch?v=qEo9vFAfFE",youtubeId:"qEo9vFAfFE",duration:"7:30",views:120,likes:[],added:"2025-07-20"},
+    {id:"VID006",title:"Chiller Plant — Operation & Startup Sequence",cat:"Chiller Operation",type:"youtube",url:"https://www.youtube.com/watch?v=5PtNw2fFSI",youtubeId:"5PtNw2fFSI",duration:"15:20",views:43,likes:[],added:"2025-07-25"},
+    {id:"VID007",title:"First Aid & CPR — Basic Life Support",cat:"First Aid",type:"youtube",url:"https://www.youtube.com/watch?v=ILxj0RcQPI",youtubeId:"ILxj0RcQPI",duration:"12:45",views:200,likes:[],added:"2025-06-01"},
+    {id:"VID008",title:"Emergency Evacuation Drill — Best Practices",cat:"Emergency Evacuation",type:"youtube",url:"https://www.youtube.com/watch?v=3uRfKmG2Vg",youtubeId:"3uRfKmG2Vg",duration:"5:10",views:88,likes:[],added:"2025-06-15"},
+    {id:"VID009",title:"Fire Hydrant System — Operation & Maintenance",cat:"Fire Fighting",type:"youtube",url:"https://www.youtube.com/watch?v=7eSyh4OVcgA",youtubeId:"7eSyh4OVcgA",duration:"9:30",views:65,likes:[],added:"2025-06-20"},
+    {id:"VID010",title:"Chemical Handling — MSDS & Safe Storage",cat:"Chemical Handling",type:"youtube",url:"https://www.youtube.com/watch?v=3_HkBrH1wsc",youtubeId:"3_HkBrH1wsc",duration:"11:00",views:47,likes:[],added:"2025-06-22"},
+    {id:"VID011",title:"AHU — Air Handling Unit Maintenance",cat:"AHU Maintenance",type:"youtube",url:"https://www.youtube.com/watch?v=3kA2jqn0P3M",youtubeId:"3kA2jqn0P3M",duration:"13:20",views:33,likes:[],added:"2025-06-25"},
+    {id:"VID012",title:"DG Set — Diesel Generator Operation",cat:"DG Operation",type:"youtube",url:"https://www.youtube.com/watch?v=cF7HmX9hOE",youtubeId:"cF7HmX9hOE",duration:"10:45",views:58,likes:[],added:"2025-06-28"},
+    {id:"VID013",title:"STP — Sewage Treatment Plant Operation",cat:"STP Operation",type:"youtube",url:"https://www.youtube.com/watch?v=Dy7O3CsYuCA",youtubeId:"Dy7O3CsYuCA",duration:"18:00",views:39,likes:[],added:"2025-07-02"},
+    {id:"VID014",title:"Permit to Work — PTW System Explained",cat:"Permit To Work",type:"youtube",url:"https://www.youtube.com/watch?v=sBYQQkWxuYk",youtubeId:"sBYQQkWxuYk",duration:"7:50",views:71,likes:[],added:"2025-07-06"},
+    {id:"VID015",title:"HIRA — Hazard Identification Risk Assessment",cat:"HIRA",type:"youtube",url:"https://www.youtube.com/watch?v=LT0FLVq2YCA",youtubeId:"LT0FLVq2YCA",duration:"14:15",views:55,likes:[],added:"2025-07-08"},
+    {id:"VID016",title:"Incident Reporting — Near Miss & Root Cause",cat:"Incident Reporting",type:"youtube",url:"https://www.youtube.com/watch?v=rQVxJv3WKtk",youtubeId:"rQVxJv3WKtk",duration:"8:30",views:44,likes:[],added:"2025-07-09"},
+    {id:"VID017",title:"Cooling Tower — Operation & Water Treatment",cat:"Cooling Tower",type:"youtube",url:"https://www.youtube.com/watch?v=Xzbt1X9DJIY",youtubeId:"Xzbt1X9DJIY",duration:"12:00",views:36,likes:[],added:"2025-07-12"},
+    {id:"VID018",title:"Transformer Safety — HT/LT Handling",cat:"Transformer Safety",type:"youtube",url:"https://www.youtube.com/watch?v=vFGe0L2WnFM",youtubeId:"vFGe0L2WnFM",duration:"9:45",views:52,likes:[],added:"2025-07-14"},
+    {id:"VID019",title:"Pump Room — Operation, Priming & Maintenance",cat:"Pump Room",type:"youtube",url:"https://www.youtube.com/watch?v=zXrVLaMSmUU",youtubeId:"zXrVLaMSmUU",duration:"11:20",views:41,likes:[],added:"2025-07-16"},
+    {id:"VID020",title:"UPS System — Operation & Battery Maintenance",cat:"UPS Operation",type:"youtube",url:"https://www.youtube.com/watch?v=BmPhpuH-A7c",youtubeId:"BmPhpuH-A7c",duration:"8:00",views:49,likes:[],added:"2025-07-18"},
+    {id:"VID021",title:"BMS — Building Management System Overview",cat:"BMS",type:"youtube",url:"https://www.youtube.com/watch?v=d8diTd3CV_E",youtubeId:"d8diTd3CV_E",duration:"17:30",views:31,likes:[],added:"2025-07-20"},
+    {id:"VID022",title:"Waste Management — Segregation & Disposal",cat:"Waste Management",type:"youtube",url:"https://www.youtube.com/watch?v=rp8hvyjZPHs",youtubeId:"rp8hvyjZPHs",duration:"6:45",views:62,likes:[],added:"2025-07-21"},
+    {id:"VID023",title:"Energy Conservation — HVAC Best Practices",cat:"Energy Conservation",type:"youtube",url:"https://www.youtube.com/watch?v=JLp1WBbGjFI",youtubeId:"JLp1WBbGjFI",duration:"10:10",views:37,likes:[],added:"2025-07-22"},
+  ],
+  sops:[
+    {id:"SOP001",title:"Fire Extinguisher Inspection & Maintenance",cat:"Fire Fighting",version:"v2.1",updated:"2025-06-01",pages:8,file:"",desc:"Comprehensive guide for monthly inspection, annual servicing, and replacement of all fire extinguisher types (ABC, CO2, Foam, Water) as per IS 2878 / IS 15683.",keyPoints:["Check pressure gauge in green zone","Inspect nozzle and hose for blockage","Verify weight of extinguisher","Check safety pin and tamper seal","Record inspection in logbook","Replace expired extinguishers immediately"],hazards:"Accidental discharge; pressurized cylinder; asphyxiation risk (CO2 type)",reviewedBy:"Safety Officer",emergency:"Call Fire Emergency: Ext 101"},
+    {id:"SOP002",title:"Electrical Isolation — LOTO Procedure",cat:"Electrical Safety",version:"v3.0",updated:"2025-05-15",pages:12,file:"",desc:"Lock Out Tag Out procedure for safe isolation of all electrical equipment before maintenance. Mandatory for all voltages above 50V AC / 120V DC as per IS 5216.",keyPoints:["Identify all energy sources","Notify all affected personnel","Switch off isolator and MCCB","Apply personal padlock and tag","Verify dead using voltage tester","Never remove others LOTO locks"],hazards:"Electrocution; arc flash; unintended startup",reviewedBy:"EHS Manager",emergency:"Emergency shutdown: Main LT Panel | Ambulance: Ext 999"},
+    {id:"SOP003",title:"Confined Space Entry & Rescue",cat:"Confined Space",version:"v1.5",updated:"2025-04-01",pages:16,file:"",desc:"Safe entry procedure for manholes, tanks, pump pits, cable vaults, and STP chambers. Follows IS 14767 and Factory Act requirements.",keyPoints:["Obtain confined space entry permit","Test atmosphere: O2 18-23%, CO2 <0.5%, LEL <10%","Continuous gas monitoring during work","Standby rescue person mandatory outside","SCBA required when O2 < 19.5%"],hazards:"Oxygen deficiency; toxic gas; engulfment; entrapment",reviewedBy:"Safety Officer",emergency:"Rescue team: Ext 110"},
+    {id:"SOP004",title:"Working at Heights — Safety Procedure",cat:"Work at Height",version:"v2.0",updated:"2025-03-10",pages:10,file:"",desc:"Safety procedure for all work above 1.8 meters including scaffolding, roof work, ladder use, cherry pickers, and boom lifts.",keyPoints:["Work at Height Permit required > 1.8m","Full body harness inspection before each use","100% tie-off — never unclipped","Guardrail minimum height 900mm","Tool tethering mandatory"],hazards:"Falls from height; falling objects; unstable scaffolding",reviewedBy:"EHS Manager",emergency:"Rescue at height: Ext 112"},
+    {id:"SOP005",title:"Chiller Plant — Operation & Startup Manual",cat:"Chiller Operation",version:"v1.2",updated:"2025-07-01",pages:24,file:"",desc:"Step-by-step startup, shutdown, and monitoring procedure for centrifugal and screw chillers.",keyPoints:["Check chilled water and condenser water levels","Verify oil level in compressor sump","Start cooling tower fans first","Start chilled water pumps","Monitor entering/leaving temperatures"],hazards:"High pressure refrigerant; rotating equipment; electrical hazard",reviewedBy:"OEM Trainer",emergency:"OEM Helpline: 1800-CHILLER"},
+    {id:"SOP006",title:"PPE — Selection, Inspection & Storage Guide",cat:"PPE Usage",version:"v2.3",updated:"2025-06-20",pages:14,file:"",desc:"Comprehensive guide for selection, use, inspection, cleaning, and storage of all PPE types.",keyPoints:["Safety Helmet: IS 2925 — inspect for cracks before each use","Safety Shoes: IS 15298 — steel toe, anti-static","Safety Harness: IS 3521 — full body, inspect stitching","Chemical Gloves: EN 374 — check for punctures"],hazards:"Improper PPE = direct injury; never modify or improvise PPE",reviewedBy:"EHS Manager",emergency:"PPE Store: Ground Floor Safety Room"},
+    {id:"SOP007",title:"Emergency Response Plan — ERP",cat:"Emergency Evacuation",version:"v4.0",updated:"2025-07-10",pages:32,file:"",desc:"Comprehensive site emergency response plan covering fire, explosion, chemical spill, medical emergency, gas leak.",keyPoints:["On fire alarm: RACE — Rescue, Alarm, Contain, Evacuate","Assembly point: Front Car Park (Gate 2)","Fire wardens designated per floor","Do NOT use lifts during fire","Practice drills: Twice per year minimum"],hazards:"Panic; blocked exits; failure to account for all persons",reviewedBy:"EHS Manager",emergency:"Fire: 101 | Ambulance: 999 | Police: 100"},
+    {id:"SOP008",title:"Permit to Work — PTW System",cat:"Permit To Work",version:"v2.0",updated:"2025-06-10",pages:20,file:"",desc:"PTW system covering Hot Work, Cold Work, Electrical Isolation, Confined Space, Work at Height, Excavation.",keyPoints:["PTW mandatory for all non-routine hazardous work","Originator raises permit — Issuing authority approves","Valid max 1 shift (8 hrs) — revalidate if needed","Toolbox talk mandatory before work starts","All PTWs filed in Safety Office for 3 years"],hazards:"Unauthorized work; multiple energy sources; concurrent operations",reviewedBy:"Safety Officer",emergency:"PTW Control: Safety Office Ext 103"},
+  ],
   notifications:[
-    {id:"N001",msg:"Welcome to PTS Safety Training System. Add employees and trainings to get started.",time:"Just now",read:false,icon:"info"}
+    {id:"N001",msg:"Fire Safety Induction training scheduled for 2025-08-10. 8 employees enrolled.",time:"2 hours ago",read:false,icon:"school"},
+    {id:"N002",msg:"Certificate CERT-2025-001 for Rajesh Kumar issued successfully.",time:"1 day ago",read:false,icon:"workspace_premium"},
+    {id:"N003",msg:"PPE Usage test — Kavya Reddy FAILED with 62%. Retraining required.",time:"2 days ago",read:false,icon:"warning"},
+    {id:"N004",msg:"3 certificates expiring this month. Review and schedule renewal.",time:"3 days ago",read:true,icon:"notification_important"},
+    {id:"N005",msg:"New SOP uploaded: Emergency Response Plan v4.0",time:"5 days ago",read:true,icon:"description"},
   ],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
-  admins:[{username:"admin",password:"admin123",name:"Admin User",role:"admin"}],
-  customEquipment:[]
+  customQuestions:[],  // persisted custom questions from admin
+  admins:[{username:"admin",password:"admin123",name:"Admin User",role:"admin"}]
 };
 
 /* ============================================================
@@ -806,6 +875,7 @@ async function fbSaveCollection(collName,items,keyField){
   try{
     const batch=fbDB.batch();
     const chunkSize=400;
+    let saved=0;
     for(let i=0;i<items.length;i+=chunkSize){
       const chunk=items.slice(i,i+chunkSize);
       for(const item of chunk){
@@ -814,15 +884,97 @@ async function fbSaveCollection(collName,items,keyField){
         const ref=fbDB.collection(collName).doc(String(docId));
         const data={...item};
         batch.set(ref,data,{merge:true});
+        saved++;
       }
       await batch.commit();
     }
-  }catch(e){console.warn('fbSaveCollection error ('+collName+'):',e);}
+    console.log('Firebase saved: '+collName+' ('+saved+' docs)');
+  }catch(e){
+    console.warn('fbSaveCollection error ('+collName+'):',e);
+  }
 }
 
 async function fbSaveSettings(){
   if(!firebaseReady)return;
   try{await fbDB.collection('config').doc('settings').set(DB.settings,{merge:true});}catch(e){console.warn('fbSaveSettings error:',e);}
+}
+
+async function forceSyncToCloud(){
+  if(!firebaseReady){toast('Firebase not available','error');return;}
+  toast('Syncing all data to cloud...','info',2000);
+  updateSyncUI('syncing');
+  try{
+    await fbSaveCollection('employees',DB.employees,'id');
+    await fbSaveCollection('admins',DB.admins,'username');
+    await fbSaveCollection('trainings',DB.trainings,'id');
+    await fbSaveCollection('testResults',DB.testResults,'id');
+    await fbSaveCollection('certificates',DB.certificates,'num');
+    await fbSaveCollection('notifications',DB.notifications,'id');
+    await fbSaveCollection('videos',DB.videos,'id');
+    await fbSaveCollection('sops',DB.sops,'id');
+    await fbSaveCollection('customEquipment',DB.customEquipment||[],'id');
+    await fbSaveCollection('customQuestions',DB.customQuestions||[],'ts');
+    await fbSaveSettings();
+    _lastSyncTime=Date.now();
+    updateSyncUI('idle');
+    toast('All data synced to cloud! 100 employees can now see it.','success',3000);
+  }catch(e){
+    updateSyncUI('error');
+    toast('Sync error: '+e.message,'error',5000);
+  }
+}
+
+async function forceSyncFromCloud(){
+  if(!firebaseReady){toast('Firebase not available','error');return;}
+  toast('Pulling latest data from cloud...','info',2000);
+  updateSyncUI('syncing');
+  try{
+    await loadDBFromFirestore();
+    saveDB();
+    renderAll();
+    _lastSyncTime=Date.now();
+    updateSyncUI('idle');
+    toast('Cloud data pulled! Page refreshed.','success',3000);
+  }catch(e){
+    updateSyncUI('error');
+    toast('Pull error: '+e.message,'error',5000);
+  }
+}
+
+// Auto-sync: Admin pushes every 60s, Employees pull every 30s
+function startAutoSync(){
+  if(!firebaseReady)return;
+  const interval=isAdmin?60000:30000;
+  setInterval(async function(){
+    if(!currentUser||document.hidden)return;
+    try{
+      if(isAdmin){
+        // Admin: push current data to cloud
+        await Promise.all([
+          fbSaveCollection('employees',DB.employees,'id'),
+          fbSaveCollection('trainings',DB.trainings,'id'),
+          fbSaveCollection('videos',DB.videos,'id'),
+          fbSaveCollection('sops',DB.sops,'id'),
+          fbSaveCollection('testResults',DB.testResults,'id'),
+          fbSaveCollection('certificates',DB.certificates,'num'),
+          fbSaveCollection('notifications',DB.notifications,'id'),
+          fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+          fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+          fbSaveSettings()
+        ]);
+        _lastSyncTime=Date.now();
+        updateSyncUI('idle');
+      }else{
+        // Employee: pull latest from cloud
+        await loadDBFromFirestore();
+        saveDB();
+        _lastSyncTime=Date.now();
+        updateSyncUI('idle');
+        // Refresh current view if data changed
+        if(typeof renderAll==='function')renderAll();
+      }
+    }catch(e){console.warn('Auto-sync error:',e);}
+  },interval);
 }
 
 async function seedFirestore(){
@@ -831,15 +983,15 @@ async function seedFirestore(){
     const metaDoc=await fbDB.collection('config').doc('meta').get();
     if(metaDoc.exists)return;
     console.log('Seeding Firestore with default data...');
-    await fbDB.collection('config').doc('meta').set({seeded:true,version:3});
-    // No default employees
+    await fbDB.collection('config').doc('meta').set({seeded:true,version:2});
+    await fbSaveCollection('employees',DB.employees,'id');
     await fbSaveCollection('admins',DB.admins,'username');
-    // No default trainings
-    // No default testResults
+    await fbSaveCollection('trainings',DB.trainings,'id');
+    await fbSaveCollection('testResults',DB.testResults,'id');
     await fbSaveCollection('certificates',DB.certificates,'num');
     await fbSaveCollection('notifications',DB.notifications,'id');
-    // No default videos
-    // No default sops
+    await fbSaveCollection('videos',DB.videos,'id');
+    await fbSaveCollection('sops',DB.sops,'id');
     await fbSaveSettings();
     // Create default Firebase Auth accounts
     try{
@@ -882,6 +1034,7 @@ function openModal(html,size="800px"){
   document.body.style.overflow="hidden";
 }
 function closeModal(){
+  destroyVideoTracker();
   document.getElementById("modalOverlay").classList.remove("open");
   document.body.style.overflow="";
 }
@@ -1003,12 +1156,13 @@ function startApp(){
   document.getElementById("reportsNav").style.display=isAdmin?"block":"none";
   updateBadges();
   gotoView("dashboard");
-  toast(`Welcome back, ${currentUser.name||currentUser.username}! 👋`,"success");
+  startAutoSync();
+  toast(`Welcome back, ${currentUser.name||currentUser.username}!`,"success");
 }
 function updateBadges(){
   document.getElementById("nb-employees").textContent=DB.employees.length;
   document.getElementById("nb-trainings").textContent=DB.trainings.length;
-  document.getElementById("nb-equipment").textContent=getAllEquipment().length;
+  document.getElementById("nb-equipment").textContent=EQUIPMENT_DATA.length;
   const unread=DB.notifications.filter(n=>!n.read).length;
   document.getElementById("nb-notif").textContent=unread;
   document.getElementById("notifDot").style.display=unread>0?"block":"none";
@@ -1067,9 +1221,8 @@ function renderNotifPanel(){
     </div>
   `).join("");
 }
-async function readNotif(id){const n=DB.notifications.find(x=>x.id===id);if(n){n.read=true;renderNotifPanel();updateBadges();await saveDBAndWait();}}
-async function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel();updateBadges();await saveDBAndWait();}
-async function addNotification(msg,icon){const id=genId("N");DB.notifications.unshift({id,msg,time:new Date().toLocaleString(),read:false,icon:icon||"info"});updateBadges();await saveDBAndWait();}
+function readNotif(id){const n=DB.notifications.find(x=>x.id===id);if(n){n.read=true;renderNotifPanel();updateBadges();saveDB();}}
+function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel();updateBadges();saveDB();}
 renderNotifPanel();
 
 /* ============================================================
@@ -1112,7 +1265,7 @@ function renderDashboard(){
       ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Pass count")}
       ${statCard("pending","Pending",pending,"#f0883e","Awaiting training")}
       ${statCard("cancel","Tests Failed",failed,"#e8483a","Retraining req.")}
-      ${statCard("build","Equipment Items",getAllEquipment().length,"#ffb020","In library")}
+      ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library")}
       ${statCard("workspace_premium","Certificates",certCount,"#c084fc","Issued")}
       ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%")}
     </div>
@@ -1159,11 +1312,7 @@ function renderDashboard(){
       </div>
     </div>
     <div class="chart-card" style="margin-bottom:18px;">
-      <div class="collapsible-header" onclick="toggleCollapsible('dashCompBody',this)">
-        <div class="chart-card-title" style="margin-bottom:0;"><span class="dot"></span>Training Completions — Employee ID, Name & Date</div>
-        <span class="mat-ico collapsible-arrow">chevron_right</span>
-      </div>
-      <div class="collapsible-body" id="dashCompBody">
+      <div class="chart-card-title"><span class="dot"></span>Training Completions — Employee ID, Name & Date</div>
       <div class="table-wrap" style="margin-top:8px;">
         <table><thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Training</th><th>Score</th><th>Result</th><th>Completion Date</th><th>Certificate</th></tr></thead>
         <tbody>
@@ -1180,7 +1329,6 @@ function renderDashboard(){
           ${!DB.testResults.filter(r=>r.pass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
         </tbody></table>
       </div>
-      </div><!-- end collapsible-body -->
     </div>
   `;
   el.querySelectorAll(".stat-num").forEach(el=>{
@@ -1223,7 +1371,7 @@ function renderEmpDashboard(){
       </div>
       <div class="quick-action" onclick="gotoView('equipment')">
         <div class="qa-ico" style="background:rgba(255,176,32,.1)"><span class="mat-ico" style="color:var(--amber);">build</span></div>
-        <div class="qa-title">Equipment Library</div><div class="qa-desc">${getAllEquipment().length}+ MEP equipment</div>
+        <div class="qa-title">Equipment Library</div><div class="qa-desc">${EQUIPMENT_DATA.length}+ MEP equipment</div>
       </div>
       <div class="quick-action" onclick="gotoView('videos')">
         <div class="qa-ico" style="background:rgba(62,207,142,.1)"><span class="mat-ico" style="color:var(--green);">play_circle</span></div>
@@ -1245,7 +1393,7 @@ function renderEmpDashboard(){
             </div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${t.duration} · Pass: ${t.passing}%</div>
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
-            ${!done?(()=>{const relatedVideo=t.videoId?DB.videos.find(v=>v.id===t.videoId):DB.videos.find(v=>v.cat===t.cat);const videoDone=relatedVideo&&(relatedVideo.completedBy||[]).includes(currentUser?.id);if(t.fromVideo&&!videoDone){return`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.videoId||""}','${relatedVideo?.youtubeId||""}')" style="border-color:var(--red);color:var(--red);"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video First</button>`;}else if(t.fromVideo&&videoDone){return`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button><span style="font-size:10px;color:var(--green);margin-left:6px;">✓ Video Done</span>`;}else{return`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test Now</button>`;}})():`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
+            ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test Now</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
           </div>`;
         }).join("")}
       </div>
@@ -1283,13 +1431,10 @@ function drawCharts(){
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
   const textColor=isDark?"#7d8590":"#656d76";
-  const now=new Date();
-  const currentMonthName=now.toLocaleString('en',{month:'short'});
-  const currentMonthTrainings=DB.trainings.filter(t=>t.date&&t.date.startsWith(now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'))).length;
-  const currentMonthCompleted=DB.testResults.filter(r=>r.pass&&r.date&&r.date.startsWith(now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'))).length;
+  const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug"];
   destroyChart("chartMonthly");
   const mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:[currentMonthName],datasets:[{label:"Trainings",data:[currentMonthTrainings],backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Completed",data:[currentMonthCompleted],backgroundColor:"rgba(62,207,142,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:months,datasets:[{label:"Trainings",data:[4,6,5,8,7,9,6,DB.trainings.length],backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Completed",data:[3,5,4,7,6,8,5,DB.testResults.filter(r=>r.pass).length],backgroundColor:"rgba(62,207,142,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor}}}}});}
   destroyChart("chartDept");
   const dCtx=document.getElementById("chartDept");
   if(dCtx){const dDepts=DEPARTMENTS.slice(0,6);charts.dept=new Chart(dCtx,{type:"bar",data:{labels:dDepts,datasets:[{label:"Completion %",data:dDepts.map(d=>{const empInDept=DB.employees.filter(e=>e.dept===d).length;if(!empInDept)return 0;const passed=DB.testResults.filter(r=>r.pass&&r.dept===d).length;return Math.min(100,Math.round(passed/empInDept*100));}),backgroundColor:["#ffb020","#3ecf8e","#e8483a","#3ea0e8","#8b6de8","#f0883e"],borderRadius:6}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{display:false}},scales:{x:{max:100,grid:{color:gridColor},ticks:{color:textColor,callback:v=>v+"%"}},y:{grid:{color:gridColor},ticks:{color:textColor}}}}});}
@@ -1418,14 +1563,14 @@ function openAddEmpModal(){
     </div>
   `,"740px");
 }
-async function saveEmployee(){
+function saveEmployee(){
   const id=document.getElementById("ne_id").value.trim().toUpperCase();
   const name=document.getElementById("ne_name").value.trim();
   const mobile=document.getElementById("ne_mobile").value.trim();
   if(!id||!name||!mobile){toast("ID, Name and Mobile required","error");return;}
   if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");return;}
   DB.employees.push({id,name,dept:document.getElementById("ne_dept").value,desig:document.getElementById("ne_desig").value,shift:document.getElementById("ne_shift").value,mobile,email:document.getElementById("ne_email").value,status:"active",joining:document.getElementById("ne_join").value||new Date().toISOString().split("T")[0],location:document.getElementById("ne_loc").value||"Site",password:document.getElementById("ne_pw").value||"emp123",company:DB.settings.companyName,photo:""});
-  closeModal();renderEmployees();updateBadges();await saveDBAndWait();toast(`Employee ${name} added & synced`,`success`);
+  closeModal();renderEmployees();updateBadges();saveDB();toast(`Employee ${name} added`,`success`);
   // Create Firebase Auth account for this employee (async)
   if(firebaseReady){
     const empEmail=toEmail(id);
@@ -1459,13 +1604,13 @@ function editEmp(id){
     </div>
   `,"600px");
 }
-async function updateEmployee(id){
+function updateEmployee(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
   e.name=document.getElementById("ee_name").value;e.mobile=document.getElementById("ee_mobile").value;
   e.dept=document.getElementById("ee_dept").value;e.desig=document.getElementById("ee_desig").value;
   e.shift=document.getElementById("ee_shift").value;e.status=document.getElementById("ee_status").value;
   e.location=document.getElementById("ee_loc").value;
-  closeModal();renderEmployees();await saveDBAndWait();toast("Employee updated & synced","success");
+  closeModal();renderEmployees();saveDB();toast("Employee updated","success");
 }
 function viewEmpHistory(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
@@ -1493,12 +1638,11 @@ function viewEmpHistory(id){
     <div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">Close</button></div>
   `,"700px");
 }
-async function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;await saveDBAndWait();toast("Password changed & synced. Use new password on next login.","success");}}
-async function deleteEmp(id){
+function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
+function deleteEmp(id){
   if(!confirm("Delete this employee? This cannot be undone."))return;
   DB.employees=DB.employees.filter(e=>e.id!==id);
-  if(firebaseReady){try{await fbDB.collection('employees').doc(String(id)).delete();}catch(e){console.warn('fb delete emp error:',e);}}
-  renderEmployees();updateBadges();await saveDBAndWait();toast("Employee deleted from local & cloud","warning");
+  renderEmployees();updateBadges();saveDB();toast("Employee deleted","warning");
 }
 function exportEmpExcel(){
   const ws=XLSX.utils.json_to_sheet(DB.employees.map(e=>({
@@ -1556,7 +1700,7 @@ function renderTrainings(){
             <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();assignEmployees('${t.id}')"><span class="mat-ico" style="font-size:11px;">person_add</span> Assign</button>
               <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openTrainingDetail('${t.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span> View</button>
-              <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
+              ${(()=>{const vd=t.fromVideo?DB.videos.find(v=>v.id===t.fromVideo):null;const ytid=vd?.youtubeId||"";if(!t.fromVideo)return `<button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz('${t.cat}','${t.name.replace(/'/g,"\\'")}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>`;const vidDone=vd&&(vd.completedBy||[]).length>0;return vidDone?`<button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz('${t.cat}','${t.name.replace(/'/g,"\\'")}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();watchVideo('${t.fromVideo}','${ytid}')"><span class="mat-ico" style="font-size:11px;">play_circle</span> Video</button>`:`<button class="btn btn-sm btn-red" onclick="event.stopPropagation();watchVideo('${t.fromVideo}','${ytid}',true)"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video</button><div style="padding:4px 8px;background:rgba(232,72,58,.08);border-radius:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">lock</span> No one completed video yet</div>`;})()}
               <button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">delete</span></button>
             </div>
           </div>
@@ -1576,10 +1720,16 @@ function renderEmpTrainings(){
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
         const done=(t.completed||[]).includes(empId);
         const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
+        const isVideoTraining=!!t.fromVideo;
+        const videoData=isVideoTraining?DB.videos.find(v=>v.id===t.fromVideo):null;
+        const videoDone=videoData&&(videoData.completedBy||[]).includes(empId);
+        const showVideoGate=isVideoTraining&&!videoDone;
+        const ytId=videoData?.youtubeId||"";
         return`<div class="training-card">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
+            ${isVideoTraining?`<span class="badge badge-danger" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">play_circle</span> Video Training</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
           </div>
           <div class="training-body">
@@ -1593,11 +1743,16 @@ function renderEmpTrainings(){
               <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
             </div>
-            ${myRes.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Best: <b style="color:${myRes.some(r=>r.pass)?"var(--green)":"var(--red)"}">${Math.max(...myRes.map(r=>r.score))}%</b> · ${myRes.length} attempt(s)</div>`:""}
+            ${myRes.length?`<div style="font-size:11px;color:var(--muted);">Best score: <b style="color:${myRes[0].pass?"var(--green)":"var(--red)"}">${Math.max(...myRes.map(r=>r.score))}%</b> · ${myRes.length} attempt(s)</div>`:""}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn btn-sm btn-amber" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
-              ${t.videoId?`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.videoId}','')"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video</button>`:""}
-              ${myRes.some(r=>r.pass)&&myRes.find(r=>r.cert)?.cert?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
+              ${showVideoGate?`
+                <button class="btn btn-sm btn-red" onclick="watchVideo('${t.fromVideo}','${ytId}',true)"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video First</button>
+                <div style="padding:4px 8px;background:rgba(232,72,58,.08);border-radius:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">lock</span> Complete video to unlock test</div>
+              `:`
+                <button class="btn btn-sm btn-amber" onclick="startQuiz('${t.cat}','${t.name.replace(/'/g,"\\\\'")}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
+                ${isVideoTraining&&videoData?`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.fromVideo}','${ytId}')"><span class="mat-ico" style="font-size:11px;">replay</span> Rewatch</button>`:""}
+              `}
+              ${done&&myRes.find(r=>r.cert)?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
             </div>
           </div>
         </div>`;
@@ -1624,6 +1779,11 @@ function openAddTrnModal(){
         <div class="form-group"><label class="form-label-sm">Certificate Required</label><select class="form-control-sm" id="nt_cert"><option value="true">Yes</option><option value="false">No</option></select></div>
       </div>
       <div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="nt_desc" rows="2" placeholder="Training description..."></textarea></div>
+      <div class="form-section" style="margin-top:14px;border:1px solid rgba(232,72,58,.2);background:rgba(232,72,58,.03);">
+        <div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> Link Video (Optional)</div>
+        <div class="form-group"><label class="form-label-sm">Select Video from Library</label><select class="form-control-sm" id="nt_video"><option value="">-- No Video Link --</option>${DB.videos.map(v=>`<option value="${v.id}">${v.title} (${v.duration})</option>`).join("")}</select></div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:4px;">If linked, employees must watch 90% of the video before they can take the test.</div>
+      </div>
     </div></div>
     <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -1681,34 +1841,27 @@ function getCustomQuestions(){
   }
   return qs;
 }
-async function saveTraining(){
+function saveTraining(){
   const name=document.getElementById("nt_name").value.trim();
   if(!name){toast("Training name required","error");return;}
   const cat=document.getElementById("nt_cat").value;
   const customQs=getCustomQuestions();
-  if(customQs.length&&!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
   if(customQs.length){
     if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
-    // Add custom questions tagged with training name
     customQs.forEach(cq=>{cq.customFor=name;QUESTION_BANK[cat].push(cq);});
+    customQs.forEach(cq=>{
+      DB.customQuestions.push({cat:cat,trainingName:name,q:cq.q,o:cq.o,a:cq.a,customFor:name,ts:Date.now()});
+    });
     toast(`${customQs.length} custom question(s) added to ${cat} question bank`,'info');
   }
-  const t={id:document.getElementById("nt_id").value,name,cat,dept:document.getElementById("nt_dept").value,trainer:document.getElementById("nt_trainer").value,date:document.getElementById("nt_date").value,duration:document.getElementById("nt_dur").value||"4 hrs",passing:parseInt(document.getElementById("nt_pass").value)||75,validity:document.getElementById("nt_val").value||"1 Year",cert:document.getElementById("nt_cert").value==="true",desc:document.getElementById("nt_desc").value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length};
+  const linkedVideoId=document.getElementById("nt_video").value;
+  const linkedVideo=linkedVideoId?DB.videos.find(v=>v.id===linkedVideoId):null;
+  const t={id:document.getElementById("nt_id").value,name,cat,dept:document.getElementById("nt_dept").value,trainer:document.getElementById("nt_trainer").value,date:document.getElementById("nt_date").value,duration:linkedVideo?linkedVideo.duration:(document.getElementById("nt_dur").value||"4 hrs"),passing:parseInt(document.getElementById("nt_pass").value)||75,validity:document.getElementById("nt_val").value||"1 Year",cert:document.getElementById("nt_cert").value==="true",desc:document.getElementById("nt_desc").value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length};
+  if(linkedVideoId){t.fromVideo=linkedVideoId;t.videoTitle=linkedVideo?t.videoTitle||linkedVideo.title:"";t.trainer="Video Training";}
+  // Don't create duplicate video-linked training
+  if(linkedVideoId&&DB.trainings.find(x=>x.fromVideo===linkedVideoId)){toast("A training already exists for this video. Use that one instead.","error");return;}
   DB.trainings.push(t);
-  closeModal();renderTrainings();updateBadges();await saveDBAndWait();toast(`Training "${name}" created & synced`,"success");
-}
-function openAddTrnModalWithEquipment(eqName,eqCat){
-  openAddTrnModal();
-  setTimeout(()=>{
-    const nameField=document.getElementById('nt_name');
-    const catField=document.getElementById('nt_cat');
-    if(nameField)nameField.value=eqName+' Safety Training';
-    if(catField){
-      for(let i=0;i<catField.options.length;i++){
-        if(catField.options[i].text===eqCat){catField.selectedIndex=i;break;}
-      }
-    }
-  },100);
+  closeModal();renderTrainings();updateBadges();saveDB();toast(`Training "${name}" created`,"success");
 }
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
@@ -1782,7 +1935,7 @@ function assignEmployees(trnId){
   `,"660px");
 }
 function toggleSelectAll(){const checked=document.getElementById("selectAll").checked;document.querySelectorAll(".emp-chk").forEach(c=>c.checked=checked);}
-async function confirmAssign(trnId){
+function confirmAssign(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
   const fromCheck=[...document.querySelectorAll(".emp-chk:checked")].map(c=>c.value);
   const raw=(document.getElementById("assignByIds")?.value||"").trim();
@@ -1795,9 +1948,9 @@ async function confirmAssign(trnId){
   t.enrolled=[...new Set([...t.enrolled,...selected])];
   closeModal();toast(`✅ ${selected.length} employee(s) assigned to "${t.name}"`,"success");
   DB.notifications.unshift({id:genId("N"),msg:`${selected.length} employee(s) assigned to "${t.name}". Date: ${formatDate(t.date)}`,time:"Just now",read:false,icon:"school"});
-  updateBadges();renderTrainings();await saveDBAndWait();
+  updateBadges();renderTrainings();saveDB();
 }
-async function confirmAssignAllDept(trnId){
+function confirmAssignAllDept(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
   const dept=prompt(`Enter department name (or "All"):\nDepts: ${[...new Set(DB.employees.map(e=>e.dept))].join(", ")}`);
   if(!dept)return;
@@ -1806,23 +1959,20 @@ async function confirmAssignAllDept(trnId){
   if(!t.enrolled)t.enrolled=[];
   t.enrolled=[...new Set([...t.enrolled,...toAssign.map(e=>e.id)])];
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
-  updateBadges();renderTrainings();await saveDBAndWait();
+  updateBadges();renderTrainings();saveDB();
 }
-async function deleteTraining(id){
-  if(!confirm("Delete this training? This cannot be undone."))return;
+function deleteTraining(id){
+  if(!confirm("Delete this training?"))return;
   DB.trainings=DB.trainings.filter(t=>t.id!==id);
-  if(firebaseReady){try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){console.warn('fb delete trn error:',e);}}
-  closeModal();renderTrainings();updateBadges();await saveDBAndWait();toast("Training deleted from local & cloud","warning");
+  closeModal();renderTrainings();updateBadges();saveDB();toast("Training deleted","warning");
 }
 
 /* ============================================================
    EQUIPMENT LIBRARY
 ============================================================ */
-function getAllEquipment(){return[...EQUIPMENT_DATA,...(DB.customEquipment||[])];}
 function renderEquipment(){
-  const allEq=getAllEquipment();
-  const cats=["All",...new Set(allEq.map(e=>e.c))];
-  const filtered=allEq.filter(e=>{
+  const cats=["All",...Object.keys(CATEGORIES)];
+  const filtered=EQUIPMENT_DATA.filter(e=>{
     const mc=equip_filter==="All"||e.c===equip_filter;
     const qs=equip_search.toLowerCase();
     const ms=!qs||e.n.toLowerCase().includes(qs)||e.c.toLowerCase().includes(qs)||e.s.toLowerCase().includes(qs);
@@ -1831,11 +1981,7 @@ function renderEquipment(){
   document.getElementById("view-equipment").innerHTML=`
     <div class="section-header">
       <div class="section-title">Equipment <span>Library</span></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <span style="font-size:12px;color:var(--muted);align-self:center;">${allEq.length} total items</span>
-        ${isAdmin?`<button class="btn btn-amber" onclick="openAddEquipmentModal()"><span class="mat-ico">add</span> Add Equipment</button>`:""}
-        ${isAdmin?`<button class="btn btn-outline" onclick="switchView('quiz')"><span class="mat-ico">quiz</span> Online Tests</button>`:""}
-      </div>
+      <span style="font-size:12px;color:var(--muted);">${EQUIPMENT_DATA.length} total items</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search equipment..." oninput="equip_search=this.value;renderEquipment()" value="${equip_search}"></div>
@@ -1845,23 +1991,21 @@ function renderEquipment(){
       ${cats.map(c=>`<button class="chip${equip_filter===c?" active":""}" onclick="equip_filter='${c.replace(/'/g,"\\'")}';renderEquipment()" style="white-space:nowrap;">${c}${c!=="All"?` (${EQUIPMENT_DATA.filter(e=>e.c===c).length})`:""}</button>`).join("")}
     </div>
     <div class="eq-grid">
-      ${filtered.map((e,fi)=>{
+      ${filtered.map(e=>{
         const catInfo=CATEGORIES[e.c]||{color:"#ffb020",icon:"🔧"};
-        const isCustom=e._isCustom||false;
-        return`<div class="eq-card" onclick="openEquipDetailByData(${fi})">
+        return`<div class="eq-card" onclick="openEquipDetail(${EQUIPMENT_DATA.indexOf(e)})">
           <div class="eq-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <span class="eq-tag">${e.c}</span>
-            <span style="font-size:40px;">${e.i||"🔧"}</span>
+            <span style="font-size:40px;">${e.i}</span>
           </div>
           <div class="eq-body">
             <div class="eq-name">${e.n}</div>
             <div class="eq-cat">${e.c} · ${e.loc||"Site"}</div>
             <div class="eq-spec">${e.s}</div>
             <div class="eq-actions">
-              <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();openEquipDetailByData(${fi})"><span class="mat-ico" style="font-size:11px;">info</span> Details</button>
+              <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();openEquipDetail(${EQUIPMENT_DATA.indexOf(e)})"><span class="mat-ico" style="font-size:11px;">info</span> Details</button>
               <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz(resolveQuizCategory('${e.c}'),'${e.n} — Equipment Quiz')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               <button class="btn btn-sm" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="event.stopPropagation();youtubeSearch('${e.n}')" target="_blank"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</button>
-              ${isCustom&&isAdmin?`<button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteCustomEquipment('${e.id}')" title="Delete"><span class="mat-ico" style="font-size:11px;">delete</span></button>`:""}
             </div>
           </div>
         </div>`;
@@ -1911,190 +2055,129 @@ function openEquipDetail(idx){
     </div>
     <div class="modal-foot">
       <button class="btn" style="background:rgba(62,207,142,.15);border:1px solid var(--green);color:var(--green);" onclick="startQuiz(resolveQuizCategory('${e.c}'),'${e.n} Equipment Quiz')"><span class="mat-ico">quiz</span> Take Test</button>
-      ${isAdmin?`<button class="btn btn-amber" onclick="closeModal();setTimeout(()=>openAddTrnModalWithEquipment('${e.n}','${e.c}'),300)"><span class="mat-ico">school</span> Create Training</button>`:""}
-      <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> YouTube</button>
+      <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> Search YouTube</button>
       <button class="btn btn-outline" onclick="closeModal()">Close</button>
     </div>
   `,"800px");
 }
 
-
-/* ============================================================
-   CUSTOM EQUIPMENT MANAGEMENT (Admin Add/Delete)
-============================================================ */
-function openAddEquipmentModal(){
-  openModal(`
-    <div class="modal-accent"></div>
-    <div class="modal-head">
-      <div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">build</span></div>
-      <h2>Add Equipment</h2>
-      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
-    </div>
-    <div class="modal-body">
-      <div class="form-section"><div class="form-grid">
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Equipment Name *</label><input class="form-control-sm" id="neq_name" placeholder="e.g. Fire Extinguisher (ABC)"></div>
-        <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="neq_cat">${Object.keys(CATEGORIES).map(c=>`<option>${c}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Location</label><input class="form-control-sm" id="neq_loc" placeholder="e.g. All Floors" value="Site"></div>
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Specifications *</label><input class="form-control-sm" id="neq_spec" placeholder="e.g. 4kg ABC | 15 bar | Range 3-4m"></div>
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Icon (emoji)</label><input class="form-control-sm" id="neq_icon" placeholder="🔧" maxlength="4" value="🔧"></div>
-      </div></div>
-    </div>
-    <div class="modal-foot"><button class="btn btn-amber" onclick="saveCustomEquipment()"><span class="mat-ico">save</span> Add Equipment</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
-  `,"640px");
-}
-async function saveCustomEquipment(){
-  const name=document.getElementById("neq_name").value.trim();
-  const spec=document.getElementById("neq_spec").value.trim();
-  const cat=document.getElementById("neq_cat").value;
-  if(!name||!spec){toast("Name and Specifications required","error");return;}
-  const eq={id:genId("EQ"),n:name,c:cat,i:document.getElementById("neq_icon").value||"🔧",s:spec,loc:document.getElementById("neq_loc").value||"Site",_isCustom:true};
-  DB.customEquipment.push(eq);
-  closeModal();renderEquipment();updateBadges();await saveDBAndWait();
-  toast(`Equipment "${name}" saved to local & cloud`,"success");
-}
-async function deleteCustomEquipment(id){
-  if(!confirm('Delete this equipment permanently?'))return;
-  DB.customEquipment=DB.customEquipment.filter(e=>e.id!==id);
-  renderEquipment();await saveDBAndWait();toast('Equipment deleted from local & cloud','warning');
-  if(firebaseReady){try{fbDB.collection('customEquipment').doc(id).delete();}catch(e){}}
-}
-function openEquipDetailByData(filteredIdx){
-  const allEq=getAllEquipment();
-  const e=allEq[filteredIdx];if(!e)return;
-  const catInfo=CATEGORIES[e.c]||{color:"#ffb020",icon:"🔧"};
-  const relatedTrn=DB.trainings.filter(t=>t.cat===e.c).slice(0,3);
-  openModal(`
-    <div class="modal-accent"></div>
-    <div class="modal-head">
-      <div class="modal-ico" style="background:${catInfo.color}22;font-size:24px;">${e.i||"🔧"}</div>
-      <div><h2>${e.n}</h2><span class="badge badge-info">${e.c}</span> <span class="badge badge-amber">${e.loc||"Site"}</span>${e._isCustom?` <span class="badge badge-purple">Custom</span>`:""}</div>
-      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
-    </div>
-    <div class="modal-body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-      <div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">Technical Specifications</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--sur2);border:1px solid var(--bdr);border-radius:6px;padding:8px;line-height:1.7;">${e.s.split("|").join("<br>")}</div>
-      </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">Daily Inspection Checklist</div>
-        <ul style="list-style:none;font-size:12px;display:flex;flex-direction:column;gap:3px;">
-          ${["Check for visible damage, leaks or corrosion","Verify pressure/electrical indicators are normal","Confirm access is clear and signage is visible","Test basic function per daily checklist","Record findings in maintenance log"].map(c=>`<li style="display:flex;gap:6px;"><span style="color:var(--green);font-size:12px;" class="mat-ico">check_circle</span>${c}</li>`).join("")}
-        </ul>
-      </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">PPE Required</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;">
-          ${["Safety Helmet","Safety Shoes","Safety Gloves","Eye Protection"].map(p=>`<span class="badge badge-warning">${p}</span>`).join("")}
-        </div>
-      </div>
-      <div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">Safety Precautions</div>
-        <ul style="list-style:none;font-size:12px;display:flex;flex-direction:column;gap:3px;">
-          ${["Always follow LOTO before maintenance","Ensure proper ventilation","Wear required PPE","Never bypass safety interlocks","Verify de-energization before starting"].map(s=>`<li style="display:flex;gap:6px;"><span style="color:var(--red);font-size:12px;" class="mat-ico">warning</span>${s}</li>`).join("")}
-        </ul>
-      </div>
-      <div style="grid-column:1/-1;">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:6px;">Related Trainings</div>
-        ${relatedTrn.length?relatedTrn.map(t=>`<span class="badge badge-info" style="margin-right:5px;">${t.name}</span>`).join(""):"<span style='font-size:12px;color:var(--muted);'>No specific training assigned</span>"}
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn" style="background:rgba(62,207,142,.15);border:1px solid var(--green);color:var(--green);" onclick="startQuiz(resolveQuizCategory('${e.c}'),'${e.n} Equipment Quiz')"><span class="mat-ico">quiz</span> Take Test</button>
-      ${isAdmin?`<button class="btn btn-amber" onclick="closeModal();setTimeout(()=>openAddTrnModalWithEquipment('${e.n}','${e.c}'),300)"><span class="mat-ico">school</span> Create Training</button>`:""}
-      <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> YouTube</button>
-      ${e._isCustom&&isAdmin?`<button class="btn btn-sm btn-red" onclick="closeModal();deleteCustomEquipment('${e.id}')"><span class="mat-ico">delete</span> Delete</button>`:""}
-      <button class="btn btn-outline" onclick="closeModal()">Close</button>
-    </div>
-  `,"800px");
-}
 
 /* ============================================================
    VIDEO PROGRESS TRACKER (YouTube IFrame API)
 ============================================================ */
-let videoTracker={player:null,videoId:"",totalWatched:0,lastTime:0,interval:null,ready:false,percent:0};
-
+let videoTracker={player:null,videoId:"",totalWatched:0,lastTime:0,interval:null,ready:false,percent:0,duration:0};
 function onYouTubeIframeAPIReady(){console.log("YouTube IFrame API ready");}
-
-function destroyVideoTracker(){
-  if(videoTracker.interval){clearInterval(videoTracker.interval);videoTracker.interval=null;}
-  try{if(videoTracker.player&&videoTracker.player.destroy)videoTracker.player.destroy();}catch(e){}
-  videoTracker={player:null,videoId:"",totalWatched:0,lastTime:0,interval:null,ready:false,percent:0};
-}
-
 function initVideoTracker(ytVideoId,progressBarId,pctId,timeId,completeBtnId,lockMsgId){
   destroyVideoTracker();
-  videoTracker.videoId=ytVideoId;
-  const pbar=document.getElementById(progressBarId);
-  const pctEl=document.getElementById(pctId);
-  const timeEl=document.getElementById(timeId);
-  const btn=document.getElementById(completeBtnId);
-  const lockMsg=document.getElementById(lockMsgId);
-
-  if(!pbar)return;
-
-  // Replace the iframe with a div for the API player
-  const wrap=pbar.closest('.modal-body').querySelector('.video-embed-wrap');
-  if(!wrap)return;
-  wrap.innerHTML='<div id="ytPlayerDiv" style="width:100%;height:100%;min-height:360px;"></div>';
-
-  videoTracker.player=new YT.Player('ytPlayerDiv',{
-    videoId:ytVideoId,
-    playerVars:{autoplay:1,rel:0,modestbranding:1,playsinline:1},
+  videoTracker.videoId=ytVideoId;videoTracker.totalWatched=0;videoTracker.lastTime=0;videoTracker.percent=0;videoTracker.ready=false;videoTracker.duration=0;
+  const container=document.getElementById(progressBarId);
+  if(!container)return;
+  container.innerHTML="<div id=\"ytPlayerDiv\"></div>";
+  videoTracker.player=new YT.Player("ytPlayerDiv",{
+    width:"100%",height:"100%",videoId:ytVideoId,
+    playerVars:{autoplay:1,rel:0,modestbranding:1},
     events:{
-      onReady:function(e){videoTracker.ready=true;},
-      onStateChange:function(e){
-        if(e.data===YT.PlayerState.PLAYING){
-          videoTracker.lastTime=videoTracker.player.getCurrentTime();
-          if(!videoTracker.interval){
-            videoTracker.interval=setInterval(function(){
-              if(!videoTracker.player||!videoTracker.ready)return;
-              const ct=videoTracker.player.getCurrentTime();
-              const dur=videoTracker.player.getDuration();
-              if(dur>0){
-                // Accumulate only forward progress (no rewinding cheating)
-                if(ct>videoTracker.lastTime){
-                  videoTracker.totalWatched+=(ct-videoTracker.lastTime);
-                }
-                videoTracker.lastTime=ct;
-                const pct=Math.min(100,Math.round(videoTracker.totalWatched/dur*100));
-                videoTracker.percent=pct;
-                // Update UI
-                if(pbar)pbar.querySelector('.video-progress-fill').style.width=pct+'%';
-                if(pctEl)pctEl.textContent=pct+'%';
-                if(timeEl){
-                  const cm=Math.floor(ct/60);const cs=Math.floor(ct%60);
-                  const dm=Math.floor(dur/60);const ds=Math.floor(dur%60);
-                  timeEl.textContent=cm+':'+String(cs).padStart(2,'0')+' / '+dm+':'+String(ds).padStart(2,'0');
-                }
-                // Enable complete button at 90%
-                if(pct>=90){
-                  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.pointerEvents='auto';}
-                  if(lockMsg)lockMsg.style.display='none';
-                }
-              }
-            },500);
-          }
-        }else if(e.data===YT.PlayerState.PAUSED||e.data===YT.PlayerState.ENDED){
-          if(videoTracker.interval){clearInterval(videoTracker.interval);videoTracker.interval=null;}
-          if(e.data===YT.PlayerState.ENDED){
-            // Force 100% on video end
-            const dur=videoTracker.player.getDuration();
-            if(dur>0){
-              videoTracker.totalWatched=dur;
-              videoTracker.percent=100;
-              if(pbar)pbar.querySelector('.video-progress-fill').style.width='100%';
-              if(pctEl)pctEl.textContent='100%';
-              if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.pointerEvents='auto';}
-              if(lockMsg)lockMsg.style.display='none';
+      onReady:function(e){
+        videoTracker.ready=true;
+        videoTracker.duration=videoTracker.player.getDuration()||0;
+        videoTracker.interval=setInterval(function(){
+          if(!videoTracker.player||!videoTracker.player.getCurrentTime)return;
+          try{
+            const cur=videoTracker.player.getCurrentTime();
+            const dur=videoTracker.player.getDuration()||videoTracker.duration;
+            if(dur>0&&cur>videoTracker.lastTime){
+              const delta=cur-videoTracker.lastTime;
+              const capped=Math.min(delta,2);
+              videoTracker.totalWatched+=capped;
             }
-          }
+            videoTracker.lastTime=cur;
+            videoTracker.percent=Math.min(100,Math.round(videoTracker.totalWatched/dur*100));
+            const pb=document.getElementById(progressBarId+"_bar");
+            const pt=document.getElementById(pctId);
+            const tt=document.getElementById(timeId);
+            const cb=document.getElementById(completeBtnId);
+            const lm=document.getElementById(lockMsgId);
+            if(pb)pb.style.width=videoTracker.percent+"%";
+            if(pt)pt.textContent=videoTracker.percent+"%";
+            if(tt){const cm=Math.floor(cur/60);const cs=Math.floor(cur%60);tt.textContent=cm+":"+String(cs).padStart(2,"0");}
+            if(cb){
+              if(videoTracker.percent>=90){cb.disabled=false;cb.style.opacity="1";cb.style.cursor="pointer";cb.classList.add("pulse-glow");}
+            }
+            if(lm&&videoTracker.percent>=90){lm.style.display="none";}
+            if(videoTracker.percent>=100&&videoTracker.interval){
+              clearInterval(videoTracker.interval);
+              videoTracker.interval=null;
+              if(cb&&!cb._autoClicked){cb._autoClicked=true;cb.click();}
+            }
+          }catch(ex){}
+        },1000);
+      },
+      onStateChange:function(e){
+        if(e.data===YT.PlayerState.PAUSED||e.data===YT.PlayerState.ENDED){
+          try{
+            const cur=videoTracker.player.getCurrentTime();
+            if(cur>videoTracker.lastTime){
+              const dur=videoTracker.player.getDuration()||videoTracker.duration;
+              if(dur>0){
+                const delta=Math.min(cur-videoTracker.lastTime,2);
+                videoTracker.totalWatched+=delta;
+                videoTracker.percent=Math.min(100,Math.round(videoTracker.totalWatched/dur*100));
+              }
+            }
+            videoTracker.lastTime=cur;
+          }catch(ex){}
         }
-      }
+      },
+      onError:function(e){console.warn("YT Player error:",e.data);}
     }
   });
 }
 
-function formatTrackTime(sec){const m=Math.floor(sec/60);const s=Math.floor(sec%60);return m+':'+String(s).padStart(2,'0');}
+function completeVideoAndCreateTraining(videoId){
+  const v=DB.videos.find(x=>x.id===videoId);
+  if(!v)return;
+  const empId=currentUser?currentUser.id:null;
+  const today=new Date().toISOString().split("T")[0];
+  // Find or create training linked to this video
+  let trn=DB.trainings.find(t=>t.fromVideo===videoId);
+  if(!trn){
+    const trnName="Video: "+v.title;
+    trn={id:genId("TRN"),name:trnName,cat:v.cat,dept:"All",trainer:"Video Training",date:today,duration:v.duration||"--",passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+v.title,enrolled:[],completed:[],completedDates:{},fromVideo:videoId,videoTitle:v.title};
+    DB.trainings.push(trn);
+    toast("Training auto-created: "+trnName,"success");
+  }
+  // Mark VIDEO as watched — do NOT mark training as completed (that requires passing the test)
+  if(empId){
+    if(!v.completedBy)v.completedBy=[];
+    if(!v.completedBy.includes(empId)){
+      v.completedBy.push(empId);
+    }
+    // Auto-enroll employee into the training if not already
+    if(!trn.enrolled)trn.enrolled=[];
+    if(!trn.enrolled.includes(empId)){
+      trn.enrolled.push(empId);
+    }
+  }
+  destroyVideoTracker();
+  closeModal();
+  saveDB();
+  updateBadges();
+  if(empId){
+    toast("Video watched successfully! Now take the test to complete training.","success",4000);
+    // Auto-navigate to take the test for this training
+    setTimeout(function(){
+      startQuiz(trn.cat, trn.name);
+    }, 1500);
+  }
+  renderVideos();
+  if(!isAdmin)renderEmpTrainings();
+}
+
+function destroyVideoTracker(){
+  if(videoTracker.interval){clearInterval(videoTracker.interval);videoTracker.interval=null;}
+  if(videoTracker.player&&videoTracker.player.destroy){try{videoTracker.player.destroy();}catch(e){}}
+  videoTracker.player=null;videoTracker.ready=false;
+}
 
 /* ============================================================
    VIDEO LIBRARY
@@ -2130,7 +2213,6 @@ function renderVideos(){
               <div class="video-play"><span class="mat-ico">play_arrow</span></div>
             </div>
             <div style="position:absolute;top:8px;left:8px;"><span class="badge badge-danger">${v.cat}</span></div>
-            ${(v.completedBy||[]).includes(currentUser?.id)?`<div style="position:absolute;top:8px;right:8px;background:var(--green);color:#151515;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;display:flex;align-items:center;gap:3px;"><span class="mat-ico" style="font-size:12px;">check_circle</span>Done</div>`:""}
             <div style="position:absolute;bottom:8px;right:8px;font-size:10px;background:rgba(0,0,0,.7);color:#fff;padding:2px 7px;border-radius:99px;">${v.duration}</div>
           </div>
           <div class="video-body">
@@ -2141,7 +2223,7 @@ function renderVideos(){
             </div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
               <button onclick="event.stopPropagation();likeVideo('${v.id}')" style="display:flex;align-items:center;gap:4px;padding:5px 12px;border-radius:99px;border:1px solid ${liked?"var(--red)":"var(--bdr)"};background:${liked?"rgba(232,72,58,.12)":"var(--sur2)"};color:${liked?"var(--red)":"var(--muted)"};font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;"><span class="mat-ico" style="font-size:14px;">${liked?"favorite":"favorite_border"}</span>${likeCount}</button>
-              <button onclick="event.stopPropagation();watchVideo('${v.id}','${ytId||""}')" style="display:flex;align-items:center;gap:4px;padding:5px 12px;border-radius:99px;border:1px solid var(--amber);background:rgba(255,176,32,.1);color:var(--amber);font-size:12px;font-weight:600;cursor:pointer;"><span class="mat-ico" style="font-size:14px;">play_circle</span>${(v.completedBy||[]).includes(currentUser?.id)?"Completed":"Watch"}</button>
+              <button onclick="event.stopPropagation();watchVideo('${v.id}','${ytId||""}')" style="display:flex;align-items:center;gap:4px;padding:5px 12px;border-radius:99px;border:1px solid var(--amber);background:rgba(255,176,32,.1);color:var(--amber);font-size:12px;font-weight:600;cursor:pointer;"><span class="mat-ico" style="font-size:14px;">play_circle</span>Watch</button>
               ${isAdmin?`<button style="margin-left:auto;display:flex;align-items:center;padding:5px 8px;border-radius:99px;border:1px solid var(--red);background:rgba(232,72,58,.1);color:var(--red);font-size:11px;cursor:pointer;" onclick="event.stopPropagation();deleteVideo('${v.id}')"><span class="mat-ico" style="font-size:13px;">delete</span></button>`:""}
             </div>
           </div>
@@ -2151,122 +2233,55 @@ function renderVideos(){
     </div>
   `;
 }
-function watchVideo(id,ytId){
+function watchVideo(id,ytId,fromTraining){
   const v=DB.videos.find(x=>x.id===id);
   if(v)v.views++;
   const videoId=ytId||extractYoutubeId(v?.url||"");
   if(!videoId){if(v?.url)window.open(v.url,"_blank");else toast("No video URL available","error");renderVideos();return;}
-  // Fix: define relatedTrn and quizCat locally (were undefined before - caused popup error)
-  const relatedTrn=v?DB.trainings.filter(t=>t.cat===v.cat).slice(0,3):[];
-  const quizCat=v?v.cat:"General Safety";
-  // Check if current user already completed this video
-  const alreadyCompleted=v&&v.completedBy&&v.completedBy.includes(currentUser?.id);
-  const vId4Tracker=videoId;
+  const canComplete=fromTraining||false;
+  const trackerId="vt_"+id;
   openModal(`
     <div class="modal-accent"></div>
     <div class="modal-head">
       <div class="modal-ico" style="background:rgba(232,72,58,.15)"><span class="mat-ico" style="color:var(--red);font-size:22px;">play_circle</span></div>
       <div><h2 style="font-size:15px;">${v?.title||"Training Video"}</h2><span class="badge badge-danger">${v?.cat||""}</span></div>
-      <button class="close-btn" onclick="destroyVideoTracker();closeModal()"><span class="mat-ico">close</span></button>
+      <button class="close-btn" onclick="destroyVideoTracker();closeModal();renderVideos();"><span class="mat-ico">close</span></button>
     </div>
     <div class="modal-body">
-      <div class="video-embed-wrap">
-        <div id="ytPlayerDiv" style="width:100%;height:100%;min-height:360px;"></div>
-      </div>
-      <div class="video-progress-wrap">
-        <div class="video-progress-bar" id="vprog_bar"><div class="video-progress-fill"></div></div>
-        <div class="video-progress-info">
-          <span id="vprog_time">0:00 / 0:00</span>
-          <span>Watched: <span class="pct" id="vprog_pct">0%</span></span>
+      <div id="${trackerId}" class="video-embed-wrap" style="position:relative;min-height:360px;"></div>
+      <div style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:12px;font-weight:700;color:var(--amber);">Watch Progress</span>
+          <span style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);">
+            <span id="${trackerId}_time">0:00</span>
+            <span id="${trackerId}_pct" style="font-weight:700;color:var(--amber);">0%</span>
+          </span>
+        </div>
+        <div style="height:6px;background:var(--sur2);border-radius:99px;overflow:hidden;margin-bottom:8px;">
+          <div id="${trackerId}_bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--amber),var(--green));border-radius:99px;transition:width 0.5s ease;"></div>
+        </div>
+        <div id="${trackerId}_lock" style="padding:6px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);margin-bottom:8px;">
+          <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% of the video to unlock the test
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          ${v?`<div style="flex:1;"><div style="font-weight:600;font-size:13px;">${v.title}</div><div style="font-size:11px;color:var(--muted);">${v.cat} · ${v.duration} · ${v.views} views</div></div>`:""}
+          <button id="${trackerId}_complete" class="btn btn-green" disabled style="opacity:0.5;cursor:not-allowed;" onclick="completeVideoAndCreateTraining('${id}')"><span class="mat-ico">check_circle</span> Mark as Watched & Take Test</button>
+          ${v?`<a href="${v.url}" target="_blank" class="btn btn-sm btn-outline"><span class="mat-ico" style="font-size:12px;">open_in_new</span></a>`:""}
         </div>
       </div>
-      ${!alreadyCompleted?`<div class="video-lock-msg" id="vprog_lock"><span class="mat-ico" style="font-size:16px;">lock</span> Watch at least 90% of the video to unlock "Mark as Complete"</div>`:""}
-      ${v?`<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <div><div style="font-weight:600;font-size:13px;">${v.title}</div><div style="font-size:11px;color:var(--muted);">${v.cat} · ${v.duration} · ${v.views} views</div></div>
-        <a href="${v.url}" target="_blank" class="btn btn-sm btn-outline"><span class="mat-ico" style="font-size:12px;">open_in_new</span> YouTube</a>
-      </div>`:""}
-      ${relatedTrn.length?`<div style="margin-top:14px;padding:12px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px;">Related Training Available</div>
-        ${relatedTrn.map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);">
-          <div><span style="font-weight:600;font-size:12px;">${t.name}</span><span style="font-size:11px;color:var(--muted);margin-left:8px;">${t.duration}</span></div>
-          <button class="btn btn-sm btn-outline" onclick="closeModal();setTimeout(()=>{switchView('trainings');openTrnDetail('${t.id}')},300)"><span class="mat-ico" style="font-size:12px;">visibility</span> View</button>
-        </div>`).join("")}
-      </div>`:""}
-    </div>
-    <div class="modal-foot">
-      ${alreadyCompleted?`<span class="badge badge-active" style="padding:6px 14px;font-size:12px;">✅ Video Completed — Training Added</span>`:`<button class="btn btn-green" id="vprog_complete_btn" disabled style="opacity:0.4;pointer-events:none;" onclick="completeVideoAndCreateTraining('${v?.id||""}','${v?.title||""}','${v?.cat||""}','${v?.duration||""}')"><span class="mat-ico">check_circle</span> Mark as Complete & Add Training</button>`}
-      ${alreadyCompleted?`<button class="btn" style="background:rgba(62,207,142,.15);border:1px solid var(--green);color:var(--green);" onclick="closeModal();setTimeout(()=>startQuiz(resolveQuizCategory('${quizCat}'),'${v?.cat||"Training"} Test'),300)"><span class="mat-ico">quiz</span> Take Test</button>`:""}
-      ${relatedTrn.length?`<button class="btn btn-amber" onclick="closeModal();setTimeout(()=>{switchView('trainings');openTrnDetail('${relatedTrn[0].id}')},300)"><span class="mat-ico">school</span> Go to Training</button>`:""}
-      <button class="btn btn-outline" onclick="destroyVideoTracker();closeModal()">Close</button>
     </div>
   `,"860px");
-  // Initialize YouTube progress tracker (delayed to let modal render)
-  if(!alreadyCompleted&&vId4Tracker){
-    setTimeout(function(){initVideoTracker(vId4Tracker,'vprog_bar','vprog_pct','vprog_time','vprog_complete_btn','vprog_lock');},600);
-  }
-  renderVideos();
+  setTimeout(function(){initVideoTracker(videoId,trackerId,trackerId+"_pct",trackerId+"_time",trackerId+"_complete",trackerId+"_lock");},500);
+  saveDB();
 }
-/* VIDEO → TRAINING → TEST WORKFLOW */
-async function completeVideoAndCreateTraining(videoId,videoTitle,videoCat,videoDuration){
-  if(!currentUser){toast("Login required","error");return;}
-  const v=DB.videos.find(x=>x.id===videoId);
-  if(!v){toast("Video not found","error");return;}
-  // Mark video as completed by this user
-  if(!v.completedBy)v.completedBy=[];
-  if(!v.completedBy.includes(currentUser.id)){
-    v.completedBy.push(currentUser.id);
-  }
-  // Check if a training already exists for this video
-  let existingTrn=DB.trainings.find(t=>t.videoId===videoId);
-  if(!existingTrn){
-    // Auto-create a training from the video
-    const trnId=genId("TRN");
-    existingTrn={
-      id:trnId,
-      name:videoTitle,
-      cat:videoCat,
-      dept:"All Departments",
-      trainer:DB.settings.trainerList?.[0]||"Safety Officer",
-      date:new Date().toISOString().split("T")[0],
-      duration:videoDuration||"--",
-      passing:DB.settings.minCertScore||70,
-      enrolled:[],
-      completed:[],
-      completedDates:{},
-      videoId:videoId,
-      fromVideo:true
-    };
-    DB.trainings.push(existingTrn);
-    addNotification("New training \""+videoTitle+"\" auto-created from Video Library","school");
-  }
-  // Enroll current user (employee) into the training
-  if(currentUser.type==="employee"&&!existingTrn.enrolled.includes(currentUser.id)){
-    existingTrn.enrolled.push(currentUser.id);
-  }
-  // Also enroll all employees if admin is watching
-  if(isAdmin){
-    DB.employees.forEach(e=>{
-      if(!existingTrn.enrolled.includes(e.id)){
-        existingTrn.enrolled.push(e.id);
-      }
-    });
-  }
-  await saveDBAndWait();
-  closeModal();
-  toast("Video completed! Training \""+videoTitle+"\" added to Training Management.","success");
-  // Navigate to Training Management after a short delay
-  setTimeout(()=>{
-    switchView('trainings');
-    openTrnDetail(existingTrn.id);
-  },500);
-}
-async function likeVideo(id){
+function likeVideo(id){
   if(!currentUser){toast("Login required","error");return;}
   const v=DB.videos.find(x=>x.id===id);if(!v)return;
   if(!v.likes)v.likes=[];
   const idx=v.likes.indexOf(currentUser.id);
   if(idx>=0){v.likes.splice(idx,1);toast("Removed like","info",1500);}
-  else{v.likes.push(currentUser.id);toast("❤ Liked!","success",1500);await saveDBAndWait();}
+  else{v.likes.push(currentUser.id);toast("❤ Liked!","success",1500);}
+  saveDB();
   renderVideos();
 }
 function openAddVideoModal(){
@@ -2292,18 +2307,24 @@ function openAddVideoModal(){
   `,"640px");
 }
 function previewVideoId(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById("videoPreviewWrap");const frame=document.getElementById("videoPreviewFrame");if(ytId&&wrap&&frame){wrap.style.display="block";frame.src=`https://www.youtube.com/embed/${ytId}?rel=0`;}else if(wrap){wrap.style.display="none";}}
-async function saveVideo(){
+function saveVideo(){
   const title=document.getElementById("nv_title").value.trim();
   const urlVal=document.getElementById("nv_url").value.trim();
   if(!title||!urlVal){toast("Title and URL required","error");return;}
   const ytId=extractYoutubeId(urlVal);
   const fullUrl=ytId?`https://www.youtube.com/watch?v=${ytId}`:urlVal;
-  DB.videos.push({id:genId("VID"),title,cat:document.getElementById("nv_cat").value,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:document.getElementById("nv_dur").value||"--",views:0,likes:[],completedBy:[],added:new Date().toISOString().split("T")[0]});
-  closeModal();renderVideos();
-  await saveDBAndWait();
-  toast("Video saved to local & cloud","success");
+  const vidId=genId("VID");
+  const cat=document.getElementById("nv_cat").value;
+  const dur=document.getElementById("nv_dur").value||"--";
+  const today=new Date().toISOString().split("T")[0];
+  DB.videos.push({id:vidId,title,cat,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:dur,views:0,likes:[],added:today,completedBy:[]});
+  // Auto-create a training linked to this video
+  const trnName="Video: "+title;
+  const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title};
+  DB.trainings.push(trn);
+  closeModal();renderVideos();renderTrainings();updateBadges();saveDB();toast("Video added & Training auto-created: "+trnName,"success");
 }
-async function deleteVideo(id){if(!confirm('Delete this video permanently?'))return;DB.videos=DB.videos.filter(v=>v.id!==id);if(firebaseReady){try{await fbDB.collection('videos').doc(id).delete();}catch(e){}}renderVideos();await saveDBAndWait();toast('Video deleted from local & cloud','warning');}
+function deleteVideo(id){if(!confirm("Delete this video and its linked training?"))return;DB.videos=DB.videos.filter(v=>v.id!==id);DB.trainings=DB.trainings.filter(t=>t.fromVideo!==id);renderVideos();renderTrainings();updateBadges();saveDB();toast("Video and linked training deleted","warning");}
 
 /* ============================================================
    SOP LIBRARY
@@ -2380,14 +2401,14 @@ function openAddSOPModal(){
     <div class="modal-foot"><button class="btn btn-amber" onclick="saveSOP()"><span class="mat-ico">save</span> Add SOP</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
   `,"620px");
 }
-async function saveSOP(){
+function saveSOP(){
   const title=document.getElementById("ns_title").value.trim();
   if(!title){toast("SOP title required","error");return;}
   const points=document.getElementById("ns_points").value.split("\n").map(s=>s.trim()).filter(s=>s);
   DB.sops.push({id:genId("SOP"),title,cat:document.getElementById("ns_cat").value,version:document.getElementById("ns_ver").value||"v1.0",updated:new Date().toISOString().split("T")[0],pages:parseInt(document.getElementById("ns_pages").value)||1,file:"",desc:document.getElementById("ns_desc").value,keyPoints:points,hazards:document.getElementById("ns_haz").value,emergency:document.getElementById("ns_emg").value,reviewedBy:document.getElementById("ns_rev").value});
-  closeModal();renderSOP();await saveDBAndWait();toast("SOP added & synced to cloud","success");
+  closeModal();renderSOP();saveDB();toast("SOP added","success");
 }
-async function deleteSOP(id){if(!confirm('Delete this SOP permanently?'))return;DB.sops=DB.sops.filter(s=>s.id!==id);if(firebaseReady){try{await fbDB.collection('sops').doc(id).delete();}catch(e){}}renderSOP();await saveDBAndWait();toast('SOP deleted from local & cloud','warning');}
+function deleteSOP(id){if(!confirm("Delete this SOP?"))return;DB.sops=DB.sops.filter(s=>s.id!==id);renderSOP();saveDB();toast("SOP deleted","warning");}
 
 /* ============================================================
    QUIZ / TESTS
@@ -2395,7 +2416,7 @@ async function deleteSOP(id){if(!confirm('Delete this SOP permanently?'))return;
 function renderQuizMenu(){
   const cats=TRAINING_CATS;
   document.getElementById("view-quiz").innerHTML=`
-    <div class="section-header"><div class="section-title">Online <span>Tests</span></div>${isAdmin?`<button class="btn btn-amber" onclick="openAddCustomTestModal()"><span class="mat-ico">add</span> Create Test</button>`:""}</div>
+    <div class="section-header"><div class="section-title">Online <span>Tests</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12.5px;display:flex;align-items:center;gap:10px;">
       <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
       <div><b>Certificate Policy:</b> Score ≥ ${DB.settings.minCertScore||70}% earns a certificate. Questions are randomized every attempt.</div>
@@ -2416,48 +2437,6 @@ function renderQuizMenu(){
       }).join("")}
     </div>
   `;
-}
-function openAddCustomTestModal(){
-  openModal(`
-    <div class="modal-accent"></div>
-    <div class="modal-head">
-      <div class="modal-ico" style="background:rgba(240,136,62,.15)"><span class="mat-ico" style="color:var(--orange);font-size:22px;">quiz</span></div>
-      <h2>Create Custom Test</h2>
-      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
-    </div>
-    <div class="modal-body">
-      <div class="form-section"><div class="form-grid">
-        <div class="form-group"><label class="form-label-sm">Test Category *</label><select class="form-control-sm" id="nqt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Test Name</label><input class="form-control-sm" id="nqt_name" placeholder="e.g. Advanced Fire Safety"></div>
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Questions (one per line: Question | Option1 | Option2 | Option3 | CorrectOption)</label>
-        <textarea class="form-control-sm" id="nqt_qs" rows="8" placeholder="What is PASS technique?|Pull pin|Aim at base|Squeeze handle|Squeeze handle
-What type of extinguisher for electrical fire?|ABC|CO2|Water|CO2" style="resize:vertical;font-family:'JetBrains Mono',monospace;font-size:11px;"></textarea></div>
-        <div style="grid-column:1/-1;font-size:11px;color:var(--muted);background:var(--sur2);padding:8px;border-radius:6px;">Format: Question | Opt1 | Opt2 | Opt3 | CorrectAnswer (one question per line). The correct answer must match one of the options exactly.</div>
-      </div></div>
-    </div>
-    <div class="modal-foot"><button class="btn btn-amber" onclick="saveCustomTest()"><span class="mat-ico">save</span> Save Test</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
-  `,"640px");
-}
-async function saveCustomTest(){
-  const cat=document.getElementById("nqt_cat").value;
-  const testName=document.getElementById("nqt_name").value.trim()||cat+" Test";
-  const qsRaw=document.getElementById("nqt_qs").value.trim();
-  if(!qsRaw){toast("Add at least one question","error");return;}
-  const lines=qsRaw.split(String.fromCharCode(10)).map(l=>l.trim()).filter(l=>l);
-  const newQs=[];
-  for(const line of lines){
-    const parts=line.split("|").map(p=>p.trim());
-    if(parts.length>=5){
-      const correctIdx=parts.slice(1,4).indexOf(parts[4]);
-      if(correctIdx>=0){newQs.push({q:parts[0],o:[parts[1],parts[2],parts[3]],a:correctIdx,customFor:testName});}
-    }
-  }
-  if(!newQs.length){toast("No valid questions found. Check format.","error");return;}
-  if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
-  QUESTION_BANK[cat].push(...newQs);
-  closeModal();renderQuizMenu();
-  await saveDBAndWait();
-  toast(`${newQs.length} question(s) added & synced to cloud`,"success");
 }
 function startQuiz(category,trainingName){
   if(!currentUser){toast("Please login first","error");return;}
@@ -2545,7 +2524,7 @@ function selectAnswer(i){if(!quizState.active)return;quizState.answers[quizState
 function nextQuestion(){if(quizState.current<quizState.questions.length-1){quizState.current++;renderQuizActive();}}
 function prevQuestion(){if(quizState.current>0){quizState.current--;renderQuizActive();}}
 function jumpToQuestion(i){quizState.current=i;renderQuizActive();}
-async function submitQuiz(){
+function submitQuiz(){
   clearInterval(quizState.timer);
   const qs=quizState.questions;
   const answers=quizState.answers;
@@ -2580,7 +2559,7 @@ async function submitQuiz(){
     if(pass&&!trnMatch.completed.includes(empId)){trnMatch.completed.push(empId);trnMatch.completedDates[empId]=today;}
   }
   updateBadges();
-  await saveDBAndWait();
+  saveDB();
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
@@ -2744,13 +2723,8 @@ function renderReports(){
       ${reportCard("bar_chart","Monthly Report","Month-wise stats","#3ea0e8","exportMonthlyReport()")}
     </div>
     <div class="chart-card" style="margin-bottom:14px;">
-      <div class="collapsible-header" onclick="toggleCollapsible('rptCompBody',this)">
-        <div class="chart-card-title" style="margin-bottom:0;"><span class="dot"></span>Training Completion Overview</div>
-        <span class="mat-ico collapsible-arrow">chevron_right</span>
-      </div>
-      <div class="collapsible-body" id="rptCompBody">
+      <div class="chart-card-title"><span class="dot"></span>Training Completion Overview</div>
       <canvas id="reportChart" height="120"></canvas>
-      </div><!-- end collapsible-body -->
     </div>
     <div class="table-wrap">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--sur2);border-bottom:1px solid var(--bdr);flex-wrap:wrap;gap:8px;">
@@ -2792,7 +2766,7 @@ function renderReports(){
     const passed=catData.map(c=>DB.testResults.filter(r=>r.pass&&(r.cat===c||r.training?.toLowerCase().includes(c.toLowerCase()))).length);
     const isDark=document.documentElement.getAttribute("data-theme")==="dark";
     const textColor=isDark?"#7d8590":"#656d76";
-    if(charts["reportChart"])try{charts["reportChart"].destroy();}catch(e){}charts["reportChart"]=new Chart(ctx,{type:"bar",data:{labels:catData,datasets:[{label:"Enrolled",data:enrolled,backgroundColor:"rgba(62,160,232,.7)",borderRadius:4},{label:"Passed",data:passed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxRotation:45}},y:{ticks:{color:textColor}}}}});
+    new Chart(ctx,{type:"bar",data:{labels:catData,datasets:[{label:"Enrolled",data:enrolled,backgroundColor:"rgba(62,160,232,.7)",borderRadius:4},{label:"Passed",data:passed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxRotation:45}},y:{ticks:{color:textColor}}}}});
   },100);
 }
 function reportCard(icon,title,desc,color,action){
@@ -2851,7 +2825,7 @@ function exportMonthlyReport(){
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Monthly");
   XLSX.writeFile(wb,"MEP_Monthly_"+new Date().toISOString().split("T")[0]+".xlsx");toast("Monthly report exported","success");
 }
-async function recalcPassFail(){
+function recalcPassFail(){
   let fixed=0;
   DB.testResults.forEach(r=>{
     const trn=DB.trainings.find(t=>t.name===r.training);
@@ -2859,21 +2833,15 @@ async function recalcPassFail(){
     const shouldPass=r.score>=passing;
     if(r.pass!==shouldPass){r.pass=shouldPass;fixed++;}
   });
-  await saveDBAndWait();renderReports();toast(fixed?"Recalculated: "+fixed+" records corrected":"All PASS/FAIL values are correct",fixed?"success":"info");
+  saveDB();renderReports();toast(fixed?"Recalculated: "+fixed+" records corrected":"All PASS/FAIL values are correct",fixed?"success":"info");
 }
-async function clearAllTestResults(){
+function clearAllTestResults(){
   if(!confirm("DELETE all "+DB.testResults.length+" test results and "+DB.certificates.length+" certificates? This cannot be undone!"))return;
   if(!confirm("Are you ABSOLUTELY sure? All test history and certificates will be permanently deleted."))return;
-  // Delete from Firebase first
-  if(firebaseReady){
-    try{DB.testResults.forEach(r=>{try{fbDB.collection('testResults').doc(String(r.id)).delete();}catch(e){}});}catch(e){}
-    try{DB.certificates.forEach(c=>{try{fbDB.collection('certificates').doc(String(c.num)).delete();}catch(e){}});}catch(e){}
-  }
   DB.testResults=[];DB.certificates=[];
-  if(firebaseReady){try{await fbDB.collection('testResults').get().then(s=>{const b=fbDB.batch();s.docs.forEach(d=>b.delete(d.ref));return b.commit();});}catch(e){}try{await fbDB.collection('certificates').get().then(s=>{const b=fbDB.batch();s.docs.forEach(d=>b.delete(d.ref));return b.commit();});}catch(e){}}
   // Also clear completed status from trainings
   DB.trainings.forEach(t=>{t.completed=[];t.completedDates={};});
-  await saveDBAndWait();renderReports();updateBadges();toast("All test results and certificates cleared from local & cloud","warning");
+  saveDB();renderReports();updateBadges();toast("All test results and certificates cleared","warning");
 }
 
 /* ============================================================
@@ -2911,6 +2879,10 @@ function renderSettings(){
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Status: <span id="fbStatusText" style="color:${firebaseReady?'var(--green)':'var(--red)'};"><span class="mat-ico" style="font-size:14px;">${firebaseReady?'check_circle':'cloud_off'}</span> ${firebaseReady?'Connected — data syncs across devices':'Not Connected — using local storage only'}</span></div>
       <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone/device. Admin-added data syncs automatically via Firebase. New employees get Firebase Auth accounts created automatically.</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-sm btn-green" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">cloud_upload</span> Force Sync to Cloud</button>
+        <button class="btn btn-sm btn-outline" onclick="forceSyncFromCloud()"><span class="mat-ico" style="font-size:12px;">cloud_download</span> Pull from Cloud</button>
+      </div>
     </div>
     <div class="settings-grid">
       <div class="form-section">
@@ -2991,23 +2963,23 @@ function renderSettings(){
           <div>Certificates: <b style="color:var(--txt);">${DB.certificates.length}</b></div>
           <div>Videos: <b style="color:var(--txt);">${DB.videos.length}</b></div>
           <div>SOPs: <b style="color:var(--txt);">${DB.sops.length}</b></div>
-          <div>Equipment: <b style="color:var(--txt);">${getAllEquipment().length}</b></div>
+          <div>Equipment: <b style="color:var(--txt);">${EQUIPMENT_DATA.length}</b></div>
           <div>Min Cert Score: <b style="color:var(--amber);">${DB.settings.minCertScore||70}%</b></div>
         </div>
       </div>`:""}
     </div>
   `;
 }
-async function saveSettings(){
+function saveSettings(){
   DB.settings.companyName=document.getElementById("st_company")?.value||DB.settings.companyName;
   DB.settings.companyLogo=document.getElementById("st_logo")?.value||DB.settings.companyLogo;
   DB.settings.minCertScore=parseInt(document.getElementById("st_mincert")?.value)||70;
   DB.settings.sheetUrl=(document.getElementById("st_sheeturl")?.value||"").trim();
-  await saveDBAndWait();toast("Settings saved & synced","success");
+  toast("Settings saved","success");saveDB();
 }
-async function addTrainer(){const v=document.getElementById("newTrainer")?.value.trim();if(!v)return;DB.settings.trainerList.push(v);document.getElementById("newTrainer").value="";renderSettings();await saveDBAndWait();toast("Trainer added & synced","success");}
-async function removeTrainer(i){DB.settings.trainerList.splice(i,1);renderSettings();await saveDBAndWait();}
-async function changeAdminPw(username){const pw=prompt(`New password for ${username}:`);if(pw){const a=DB.admins.find(x=>x.username===username);if(a){a.password=pw;await saveDBAndWait();toast("Password changed & synced","success");}}}
+function addTrainer(){const v=document.getElementById("newTrainer")?.value.trim();if(!v)return;DB.settings.trainerList.push(v);document.getElementById("newTrainer").value="";renderSettings();saveDB();toast("Trainer added","success");}
+function removeTrainer(i){DB.settings.trainerList.splice(i,1);renderSettings();saveDB();}
+function changeAdminPw(username){const pw=prompt(`New password for ${username}:`);if(pw){const a=DB.admins.find(x=>x.username===username);if(a){a.password=pw;toast("Password changed","success");saveDB();}}}
 function addAdminModal(){
   openModal(`
     <div class="modal-accent"></div>
@@ -3021,14 +2993,14 @@ function addAdminModal(){
     <div class="modal-foot"><button class="btn btn-amber" onclick="saveAdmin()"><span class="mat-ico">save</span> Add Admin</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
   `,"480px");
 }
-async function saveAdmin(){
+function saveAdmin(){
   const u=document.getElementById("na_user").value.trim();
   const n=document.getElementById("na_name").value.trim();
   const p=document.getElementById("na_pw").value;
   if(!u||!n||!p){toast("All fields required","error");return;}
   if(DB.admins.find(a=>a.username===u)){toast("Username already exists","error");return;}
   DB.admins.push({username:u,name:n,password:p,role:document.getElementById("na_role").value});
-  closeModal();await saveDBAndWait();toast("Admin added & synced","success");
+  closeModal();renderSettings();saveDB();toast("Admin added","success");
   if(firebaseReady){const aEmail=toEmail(u);fbAuth.signInWithEmailAndPassword(aEmail,p).catch(()=>{fbAuth.createUserWithEmailAndPassword(aEmail,p).catch(()=>{});});}
 }
 function backupData(){
@@ -3039,7 +3011,7 @@ function backupData(){
 function restoreData(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
-  reader.onload=(e)=>{try{const restored=JSON.parse(e.target.result);if(restored.employees)DB.employees=restored.employees;if(restored.admins)DB.admins=restored.admins;if(restored.trainings)DB.trainings=restored.trainings;if(restored.testResults)DB.testResults=restored.testResults;if(restored.certificates)DB.certificates=restored.certificates;if(restored.videos)DB.videos=restored.videos;if(restored.sops)DB.sops=restored.sops;if(restored.notifications)DB.notifications=restored.notifications;if(restored.settings)Object.assign(DB.settings,restored.settings);saveDB();renderSettings();updateBadges();toast("Data restored & syncing to cloud","success");}catch{toast("Invalid backup file","error");}};
+  reader.onload=(e)=>{try{const restored=JSON.parse(e.target.result);if(restored.employees)DB.employees=restored.employees;if(restored.admins)DB.admins=restored.admins;if(restored.trainings)DB.trainings=restored.trainings;if(restored.testResults)DB.testResults=restored.testResults;if(restored.certificates)DB.certificates=restored.certificates;if(restored.videos)DB.videos=restored.videos;if(restored.sops)DB.sops=restored.sops;if(restored.notifications)DB.notifications=restored.notifications;if(restored.settings)Object.assign(DB.settings,restored.settings);saveDB();renderSettings();updateBadges();toast("Data restored successfully","success");}catch{toast("Invalid backup file","error");}};
   reader.readAsText(file);
 }
 
@@ -3258,58 +3230,60 @@ function exportFullStatusReport(){
 }
 
 /* ============================================================
-   COLLAPSIBLE SECTIONS
-============================================================ */
-function toggleCollapsible(bodyId,headerEl){
-  const body=document.getElementById(bodyId);
-  const arrow=headerEl.querySelector(".collapsible-arrow");
-  if(!body)return;
-  body.classList.toggle("open");
-  if(arrow)arrow.classList.toggle("open");
-}
-
-/* ============================================================
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
+let _syncBusy=false;
+let _lastSyncTime=null;
+function updateSyncUI(status){
+  const icon=document.getElementById('syncIcon');
+  const txt=document.getElementById('syncText');
+  const wrap=document.getElementById('syncIndicator');
+  if(!icon||!txt)return;
+  if(status==='syncing'){
+    icon.textContent='sync';icon.style.color='var(--amber)';icon.style.animation='spin 1s linear infinite';
+    txt.textContent='Syncing...';txt.style.color='var(--amber)';
+    wrap.style.borderColor='var(--amber)';
+  }else if(status==='error'){
+    icon.textContent='cloud_off';icon.style.color='var(--red)';icon.style.animation='';
+    txt.textContent='Sync Failed';txt.style.color='var(--red)';
+    wrap.style.borderColor='var(--red)';
+    setTimeout(()=>updateSyncUI('idle'),4000);
+  }else{
+    icon.textContent='cloud_done';icon.style.color='var(--green)';icon.style.animation='';
+    const ago=_lastSyncTime?Math.round((Date.now()-_lastSyncTime)/1000)+'s ago':'Ready';
+    txt.textContent='Synced';txt.style.color='var(--muted)';
+    wrap.style.borderColor='var(--bdr)';
+  }
+}
 function saveDB(){
   try{
     const data=JSON.parse(JSON.stringify(DB));
     localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(data));
   }catch(e){}
-  // Firebase sync (fire-and-forget for rapid calls)
-  if(firebaseReady){
-    fbSaveCollection('employees',DB.employees,'id');
-    fbSaveCollection('admins',DB.admins,'username');
-    fbSaveCollection('trainings',DB.trainings,'id');
-    fbSaveCollection('testResults',DB.testResults,'id');
-    fbSaveCollection('certificates',DB.certificates,'num');
-    fbSaveCollection('notifications',DB.notifications,'id');
-    fbSaveCollection('videos',DB.videos,'id');
-    fbSaveCollection('sops',DB.sops,'id');
-    fbSaveCollection('customEquipment',DB.customEquipment,'id');
-    fbSaveSettings();
-  }
-}
-/* saveDBAndWait — WAITS for all Firebase writes to complete.
-   Use for all admin uploads/adds/deletes to guarantee cloud sync. */
-async function saveDBAndWait(){
-  saveDB();
-  if(firebaseReady){
-    try{
-      await Promise.all([
-        fbSaveCollection('employees',DB.employees,'id'),
-        fbSaveCollection('admins',DB.admins,'username'),
-        fbSaveCollection('trainings',DB.trainings,'id'),
-        fbSaveCollection('testResults',DB.testResults,'id'),
-        fbSaveCollection('certificates',DB.certificates,'num'),
-        fbSaveCollection('notifications',DB.notifications,'id'),
-        fbSaveCollection('videos',DB.videos,'id'),
-        fbSaveCollection('sops',DB.sops,'id'),
-        fbSaveCollection('customEquipment',DB.customEquipment,'id'),
-        fbSaveSettings()
-      ]);
-    }catch(e){console.warn('saveDBAndWait error:',e);}
+  // Firebase sync — show status, prevent double-sync
+  if(firebaseReady&&!_syncBusy){
+    _syncBusy=true;
+    updateSyncUI('syncing');
+    const syncPromise=Promise.all([
+      fbSaveCollection('employees',DB.employees,'id'),
+      fbSaveCollection('admins',DB.admins,'username'),
+      fbSaveCollection('trainings',DB.trainings,'id'),
+      fbSaveCollection('testResults',DB.testResults,'id'),
+      fbSaveCollection('certificates',DB.certificates,'num'),
+      fbSaveCollection('notifications',DB.notifications,'id'),
+      fbSaveCollection('videos',DB.videos,'id'),
+      fbSaveCollection('sops',DB.sops,'id'),
+      fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+      fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+      fbSaveSettings()
+    ]);
+    syncPromise.then(()=>{
+      _lastSyncTime=Date.now();
+      updateSyncUI('idle');
+    }).catch(()=>{
+      updateSyncUI('error');
+    }).finally(()=>{_syncBusy=false;});
   }
 }
 function loadDBFromLocal(){
@@ -3324,44 +3298,49 @@ function loadDBFromLocal(){
     if(saved.videos&&Array.isArray(saved.videos))DB.videos=saved.videos;
     if(saved.sops&&Array.isArray(saved.sops))DB.sops=saved.sops;
     if(saved.notifications&&Array.isArray(saved.notifications))DB.notifications=saved.notifications;
-    if(saved.customEquipment&&Array.isArray(saved.customEquipment))DB.customEquipment=saved.customEquipment;
     if(saved.settings&&typeof saved.settings==="object")Object.assign(DB.settings,saved.settings);
     if(saved.admins&&Array.isArray(saved.admins)&&saved.admins.length>0){
       DB.admins=saved.admins;
+    }
+    if(saved.customEquipment&&Array.isArray(saved.customEquipment))DB.customEquipment=saved.customEquipment;
+    if(saved.customQuestions&&Array.isArray(saved.customQuestions)){
+      saved.customQuestions.forEach(cq=>{
+        if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];
+        // Avoid duplicates
+        if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){
+          QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});
+        }
+      });
+      DB.customQuestions=saved.customQuestions;
     }
     return true;
   }catch(e){console.warn("Local load failed:",e);return false;}
 }
 
 async function loadDBFromFirestore(){
+  let loaded=0;let failed=[];
   try{
-    const [empSnap,trnSnap,testSnap,certSnap,vidSnap,sopSnap,custEquipSnap,notifSnap,adminSnap,setSnap]=await Promise.all([
-      fbDB.collection('employees').get(),
-      fbDB.collection('trainings').get(),
-      fbDB.collection('testResults').get(),
-      fbDB.collection('certificates').get(),
-      fbDB.collection('videos').get(),
-      fbDB.collection('sops').get(),
-      fbDB.collection('customEquipment').get(),
-      fbDB.collection('notifications').orderBy('id','desc').get(),
-      fbDB.collection('admins').get(),
-      fbDB.collection('config').doc('settings').get()
-    ]);
-    if(empSnap.size>0)DB.employees=empSnap.docs.map(d=>d.data());
-    if(trnSnap.size>0)DB.trainings=trnSnap.docs.map(d=>d.data());
-    if(testSnap.size>0)DB.testResults=testSnap.docs.map(d=>d.data());
-    if(certSnap.size>0)DB.certificates=certSnap.docs.map(d=>d.data());
-    if(vidSnap.size>0)DB.videos=vidSnap.docs.map(d=>d.data());
-    if(sopSnap.size>0)DB.sops=sopSnap.docs.map(d=>d.data());
-    if(custEquipSnap.size>0)DB.customEquipment=custEquipSnap.docs.map(d=>d.data());
-    if(notifSnap.size>0)DB.notifications=notifSnap.docs.map(d=>d.data());
-    if(adminSnap.size>0)DB.admins=adminSnap.docs.map(d=>d.data());
-    if(setSnap.exists)Object.assign(DB.settings,setSnap.data());
-    console.log('Firestore loaded: employees='+DB.employees.length+' trainings='+DB.trainings.length+' results='+DB.testResults.length);
-    return true;
+    // Load each collection individually — one failure won't break the rest
+    const cols=[
+      ['employees','id',d=>{if(d.size>0)DB.employees=d.docs.map(x=>x.data());}],
+      ['trainings','id',d=>{if(d.size>0)DB.trainings=d.docs.map(x=>x.data());}],
+      ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
+      ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
+      ['videos','id',d=>{if(d.size>0)DB.videos=d.docs.map(x=>x.data());}],
+      ['sops','id',d=>{if(d.size>0)DB.sops=d.docs.map(x=>x.data());}],
+      ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
+      ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
+      ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
+      ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}]
+    ];
+    const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
+    // Load settings separately (it's a single doc, not a collection)
+    try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');}
+    console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
+    return true; // Always return true so firebaseReady stays ON
   }catch(e){
     console.warn('Firestore load error:',e);
-    return false;
+    return true; // Still return true — keep Firebase active for saves
   }
 }
 
@@ -3372,14 +3351,16 @@ function loadDB(){
   if(!DB.admins.find(a=>a.username==="admin")){
     DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
   }
+  if(!DB.employees.find(e=>e.id==="EMP001")){
+    DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
+  }
 }
-
 async function resetDBToDefault(){
   if(!confirm("Reset ALL data to defaults? This will delete all employees, trainings, test results, and certificates you added. This cannot be undone."))return;
   localStorage.removeItem(DB_STORAGE_KEY);
   if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
     try{
-      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','customEquipment'];
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config'];
       for(const c of cols){
         const snap=await fbDB.collection(c).get();
         const batch=fbDB.batch();
@@ -3415,43 +3396,19 @@ async function initApp(){
   // 2. Try Firebase/Firestore
   try{
     firebaseReady=true;
-    const loaded=await loadDBFromFirestore();
-    if(loaded){
-      // Merge: Firestore data takes priority, but keep defaults
-      if(!DB.admins.find(a=>a.username==="admin")){
-        DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
-      }
-      // Clean start: remove old default employees from Firestore
-      const oldEmpIds=["EMP001","EMP002","EMP003","EMP004","EMP005","EMP006","EMP007","EMP008"];
-      const oldEmps=DB.employees.filter(e=>oldEmpIds.includes(e.id));
-      if(oldEmps.length>0){
-        DB.employees=DB.employees.filter(e=>!oldEmpIds.includes(e.id));
-        if(firebaseReady){oldEmpIds.forEach(eid=>{try{fbDB.collection('employees').doc(eid).delete();}catch(e){}});}
-        // Also clear any test results and certificates for old employees
-        DB.testResults=DB.testResults.filter(r=>!oldEmpIds.includes(r.empId));
-        DB.certificates=DB.certificates.filter(c=>!oldEmpIds.includes(c.empId));
-        // Remove old employees from trainings
-        DB.trainings.forEach(t=>{
-          if(t.enrolled)t.enrolled=t.enrolled.filter(id=>!oldEmpIds.includes(id));
-          if(t.completed)t.completed=t.completed.filter(id=>!oldEmpIds.includes(id));
-        });
-        saveDB();
-        console.log('Cleaned up '+oldEmps.length+' old default employees');
-      }
-      // Clear old trainings/testResults from Firebase that were removed locally
-      if(firebaseReady){
-        try{
-          const fbTrnSnap=await fbDB.collection('trainings').get();
-          const fbTrnIds=fbTrnSnap.docs.map(d=>d.id);
-          const localTrnIds=DB.trainings.map(t=>String(t.id));
-          fbTrnIds.forEach(fid=>{if(!localTrnIds.includes(fid)){try{fbDB.collection('trainings').doc(fid).delete();}catch(e){}}});
-        }catch(e){}
-      }
-      saveDB();
+    await loadDBFromFirestore();
+    // Always keep firebaseReady ON — even partial load is OK
+    if(!DB.admins.find(a=>a.username==="admin")){
+      DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
     }
+    if(!DB.employees.find(e=>e.id==="EMP001")){
+      DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
+    }
+    saveDB();
+    await seedFirestore();
   }catch(e){
     console.warn('Firebase init error:',e);
-    firebaseReady=false;
+    // Do NOT set firebaseReady=false — keep trying to save
   }
 
   if(loadMsg)loadMsg.style.display='none';
