@@ -347,6 +347,8 @@ select.form-control-sm{background:var(--sur2);}
   .quick-actions{grid-template-columns:1fr 1fr;}
   .topbar-search input{width:140px;}
 }
+
+.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:4px 0;}.collapsible-header:hover .collapsible-arrow{color:var(--amber);}.collapsible-arrow{transition:transform .25s ease;color:var(--muted);font-size:18px;}.collapsible-arrow.open{transform:rotate(90deg);}.collapsible-body{max-height:0;overflow:hidden;transition:max-height .35s ease;}.collapsible-body.open{max-height:5000px;}
 </style>
 </head>
 <body>
@@ -392,13 +394,8 @@ select.form-control-sm{background:var(--sur2);}
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
       <button class="btn-primary-full" id="loginBtn" onclick="doLogin()">PTS SAFETY SIGN IN</button>
-      <div class="demo-hint">
-        <div style="margin-bottom:6px;"><b>Admin:</b> <span style="color:var(--txt);">Admin User</span> — username: <b>admin</b> | password: <b>admin123</b></div>
-        <div><b>Employee:</b> <span style="color:var(--txt);">Rajesh Kumar</span> — ID: <b>EMP001</b> | password: <b>emp123</b></div>
-      </div>
     </div>
     <div class="login-footer">PTS SAFETY — Training Management System</div>
-    <div style="text-align:center;margin-top:10px;"><button class="link-btn" style="font-size:11px;opacity:.6;" onclick="if(confirm('Clear all saved data and reset to defaults?')){localStorage.removeItem('pts_safety_db');localStorage.removeItem('mep_user');location.reload();}">Reset Data / Fix Login</button></div>
   </div>
 </div>
 
@@ -774,7 +771,8 @@ let DB={
     sheetUrl:"",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
-  admins:[{username:"admin",password:"admin123",name:"Admin User",role:"admin"}]
+  admins:[{username:"admin",password:"admin123",name:"Admin User",role:"admin"}],
+  customEquipment:[]
 };
 
 /* ============================================================
@@ -1007,7 +1005,7 @@ function startApp(){
 function updateBadges(){
   document.getElementById("nb-employees").textContent=DB.employees.length;
   document.getElementById("nb-trainings").textContent=DB.trainings.length;
-  document.getElementById("nb-equipment").textContent=EQUIPMENT_DATA.length;
+  document.getElementById("nb-equipment").textContent=getAllEquipment().length;
   const unread=DB.notifications.filter(n=>!n.read).length;
   document.getElementById("nb-notif").textContent=unread;
   document.getElementById("notifDot").style.display=unread>0?"block":"none";
@@ -1111,7 +1109,7 @@ function renderDashboard(){
       ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Pass count")}
       ${statCard("pending","Pending",pending,"#f0883e","Awaiting training")}
       ${statCard("cancel","Tests Failed",failed,"#e8483a","Retraining req.")}
-      ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library")}
+      ${statCard("build","Equipment Items",getAllEquipment().length,"#ffb020","In library")}
       ${statCard("workspace_premium","Certificates",certCount,"#c084fc","Issued")}
       ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%")}
     </div>
@@ -1158,7 +1156,11 @@ function renderDashboard(){
       </div>
     </div>
     <div class="chart-card" style="margin-bottom:18px;">
-      <div class="chart-card-title"><span class="dot"></span>Training Completions — Employee ID, Name & Date</div>
+      <div class="collapsible-header" onclick="toggleCollapsible('dashCompBody',this)">
+        <div class="chart-card-title" style="margin-bottom:0;"><span class="dot"></span>Training Completions — Employee ID, Name & Date</div>
+        <span class="mat-ico collapsible-arrow">chevron_right</span>
+      </div>
+      <div class="collapsible-body" id="dashCompBody">
       <div class="table-wrap" style="margin-top:8px;">
         <table><thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Training</th><th>Score</th><th>Result</th><th>Completion Date</th><th>Certificate</th></tr></thead>
         <tbody>
@@ -1175,6 +1177,7 @@ function renderDashboard(){
           ${!DB.testResults.filter(r=>r.pass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
         </tbody></table>
       </div>
+      </div><!-- end collapsible-body -->
     </div>
   `;
   el.querySelectorAll(".stat-num").forEach(el=>{
@@ -1217,7 +1220,7 @@ function renderEmpDashboard(){
       </div>
       <div class="quick-action" onclick="gotoView('equipment')">
         <div class="qa-ico" style="background:rgba(255,176,32,.1)"><span class="mat-ico" style="color:var(--amber);">build</span></div>
-        <div class="qa-title">Equipment Library</div><div class="qa-desc">${EQUIPMENT_DATA.length}+ MEP equipment</div>
+        <div class="qa-title">Equipment Library</div><div class="qa-desc">${getAllEquipment().length}+ MEP equipment</div>
       </div>
       <div class="quick-action" onclick="gotoView('videos')">
         <div class="qa-ico" style="background:rgba(62,207,142,.1)"><span class="mat-ico" style="color:var(--green);">play_circle</span></div>
@@ -1239,7 +1242,7 @@ function renderEmpDashboard(){
             </div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${t.duration} · Pass: ${t.passing}%</div>
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
-            ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test Now</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
+            ${!done?(()=>{const relatedVideo=t.videoId?DB.videos.find(v=>v.id===t.videoId):DB.videos.find(v=>v.cat===t.cat);const videoDone=relatedVideo&&(relatedVideo.completedBy||[]).includes(currentUser?.id);if(t.fromVideo&&!videoDone){return`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.videoId||""}','${relatedVideo?.youtubeId||""}')" style="border-color:var(--red);color:var(--red);"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video First</button>`;}else if(t.fromVideo&&videoDone){return`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button><span style="font-size:10px;color:var(--green);margin-left:6px;">✓ Video Done</span>`;}else{return`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test Now</button>`;}})():`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
           </div>`;
         }).join("")}
       </div>
@@ -1277,10 +1280,13 @@ function drawCharts(){
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
   const textColor=isDark?"#7d8590":"#656d76";
-  const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug"];
+  const now=new Date();
+  const currentMonthName=now.toLocaleString('en',{month:'short'});
+  const currentMonthTrainings=DB.trainings.filter(t=>t.date&&t.date.startsWith(now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'))).length;
+  const currentMonthCompleted=DB.testResults.filter(r=>r.pass&&r.date&&r.date.startsWith(now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'))).length;
   destroyChart("chartMonthly");
   const mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:months,datasets:[{label:"Trainings",data:[4,6,5,8,7,9,6,DB.trainings.length],backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Completed",data:[3,5,4,7,6,8,5,DB.testResults.filter(r=>r.pass).length],backgroundColor:"rgba(62,207,142,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor}}}}});}
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:[currentMonthName],datasets:[{label:"Trainings",data:[currentMonthTrainings],backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Completed",data:[currentMonthCompleted],backgroundColor:"rgba(62,207,142,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
   destroyChart("chartDept");
   const dCtx=document.getElementById("chartDept");
   if(dCtx){const dDepts=DEPARTMENTS.slice(0,6);charts.dept=new Chart(dCtx,{type:"bar",data:{labels:dDepts,datasets:[{label:"Completion %",data:dDepts.map(d=>{const empInDept=DB.employees.filter(e=>e.dept===d).length;if(!empInDept)return 0;const passed=DB.testResults.filter(r=>r.pass&&r.dept===d).length;return Math.min(100,Math.round(passed/empInDept*100));}),backgroundColor:["#ffb020","#3ecf8e","#e8483a","#3ea0e8","#8b6de8","#f0883e"],borderRadius:6}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{display:false}},scales:{x:{max:100,grid:{color:gridColor},ticks:{color:textColor,callback:v=>v+"%"}},y:{grid:{color:gridColor},ticks:{color:textColor}}}}});}
@@ -1584,10 +1590,11 @@ function renderEmpTrainings(){
               <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
             </div>
-            ${myRes.length?`<div style="font-size:11px;color:var(--muted);">Best score: <b style="color:${myRes[0].pass?"var(--green)":"var(--red)"}">${Math.max(...myRes.map(r=>r.score))}%</b> · ${myRes.length} attempt(s)</div>`:""}
-            <div style="margin-top:8px;">
+            ${myRes.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Best: <b style="color:${myRes.some(r=>r.pass)?"var(--green)":"var(--red)"}">${Math.max(...myRes.map(r=>r.score))}%</b> · ${myRes.length} attempt(s)</div>`:""}
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-amber" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
-              ${done&&myRes[0]?.cert?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes[0].cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
+              ${t.videoId?`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.videoId}','')"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video</button>`:""}
+              ${myRes.some(r=>r.pass)&&myRes.find(r=>r.cert)?.cert?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
             </div>
           </div>
         </div>`;
@@ -1686,6 +1693,19 @@ function saveTraining(){
   const t={id:document.getElementById("nt_id").value,name,cat,dept:document.getElementById("nt_dept").value,trainer:document.getElementById("nt_trainer").value,date:document.getElementById("nt_date").value,duration:document.getElementById("nt_dur").value||"4 hrs",passing:parseInt(document.getElementById("nt_pass").value)||75,validity:document.getElementById("nt_val").value||"1 Year",cert:document.getElementById("nt_cert").value==="true",desc:document.getElementById("nt_desc").value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length};
   DB.trainings.push(t);
   closeModal();renderTrainings();updateBadges();saveDB();toast(`Training "${name}" created`,"success");
+}
+function openAddTrnModalWithEquipment(eqName,eqCat){
+  openAddTrnModal();
+  setTimeout(()=>{
+    const nameField=document.getElementById('nt_name');
+    const catField=document.getElementById('nt_cat');
+    if(nameField)nameField.value=eqName+' Safety Training';
+    if(catField){
+      for(let i=0;i<catField.options.length;i++){
+        if(catField.options[i].text===eqCat){catField.selectedIndex=i;break;}
+      }
+    }
+  },100);
 }
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
@@ -1795,9 +1815,11 @@ function deleteTraining(id){
 /* ============================================================
    EQUIPMENT LIBRARY
 ============================================================ */
+function getAllEquipment(){return[...EQUIPMENT_DATA,...(DB.customEquipment||[])];}
 function renderEquipment(){
-  const cats=["All",...Object.keys(CATEGORIES)];
-  const filtered=EQUIPMENT_DATA.filter(e=>{
+  const allEq=getAllEquipment();
+  const cats=["All",...new Set(allEq.map(e=>e.c))];
+  const filtered=allEq.filter(e=>{
     const mc=equip_filter==="All"||e.c===equip_filter;
     const qs=equip_search.toLowerCase();
     const ms=!qs||e.n.toLowerCase().includes(qs)||e.c.toLowerCase().includes(qs)||e.s.toLowerCase().includes(qs);
@@ -1806,7 +1828,11 @@ function renderEquipment(){
   document.getElementById("view-equipment").innerHTML=`
     <div class="section-header">
       <div class="section-title">Equipment <span>Library</span></div>
-      <span style="font-size:12px;color:var(--muted);">${EQUIPMENT_DATA.length} total items</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:12px;color:var(--muted);align-self:center;">${allEq.length} total items</span>
+        ${isAdmin?`<button class="btn btn-amber" onclick="openAddEquipmentModal()"><span class="mat-ico">add</span> Add Equipment</button>`:""}
+        ${isAdmin?`<button class="btn btn-outline" onclick="switchView('quiz')"><span class="mat-ico">quiz</span> Online Tests</button>`:""}
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search equipment..." oninput="equip_search=this.value;renderEquipment()" value="${equip_search}"></div>
@@ -1816,21 +1842,23 @@ function renderEquipment(){
       ${cats.map(c=>`<button class="chip${equip_filter===c?" active":""}" onclick="equip_filter='${c.replace(/'/g,"\\'")}';renderEquipment()" style="white-space:nowrap;">${c}${c!=="All"?` (${EQUIPMENT_DATA.filter(e=>e.c===c).length})`:""}</button>`).join("")}
     </div>
     <div class="eq-grid">
-      ${filtered.map(e=>{
+      ${filtered.map((e,fi)=>{
         const catInfo=CATEGORIES[e.c]||{color:"#ffb020",icon:"🔧"};
-        return`<div class="eq-card" onclick="openEquipDetail(${EQUIPMENT_DATA.indexOf(e)})">
+        const isCustom=e._isCustom||false;
+        return`<div class="eq-card" onclick="openEquipDetailByData(${fi})">
           <div class="eq-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <span class="eq-tag">${e.c}</span>
-            <span style="font-size:40px;">${e.i}</span>
+            <span style="font-size:40px;">${e.i||"🔧"}</span>
           </div>
           <div class="eq-body">
             <div class="eq-name">${e.n}</div>
             <div class="eq-cat">${e.c} · ${e.loc||"Site"}</div>
             <div class="eq-spec">${e.s}</div>
             <div class="eq-actions">
-              <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();openEquipDetail(${EQUIPMENT_DATA.indexOf(e)})"><span class="mat-ico" style="font-size:11px;">info</span> Details</button>
+              <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();openEquipDetailByData(${fi})"><span class="mat-ico" style="font-size:11px;">info</span> Details</button>
               <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz(resolveQuizCategory('${e.c}'),'${e.n} — Equipment Quiz')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               <button class="btn btn-sm" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="event.stopPropagation();youtubeSearch('${e.n}')" target="_blank"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</button>
+              ${isCustom&&isAdmin?`<button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteCustomEquipment('${e.id}')" title="Delete"><span class="mat-ico" style="font-size:11px;">delete</span></button>`:""}
             </div>
           </div>
         </div>`;
@@ -1880,7 +1908,98 @@ function openEquipDetail(idx){
     </div>
     <div class="modal-foot">
       <button class="btn" style="background:rgba(62,207,142,.15);border:1px solid var(--green);color:var(--green);" onclick="startQuiz(resolveQuizCategory('${e.c}'),'${e.n} Equipment Quiz')"><span class="mat-ico">quiz</span> Take Test</button>
-      <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> Search YouTube</button>
+      ${isAdmin?`<button class="btn btn-amber" onclick="closeModal();setTimeout(()=>openAddTrnModalWithEquipment('${e.n}','${e.c}'),300)"><span class="mat-ico">school</span> Create Training</button>`:""}
+      <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> YouTube</button>
+      <button class="btn btn-outline" onclick="closeModal()">Close</button>
+    </div>
+  `,"800px");
+}
+
+
+/* ============================================================
+   CUSTOM EQUIPMENT MANAGEMENT (Admin Add/Delete)
+============================================================ */
+function openAddEquipmentModal(){
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head">
+      <div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">build</span></div>
+      <h2>Add Equipment</h2>
+      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-section"><div class="form-grid">
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Equipment Name *</label><input class="form-control-sm" id="neq_name" placeholder="e.g. Fire Extinguisher (ABC)"></div>
+        <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="neq_cat">${Object.keys(CATEGORIES).map(c=>`<option>${c}</option>`).join("")}</select></div>
+        <div class="form-group"><label class="form-label-sm">Location</label><input class="form-control-sm" id="neq_loc" placeholder="e.g. All Floors" value="Site"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Specifications *</label><input class="form-control-sm" id="neq_spec" placeholder="e.g. 4kg ABC | 15 bar | Range 3-4m"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Icon (emoji)</label><input class="form-control-sm" id="neq_icon" placeholder="🔧" maxlength="4" value="🔧"></div>
+      </div></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-amber" onclick="saveCustomEquipment()"><span class="mat-ico">save</span> Add Equipment</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
+  `,"640px");
+}
+function saveCustomEquipment(){
+  const name=document.getElementById("neq_name").value.trim();
+  const spec=document.getElementById("neq_spec").value.trim();
+  const cat=document.getElementById("neq_cat").value;
+  if(!name||!spec){toast("Name and Specifications required","error");return;}
+  const eq={id:genId("EQ"),n:name,c:cat,i:document.getElementById("neq_icon").value||"🔧",s:spec,loc:document.getElementById("neq_loc").value||"Site",_isCustom:true};
+  DB.customEquipment.push(eq);
+  closeModal();renderEquipment();updateBadges();saveDB();
+  toast(`Equipment "${name}" added and synced`,"success");
+}
+function deleteCustomEquipment(id){
+  if(!confirm('Delete this equipment permanently?'))return;
+  DB.customEquipment=DB.customEquipment.filter(e=>e.id!==id);
+  renderEquipment();saveDB();toast('Equipment deleted permanently','warning');
+  if(firebaseReady){try{fbDB.collection('customEquipment').doc(id).delete();}catch(e){}}
+}
+function openEquipDetailByData(filteredIdx){
+  const allEq=getAllEquipment();
+  const e=allEq[filteredIdx];if(!e)return;
+  const catInfo=CATEGORIES[e.c]||{color:"#ffb020",icon:"🔧"};
+  const relatedTrn=DB.trainings.filter(t=>t.cat===e.c).slice(0,3);
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head">
+      <div class="modal-ico" style="background:${catInfo.color}22;font-size:24px;">${e.i||"🔧"}</div>
+      <div><h2>${e.n}</h2><span class="badge badge-info">${e.c}</span> <span class="badge badge-amber">${e.loc||"Site"}</span>${e._isCustom?` <span class="badge badge-purple">Custom</span>`:""}</div>
+      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
+    </div>
+    <div class="modal-body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">Technical Specifications</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--sur2);border:1px solid var(--bdr);border-radius:6px;padding:8px;line-height:1.7;">${e.s.split("|").join("<br>")}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">Daily Inspection Checklist</div>
+        <ul style="list-style:none;font-size:12px;display:flex;flex-direction:column;gap:3px;">
+          ${["Check for visible damage, leaks or corrosion","Verify pressure/electrical indicators are normal","Confirm access is clear and signage is visible","Test basic function per daily checklist","Record findings in maintenance log"].map(c=>`<li style="display:flex;gap:6px;"><span style="color:var(--green);font-size:12px;" class="mat-ico">check_circle</span>${c}</li>`).join("")}
+        </ul>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">PPE Required</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          ${["Safety Helmet","Safety Shoes","Safety Gloves","Eye Protection"].map(p=>`<span class="badge badge-warning">${p}</span>`).join("")}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:4px;">Safety Precautions</div>
+        <ul style="list-style:none;font-size:12px;display:flex;flex-direction:column;gap:3px;">
+          ${["Always follow LOTO before maintenance","Ensure proper ventilation","Wear required PPE","Never bypass safety interlocks","Verify de-energization before starting"].map(s=>`<li style="display:flex;gap:6px;"><span style="color:var(--red);font-size:12px;" class="mat-ico">warning</span>${s}</li>`).join("")}
+        </ul>
+      </div>
+      <div style="grid-column:1/-1;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--amber);margin-bottom:6px;">Related Trainings</div>
+        ${relatedTrn.length?relatedTrn.map(t=>`<span class="badge badge-info" style="margin-right:5px;">${t.name}</span>`).join(""):"<span style='font-size:12px;color:var(--muted);'>No specific training assigned</span>"}
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" style="background:rgba(62,207,142,.15);border:1px solid var(--green);color:var(--green);" onclick="startQuiz(resolveQuizCategory('${e.c}'),'${e.n} Equipment Quiz')"><span class="mat-ico">quiz</span> Take Test</button>
+      ${isAdmin?`<button class="btn btn-amber" onclick="closeModal();setTimeout(()=>openAddTrnModalWithEquipment('${e.n}','${e.c}'),300)"><span class="mat-ico">school</span> Create Training</button>`:""}
+      <button class="btn" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="youtubeSearch('${e.n}')"><span class="mat-ico">smart_display</span> YouTube</button>
+      ${e._isCustom&&isAdmin?`<button class="btn btn-sm btn-red" onclick="closeModal();deleteCustomEquipment('${e.id}')"><span class="mat-ico">delete</span> Delete</button>`:""}
       <button class="btn btn-outline" onclick="closeModal()">Close</button>
     </div>
   `,"800px");
@@ -1984,7 +2103,7 @@ function watchVideo(id,ytId){
   renderVideos();
 }
 /* VIDEO → TRAINING → TEST WORKFLOW */
-function completeVideoAndCreateTraining(videoId,videoTitle,videoCat,videoDuration){
+async function completeVideoAndCreateTraining(videoId,videoTitle,videoCat,videoDuration){
   if(!currentUser){toast("Login required","error");return;}
   const v=DB.videos.find(x=>x.id===videoId);
   if(!v){toast("Video not found","error");return;}
@@ -2069,14 +2188,18 @@ function openAddVideoModal(){
   `,"640px");
 }
 function previewVideoId(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById("videoPreviewWrap");const frame=document.getElementById("videoPreviewFrame");if(ytId&&wrap&&frame){wrap.style.display="block";frame.src=`https://www.youtube.com/embed/${ytId}?rel=0`;}else if(wrap){wrap.style.display="none";}}
-function saveVideo(){
+async function saveVideo(){
   const title=document.getElementById("nv_title").value.trim();
   const urlVal=document.getElementById("nv_url").value.trim();
   if(!title||!urlVal){toast("Title and URL required","error");return;}
   const ytId=extractYoutubeId(urlVal);
   const fullUrl=ytId?`https://www.youtube.com/watch?v=${ytId}`:urlVal;
-  DB.videos.push({id:genId("VID"),title,cat:document.getElementById("nv_cat").value,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:document.getElementById("nv_dur").value||"--",views:0,likes:[],added:new Date().toISOString().split("T")[0]});
-  closeModal();renderVideos();saveDB();toast("Video added to library","success");
+  DB.videos.push({id:genId("VID"),title,cat:document.getElementById("nv_cat").value,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:document.getElementById("nv_dur").value||"--",views:0,likes:[],completedBy:[],added:new Date().toISOString().split("T")[0]});
+  closeModal();renderVideos();saveDB();
+  // Explicitly wait for Firebase sync so video appears on other devices
+  if(firebaseReady){
+    try{await fbSaveCollection('videos',DB.videos,'id');toast("Video saved and synced to cloud","success");}catch(e){toast("Video saved locally (cloud sync pending)","success");}
+  }else{toast("Video added to library","success");}
 }
 function deleteVideo(id){if(!confirm('Delete this video permanently?'))return;DB.videos=DB.videos.filter(v=>v.id!==id);renderVideos();saveDB();toast('Video deleted permanently','warning');if(firebaseReady){try{fbDB.collection('videos').doc(id).delete();}catch(e){}}}
 
@@ -2170,7 +2293,7 @@ function deleteSOP(id){if(!confirm('Delete this SOP permanently?'))return;DB.sop
 function renderQuizMenu(){
   const cats=TRAINING_CATS;
   document.getElementById("view-quiz").innerHTML=`
-    <div class="section-header"><div class="section-title">Online <span>Tests</span></div></div>
+    <div class="section-header"><div class="section-title">Online <span>Tests</span></div>${isAdmin?`<button class="btn btn-amber" onclick="openAddCustomTestModal()"><span class="mat-ico">add</span> Create Test</button>`:""}</div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12.5px;display:flex;align-items:center;gap:10px;">
       <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
       <div><b>Certificate Policy:</b> Score ≥ ${DB.settings.minCertScore||70}% earns a certificate. Questions are randomized every attempt.</div>
@@ -2191,6 +2314,47 @@ function renderQuizMenu(){
       }).join("")}
     </div>
   `;
+}
+function openAddCustomTestModal(){
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head">
+      <div class="modal-ico" style="background:rgba(240,136,62,.15)"><span class="mat-ico" style="color:var(--orange);font-size:22px;">quiz</span></div>
+      <h2>Create Custom Test</h2>
+      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-section"><div class="form-grid">
+        <div class="form-group"><label class="form-label-sm">Test Category *</label><select class="form-control-sm" id="nqt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
+        <div class="form-group"><label class="form-label-sm">Test Name</label><input class="form-control-sm" id="nqt_name" placeholder="e.g. Advanced Fire Safety"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Questions (one per line: Question | Option1 | Option2 | Option3 | CorrectOption)</label>
+        <textarea class="form-control-sm" id="nqt_qs" rows="8" placeholder="What is PASS technique?|Pull pin|Aim at base|Squeeze handle|Squeeze handle
+What type of extinguisher for electrical fire?|ABC|CO2|Water|CO2" style="resize:vertical;font-family:'JetBrains Mono',monospace;font-size:11px;"></textarea></div>
+        <div style="grid-column:1/-1;font-size:11px;color:var(--muted);background:var(--sur2);padding:8px;border-radius:6px;">Format: Question | Opt1 | Opt2 | Opt3 | CorrectAnswer (one question per line). The correct answer must match one of the options exactly.</div>
+      </div></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-amber" onclick="saveCustomTest()"><span class="mat-ico">save</span> Save Test</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
+  `,"640px");
+}
+function saveCustomTest(){
+  const cat=document.getElementById("nqt_cat").value;
+  const testName=document.getElementById("nqt_name").value.trim()||cat+" Test";
+  const qsRaw=document.getElementById("nqt_qs").value.trim();
+  if(!qsRaw){toast("Add at least one question","error");return;}
+  const lines=qsRaw.split(String.fromCharCode(10)).map(l=>l.trim()).filter(l=>l);
+  const newQs=[];
+  for(const line of lines){
+    const parts=line.split("|").map(p=>p.trim());
+    if(parts.length>=5){
+      const correctIdx=parts.slice(1,4).indexOf(parts[4]);
+      if(correctIdx>=0){newQs.push({q:parts[0],o:[parts[1],parts[2],parts[3]],a:correctIdx,customFor:testName});}
+    }
+  }
+  if(!newQs.length){toast("No valid questions found. Check format.","error");return;}
+  if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
+  QUESTION_BANK[cat].push(...newQs);
+  closeModal();renderQuizMenu();saveDB();
+  toast(`${newQs.length} question(s) added to ${cat} test bank`,"success");
 }
 function startQuiz(category,trainingName){
   if(!currentUser){toast("Please login first","error");return;}
@@ -2477,8 +2641,13 @@ function renderReports(){
       ${reportCard("bar_chart","Monthly Report","Month-wise stats","#3ea0e8","exportMonthlyReport()")}
     </div>
     <div class="chart-card" style="margin-bottom:14px;">
-      <div class="chart-card-title"><span class="dot"></span>Training Completion Overview</div>
+      <div class="collapsible-header" onclick="toggleCollapsible('rptCompBody',this)">
+        <div class="chart-card-title" style="margin-bottom:0;"><span class="dot"></span>Training Completion Overview</div>
+        <span class="mat-ico collapsible-arrow">chevron_right</span>
+      </div>
+      <div class="collapsible-body" id="rptCompBody">
       <canvas id="reportChart" height="120"></canvas>
+      </div><!-- end collapsible-body -->
     </div>
     <div class="table-wrap">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--sur2);border-bottom:1px solid var(--bdr);flex-wrap:wrap;gap:8px;">
@@ -2718,7 +2887,7 @@ function renderSettings(){
           <div>Certificates: <b style="color:var(--txt);">${DB.certificates.length}</b></div>
           <div>Videos: <b style="color:var(--txt);">${DB.videos.length}</b></div>
           <div>SOPs: <b style="color:var(--txt);">${DB.sops.length}</b></div>
-          <div>Equipment: <b style="color:var(--txt);">${EQUIPMENT_DATA.length}</b></div>
+          <div>Equipment: <b style="color:var(--txt);">${getAllEquipment().length}</b></div>
           <div>Min Cert Score: <b style="color:var(--amber);">${DB.settings.minCertScore||70}%</b></div>
         </div>
       </div>`:""}
@@ -2985,6 +3154,17 @@ function exportFullStatusReport(){
 }
 
 /* ============================================================
+   COLLAPSIBLE SECTIONS
+============================================================ */
+function toggleCollapsible(bodyId,headerEl){
+  const body=document.getElementById(bodyId);
+  const arrow=headerEl.querySelector(".collapsible-arrow");
+  if(!body)return;
+  body.classList.toggle("open");
+  if(arrow)arrow.classList.toggle("open");
+}
+
+/* ============================================================
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
@@ -3003,6 +3183,7 @@ function saveDB(){
     fbSaveCollection('notifications',DB.notifications,'id');
     fbSaveCollection('videos',DB.videos,'id');
     fbSaveCollection('sops',DB.sops,'id');
+    fbSaveCollection('customEquipment',DB.customEquipment,'id');
     fbSaveSettings();
   }
 }
@@ -3018,6 +3199,7 @@ function loadDBFromLocal(){
     if(saved.videos&&Array.isArray(saved.videos))DB.videos=saved.videos;
     if(saved.sops&&Array.isArray(saved.sops))DB.sops=saved.sops;
     if(saved.notifications&&Array.isArray(saved.notifications))DB.notifications=saved.notifications;
+    if(saved.customEquipment&&Array.isArray(saved.customEquipment))DB.customEquipment=saved.customEquipment;
     if(saved.settings&&typeof saved.settings==="object")Object.assign(DB.settings,saved.settings);
     if(saved.admins&&Array.isArray(saved.admins)&&saved.admins.length>0){
       DB.admins=saved.admins;
@@ -3028,13 +3210,14 @@ function loadDBFromLocal(){
 
 async function loadDBFromFirestore(){
   try{
-    const [empSnap,trnSnap,testSnap,certSnap,vidSnap,sopSnap,notifSnap,adminSnap,setSnap]=await Promise.all([
+    const [empSnap,trnSnap,testSnap,certSnap,vidSnap,sopSnap,custEquipSnap,notifSnap,adminSnap,setSnap]=await Promise.all([
       fbDB.collection('employees').get(),
       fbDB.collection('trainings').get(),
       fbDB.collection('testResults').get(),
       fbDB.collection('certificates').get(),
       fbDB.collection('videos').get(),
       fbDB.collection('sops').get(),
+      fbDB.collection('customEquipment').get(),
       fbDB.collection('notifications').orderBy('id','desc').get(),
       fbDB.collection('admins').get(),
       fbDB.collection('config').doc('settings').get()
@@ -3045,6 +3228,7 @@ async function loadDBFromFirestore(){
     if(certSnap.size>0)DB.certificates=certSnap.docs.map(d=>d.data());
     if(vidSnap.size>0)DB.videos=vidSnap.docs.map(d=>d.data());
     if(sopSnap.size>0)DB.sops=sopSnap.docs.map(d=>d.data());
+    if(custEquipSnap.size>0)DB.customEquipment=custEquipSnap.docs.map(d=>d.data());
     if(notifSnap.size>0)DB.notifications=notifSnap.docs.map(d=>d.data());
     if(adminSnap.size>0)DB.admins=adminSnap.docs.map(d=>d.data());
     if(setSnap.exists)Object.assign(DB.settings,setSnap.data());
@@ -3070,7 +3254,7 @@ async function resetDBToDefault(){
   localStorage.removeItem(DB_STORAGE_KEY);
   if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
     try{
-      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config'];
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','customEquipment'];
       for(const c of cols){
         const snap=await fbDB.collection(c).get();
         const batch=fbDB.batch();
