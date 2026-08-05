@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
@@ -1640,9 +1640,27 @@ function viewEmpHistory(id){
 }
 function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
 function deleteEmp(id){
-  if(!confirm("Delete this employee? This cannot be undone."))return;
+  if(!confirm("Delete this employee permanently? All their training records, test results, and certificates will also be deleted. This cannot be undone."))return;
+  // 1. Remove from employees list
   DB.employees=DB.employees.filter(e=>e.id!==id);
-  renderEmployees();updateBadges();saveDB();toast("Employee deleted","warning");
+  // 2. Remove employee from all training enrolled/completed lists
+  DB.trainings.forEach(t=>{
+    if(t.enrolled) t.enrolled=t.enrolled.filter(eid=>eid!==id);
+    if(t.completed) t.completed=t.completed.filter(eid=>eid!==id);
+    if(t.completedDates) delete t.completedDates[id];
+  });
+  // 3. Remove all test results for this employee
+  DB.testResults=DB.testResults.filter(r=>r.empId!==id);
+  // 4. Remove all certificates for this employee
+  DB.certificates=DB.certificates.filter(c=>c.empId!==id);
+  // 5. Remove from video completedBy lists
+  DB.videos.forEach(v=>{
+    if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);
+  });
+  // 6. Remove any notifications related to this employee
+  DB.notifications=DB.notifications.filter(n=>!n.msg||!n.msg.includes(id));
+  renderEmployees();renderTrainings();renderCertificates();updateBadges();saveDB();
+  toast("Employee permanently deleted from all records","warning");
 }
 function exportEmpExcel(){
   const ws=XLSX.utils.json_to_sheet(DB.employees.map(e=>({
