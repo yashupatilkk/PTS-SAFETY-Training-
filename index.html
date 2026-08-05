@@ -941,40 +941,42 @@ async function forceSyncFromCloud(){
   }
 }
 
-// Auto-sync: Admin pushes every 60s, Employees pull every 30s
+// Auto-sync: BOTH admin and employee PUSH to cloud
+// Pull from Firestore ONLY on initial load and tab focus (never on timer)
 function startAutoSync(){
   if(!firebaseReady)return;
-  const interval=isAdmin?60000:30000;
+  // Push current data to cloud every 30 seconds
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
-      if(isAdmin){
-        // Admin: push current data to cloud
-        await Promise.all([
-          fbSaveCollection('employees',DB.employees,'id'),
-          fbSaveCollection('trainings',DB.trainings,'id'),
-          fbSaveCollection('videos',DB.videos,'id'),
-          fbSaveCollection('sops',DB.sops,'id'),
-          fbSaveCollection('testResults',DB.testResults,'id'),
-          fbSaveCollection('certificates',DB.certificates,'num'),
-          fbSaveCollection('notifications',DB.notifications,'id'),
-          fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
-          fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
-          fbSaveSettings()
-        ]);
-        _lastSyncTime=Date.now();
-        updateSyncUI('idle');
-      }else{
-        // Employee: pull latest from cloud
+      await Promise.all([
+        fbSaveCollection('employees',DB.employees,'id'),
+        fbSaveCollection('trainings',DB.trainings,'id'),
+        fbSaveCollection('videos',DB.videos,'id'),
+        fbSaveCollection('sops',DB.sops,'id'),
+        fbSaveCollection('testResults',DB.testResults,'id'),
+        fbSaveCollection('certificates',DB.certificates,'num'),
+        fbSaveCollection('notifications',DB.notifications,'id'),
+        fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+        fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+        fbSaveSettings()
+      ]);
+      _lastSyncTime=Date.now();
+      updateSyncUI('idle');
+    }catch(e){console.warn('Auto-sync error:',e);}
+  },30000);
+  // When user returns to the tab, pull latest from cloud (to get admin changes)
+  document.addEventListener('visibilitychange',async function(){
+    if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady){
+      try{
         await loadDBFromFirestore();
         saveDB();
+        if(typeof renderAll==='function')renderAll();
         _lastSyncTime=Date.now();
         updateSyncUI('idle');
-        // Refresh current view if data changed
-        if(typeof renderAll==='function')renderAll();
-      }
-    }catch(e){console.warn('Auto-sync error:',e);}
-  },interval);
+      }catch(e){console.warn('Visibility sync error:',e);}
+    }
+  });
 }
 
 async function seedFirestore(){
