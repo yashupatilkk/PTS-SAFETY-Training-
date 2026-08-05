@@ -1640,44 +1640,41 @@ function viewEmpHistory(id){
 }
 function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
 async function deleteEmp(id){
-  if(!confirm("Delete this employee PERMANENTLY? All their training records, test results, certificates, and Firebase data will be erased. This cannot be undone."))return;
-  // 1. Remove from local employees list
+  if(!confirm("Delete this employee PERMANENTLY? All data will be erased from everywhere. This cannot be undone."))return;
+
+  // === STEP 1: Collect IDs to delete from Firebase BEFORE touching local arrays ===
+  const testResultIds=DB.testResults.filter(r=>r.empId===id).map(r=>r.id);
+  const certNums=DB.certificates.filter(c=>c.empId===id).map(c=>c.num);
+
+  // === STEP 2: Clean ALL local data first ===
   DB.employees=DB.employees.filter(e=>e.id!==id);
-  // 2. Remove employee from all training enrolled/completed lists
   DB.trainings.forEach(t=>{
     if(t.enrolled) t.enrolled=t.enrolled.filter(eid=>eid!==id);
     if(t.completed) t.completed=t.completed.filter(eid=>eid!==id);
     if(t.completedDates) delete t.completedDates[id];
   });
-  // 3. Remove all test results for this employee (local)
   DB.testResults=DB.testResults.filter(r=>r.empId!==id);
-  // 4. Remove all certificates for this employee (local)
   DB.certificates=DB.certificates.filter(c=>c.empId!==id);
-  // 5. Remove from video completedBy lists
-  DB.videos.forEach(v=>{
-    if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);
-  });
-  // 6. Remove any notifications related to this employee
+  DB.videos.forEach(v=>{if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);});
   DB.notifications=DB.notifications.filter(n=>!n.msg||!n.msg.includes(id));
-  // 7. PERMANENTLY delete from Firebase Firestore (not just local)
+
+  // === STEP 3: Save cleaned local data immediately (localStorage + push to Firebase) ===
+  saveDB();
+
+  // === STEP 4: Delete docs from Firebase one-by-one (no where queries = no index issues) ===
   if(firebaseReady){
-    try{
-      const batch=fbDB.batch();
-      // Delete employee doc
-      batch.delete(fbDB.collection('employees').doc(String(id)));
-      // Delete their test result docs from Firestore
-      const testSnap=await fbDB.collection('testResults').where('empId','==',id).get();
-      testSnap.forEach(d=>batch.delete(d.ref));
-      // Delete their certificate docs from Firestore
-      const certSnap=await fbDB.collection('certificates').where('empId','==',id).get();
-      certSnap.forEach(d=>batch.delete(d.ref));
-      await batch.commit();
-      console.log('Firebase: permanently deleted employee '+id+' and all linked docs');
-    }catch(e){console.warn('Firebase delete error:',e);}
+    try{await fbDB.collection('employees').doc(String(id)).delete();}catch(e){console.warn('FB del employee:',e);}
+    for(const tid of testResultIds){
+      try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){console.warn('FB del testResult:',e);}
+    }
+    for(const cnum of certNums){
+      try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){console.warn('FB del cert:',e);}
+    }
   }
-  // 8. Save updated local data + re-render everything
-  renderEmployees();renderTrainings();renderCertificates();renderQuizMenu();updateBadges();saveDB();
-  toast("Employee PERMANENTLY deleted from all records and cloud","warning");
+
+  // === STEP 5: Re-render everything ===
+  renderEmployees();renderTrainings();renderCertificates();renderQuizMenu();updateBadges();
+  toast("Employee PERMANENTLY deleted","warning");
 }
 function exportEmpExcel(){
   const ws=XLSX.utils.json_to_sheet(DB.employees.map(e=>({
