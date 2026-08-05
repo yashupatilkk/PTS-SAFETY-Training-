@@ -1993,10 +1993,22 @@ function confirmAssignAllDept(trnId){
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
   updateBadges();renderTrainings();saveDB();
 }
-function deleteTraining(id){
-  if(!confirm("Delete this training?"))return;
+async function deleteTraining(id){
+  if(!confirm("Delete this training PERMANENTLY? Linked test results and certificates will also be removed."))return;
+  const trn=DB.trainings.find(t=>t.id===id);
+  const linkedTestIds=trn?DB.testResults.filter(r=>r.training===trn.name).map(r=>r.id):[];
+  const linkedCertNums=trn?DB.certificates.filter(c=>c.training===trn.name).map(c=>c.num):[];
   DB.trainings=DB.trainings.filter(t=>t.id!==id);
-  closeModal();renderTrainings();updateBadges();saveDB();toast("Training deleted","warning");
+  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);});
+  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);});
+  saveDB();
+  if(firebaseReady){
+    try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){console.warn('FB del training:',e);}
+    for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
+    for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
+  }
+  closeModal();renderTrainings();renderCertificates();updateBadges();
+  toast("Training PERMANENTLY deleted","warning");
 }
 
 /* ============================================================
@@ -2339,7 +2351,10 @@ function openAddVideoModal(){
   `,"640px");
 }
 function previewVideoId(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById("videoPreviewWrap");const frame=document.getElementById("videoPreviewFrame");if(ytId&&wrap&&frame){wrap.style.display="block";frame.src=`https://www.youtube.com/embed/${ytId}?rel=0`;}else if(wrap){wrap.style.display="none";}}
+let _videoSaving=false;
 function saveVideo(){
+  if(_videoSaving)return;
+  _videoSaving=true;
   const title=document.getElementById("nv_title").value.trim();
   const urlVal=document.getElementById("nv_url").value.trim();
   if(!title||!urlVal){toast("Title and URL required","error");return;}
@@ -2359,9 +2374,57 @@ function saveVideo(){
     const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title};
     DB.trainings.push(trn);
   }
+  _videoSaving=false;
   closeModal();renderVideos();renderTrainings();updateBadges();saveDB();toast("Video added & Training auto-created: "+trnName,"success");
 }
-function deleteVideo(id){if(!confirm("Delete this video and its linked training?"))return;DB.videos=DB.videos.filter(v=>v.id!==id);DB.trainings=DB.trainings.filter(t=>t.fromVideo!==id);renderVideos();renderTrainings();updateBadges();saveDB();toast("Video and linked training deleted","warning");}
+async function deleteVideo(id){
+  if(!confirm("Delete this video PERMANENTLY? Linked training, test results, and certificates will also be removed from everywhere."))return;
+
+  // STEP 1: Collect IDs to delete from Firebase BEFORE touching local arrays
+  const linkedTrnIds=DB.trainings.filter(t=>t.fromVideo===id).map(t=>t.id);
+  const linkedTestIds=[];
+  const linkedCertNums=[];
+  linkedTrnIds.forEach(trnId=>{
+    const trn=DB.trainings.find(t=>t.id===trnId);
+    if(!trn)return;
+    (trn.enrolled||[]).forEach(eid=>{
+      DB.testResults.filter(r=>r.empId===eid&&r.training===trn.name).forEach(r=>{
+        if(!linkedTestIds.includes(r.id))linkedTestIds.push(r.id);
+      });
+      DB.certificates.filter(c=>c.empId===eid&&c.training===trn.name).forEach(c=>{
+        if(!linkedCertNums.includes(c.num))linkedCertNums.push(c.num);
+      });
+    });
+  });
+
+  // STEP 2: Clean all local data
+  DB.videos=DB.videos.filter(v=>v.id!==id);
+  DB.trainings=DB.trainings.filter(t=>t.fromVideo!==id);
+  // Also remove test results and certs linked to the deleted training
+  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);});
+  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);});
+
+  // STEP 3: Save cleaned local data first
+  saveDB();
+
+  // STEP 4: Delete from Firebase one-by-one
+  if(firebaseReady){
+    try{await fbDB.collection('videos').doc(String(id)).delete();}catch(e){console.warn('FB del video:',e);}
+    for(const tid of linkedTrnIds){
+      try{await fbDB.collection('trainings').doc(String(tid)).delete();}catch(e){console.warn('FB del training:',e);}
+    }
+    for(const tid of linkedTestIds){
+      try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){console.warn('FB del testResult:',e);}
+    }
+    for(const cnum of linkedCertNums){
+      try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){console.warn('FB del cert:',e);}
+    }
+  }
+
+  // STEP 5: Re-render
+  renderVideos();renderTrainings();renderCertificates();updateBadges();
+  toast("Video PERMANENTLY deleted from all records and cloud","warning");
+}
 
 /* ============================================================
    SOP LIBRARY
@@ -2445,7 +2508,13 @@ function saveSOP(){
   DB.sops.push({id:genId("SOP"),title,cat:document.getElementById("ns_cat").value,version:document.getElementById("ns_ver").value||"v1.0",updated:new Date().toISOString().split("T")[0],pages:parseInt(document.getElementById("ns_pages").value)||1,file:"",desc:document.getElementById("ns_desc").value,keyPoints:points,hazards:document.getElementById("ns_haz").value,emergency:document.getElementById("ns_emg").value,reviewedBy:document.getElementById("ns_rev").value});
   closeModal();renderSOP();saveDB();toast("SOP added","success");
 }
-function deleteSOP(id){if(!confirm("Delete this SOP?"))return;DB.sops=DB.sops.filter(s=>s.id!==id);renderSOP();saveDB();toast("SOP deleted","warning");}
+async function deleteSOP(id){
+  if(!confirm("Delete this SOP PERMANENTLY?"))return;
+  DB.sops=DB.sops.filter(s=>s.id!==id);
+  saveDB();
+  if(firebaseReady){try{await fbDB.collection('sops').doc(String(id)).delete();}catch(e){console.warn('FB del SOP:',e);}}
+  renderSOP();updateBadges();toast("SOP PERMANENTLY deleted","warning");
+}
 
 /* ============================================================
    QUIZ / TESTS
