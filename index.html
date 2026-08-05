@@ -941,14 +941,13 @@ async function forceSyncFromCloud(){
   }
 }
 
-// Auto-sync: BOTH admin and employee PUSH to cloud
-// Pull from Firestore ONLY on initial load and tab focus (never on timer)
+// Auto-sync: PUSH to cloud + Admin pulls employee results
 function startAutoSync(){
   if(!firebaseReady)return;
-  // Push current data to cloud every 30 seconds
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
+      // STEP 1: Push all local data to cloud
       await Promise.all([
         fbSaveCollection('employees',DB.employees,'id'),
         fbSaveCollection('trainings',DB.trainings,'id'),
@@ -961,11 +960,31 @@ function startAutoSync(){
         fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
         fbSaveSettings()
       ]);
+      // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
+      if(isAdmin){
+        try{
+          const fbTestSnap=await fbDB.collection('testResults').get();
+          const fbTests=fbTestSnap.docs.map(d=>d.data());
+          let newTests=0;
+          fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
+          const fbCertSnap=await fbDB.collection('certificates').get();
+          const fbCerts=fbCertSnap.docs.map(d=>d.data());
+          let newCerts=0;
+          fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
+          // Reconcile training completed arrays from all testResults (source of truth)
+          const trainingsUpdated=reconcileTrainingsFromResults()>0;
+          // Save merged data to localStorage (don't re-push to avoid loop)
+          if(newTests||newCerts||trainingsUpdated){
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            if(typeof renderAll==='function')renderAll();
+          }
+        }catch(e){console.warn('Admin pull merge error:',e);}
+      }
       _lastSyncTime=Date.now();
       updateSyncUI('idle');
     }catch(e){console.warn('Auto-sync error:',e);}
   },30000);
-  // When user returns to the tab, pull latest from cloud (to get admin changes)
+  // When user returns to the tab, pull latest from cloud
   document.addEventListener('visibilitychange',async function(){
     if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady){
       try{
@@ -1252,7 +1271,11 @@ function renderDashboard(){
   const total=DB.employees.length;
   const totalTrn=DB.trainings.length;
   const completed=DB.testResults.filter(r=>r.pass).length;
-  const pending=DB.trainings.reduce((s,t)=>s+(t.enrolled||[]).length-(t.completed||[]).length,0);
+  const pending=DB.trainings.reduce((s,t)=>{
+    const enrolled=(t.enrolled||[]);
+    const passed=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
+    return s+enrolled.filter(eid=>!passed.has(eid)).length;
+  },0);
   const failed=DB.testResults.filter(r=>!r.pass).length;
   const avgScore=DB.testResults.length?Math.round(DB.testResults.reduce((s,r)=>s+r.score,0)/DB.testResults.length):0;
   const certCount=DB.certificates.length;
@@ -1348,7 +1371,10 @@ function renderEmpDashboard(){
   const myFailed=myResults.filter(r=>!r.pass).length;
   const myCerts=DB.certificates.filter(c=>c.empId===empId).length;
   const myAvg=myResults.length?Math.round(myResults.reduce((s,r)=>s+r.score,0)/myResults.length):0;
-  const myPending=myTrns.filter(t=>!(t.completed||[]).includes(empId)).length;
+  const myPending=myTrns.filter(t=>{
+    const hasPass=DB.testResults.find(r=>r.empId===empId&&r.training===t.name&&r.pass);
+    return !hasPass;
+  }).length;
   const assignedTrns=myTrns.filter(t=>(t.enrolled||[]).includes(empId));
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
@@ -1385,8 +1411,9 @@ function renderEmpDashboard(){
       <div class="chart-card-title" style="margin-bottom:10px;font-family:'Oswald',sans-serif;font-size:16px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>📋 Trainings Assigned to You (${assignedTrns.length})</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
         ${assignedTrns.map(t=>{
-          const done=(t.completed||[]).includes(empId);
-          const myResult=myResults.filter(r=>r.training===t.name).sort((a,b)=>b.score-a.score)[0];
+          const myPassResult=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+          const done=!!myPassResult||(t.completed||[]).includes(empId);
+          const myResult=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
           return`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;border-left:4px solid ${done?"var(--green)":"var(--amber)"};">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <span style="font-size:22px;">${CATEGORIES[t.cat]?.icon||"📚"}</span>
@@ -1711,7 +1738,8 @@ function renderTrainings(){
       ${filtered.map(t=>{
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
         const enrolledCount=(t.enrolled||[]).length;
-        const completedCount=(t.completed||[]).length;
+        const completedFromResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
+        const completedCount=Math.max((t.completed||[]).length,completedFromResults.size);
         const pct=enrolledCount?Math.round(completedCount/enrolledCount*100):0;
         return`<div class="training-card" onclick="openTrainingDetail('${t.id}')">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
@@ -1752,8 +1780,9 @@ function renderEmpTrainings(){
     <div class="training-cards">
       ${myTrns.map(t=>{
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
-        const done=(t.completed||[]).includes(empId);
-        const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
+        const myPassRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name&&r.pass);
+          const done=myPassRes.length>0||(t.completed||[]).includes(empId);
+          const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
         const isVideoTraining=!!t.fromVideo;
         const videoData=isVideoTraining?DB.videos.find(v=>v.id===t.fromVideo):null;
         const videoDone=videoData&&(videoData.completedBy||[]).includes(empId);
@@ -1925,9 +1954,12 @@ function openTrainingDetail(id){
       ${enrolledEmps.length?`<div class="table-wrap"><table>
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
-          const done=(t.completed||[]).includes(e.id);
-          const completedDate=(t.completedDates||{})[e.id];
-          const result=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
+          const bestResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+          const anyResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
+          const doneFromResult=!!bestResult;
+          const done=doneFromResult||(t.completed||[]).includes(e.id);
+          const completedDate=bestResult?bestResult.date:((t.completedDates||{})[e.id]||"");
+          const result=bestResult||anyResult;
           const cert=DB.certificates.find(c=>c.empId===e.id&&c.training===t.name);
           return`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${e.id}</td>
@@ -1996,21 +2028,31 @@ function confirmAssignAllDept(trnId){
   updateBadges();renderTrainings();saveDB();
 }
 async function deleteTraining(id){
-  if(!confirm("Delete this training PERMANENTLY? Linked test results and certificates will also be removed."))return;
+  if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
   const trn=DB.trainings.find(t=>t.id===id);
-  const linkedTestIds=trn?DB.testResults.filter(r=>r.training===trn.name).map(r=>r.id):[];
-  const linkedCertNums=trn?DB.certificates.filter(c=>c.training===trn.name).map(c=>c.num):[];
+  if(!trn)return;
+  // Collect IDs before cleaning
+  const linkedTestIds=DB.testResults.filter(r=>r.training===trn.name).map(r=>r.id);
+  const linkedCertNums=DB.certificates.filter(c=>c.training===trn.name).map(c=>c.num);
+  const linkedVideoId=trn.fromVideo||null;
+  // Clean local data
   DB.trainings=DB.trainings.filter(t=>t.id!==id);
   linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);});
   linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);});
+  // Also delete the linked video so it doesn't re-create the training
+  if(linkedVideoId){
+    DB.videos=DB.videos.filter(v=>v.id!==linkedVideoId);
+  }
   saveDB();
+  // Delete from Firebase
   if(firebaseReady){
-    try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){console.warn('FB del training:',e);}
+    try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
     for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
     for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
+    if(linkedVideoId){try{await fbDB.collection('videos').doc(String(linkedVideoId)).delete();}catch(e){}}
   }
-  closeModal();renderTrainings();renderCertificates();updateBadges();
-  toast("Training PERMANENTLY deleted","warning");
+  closeModal();renderTrainings();renderVideos();renderCertificates();updateBadges();
+  toast("Training + linked video PERMANENTLY deleted","warning");
 }
 
 /* ============================================================
@@ -2930,7 +2972,8 @@ function exportFailReport(){
 function exportPendingReport(){
   const pending=[];
   DB.trainings.forEach(t=>(t.enrolled||[]).forEach(eid=>{
-    if(!(t.completed||[]).includes(eid)){const e=DB.employees.find(x=>x.id===eid);if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});}
+    const hasPass=DB.testResults.find(r=>r.empId===eid&&r.training===t.name&&r.pass);
+    if(!hasPass&&!(t.completed||[]).includes(eid)){const e=DB.employees.find(x=>x.id===eid);if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});}
   }));
   const ws=XLSX.utils.json_to_sheet(pending.length?pending:[{"Note":"No pending trainings"}]);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Pending");
@@ -3200,8 +3243,9 @@ function renderTrainStatus(){
   DB.trainings.forEach(trn=>{
     (trn.enrolled||[]).forEach(empId=>{
       const emp=DB.employees.find(e=>e.id===empId);if(!emp)return;
-      const done=(trn.completed||[]).includes(empId);
-      const completedDate=(trn.completedDates||{})[empId]||"";
+      const passResult=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+      const done=!!passResult||(trn.completed||[]).includes(empId);
+      const completedDate=passResult?passResult.date:((trn.completedDates||{})[empId]||"");
       const result=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
       const cert=DB.certificates.find(c=>c.empId===empId&&c.training===trn.name)||null;
       rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:""});
@@ -3328,8 +3372,9 @@ function exportFullStatusReport(){
   DB.trainings.forEach(trn=>{
     (trn.enrolled||[]).forEach(empId=>{
       const emp=DB.employees.find(e=>e.id===empId);if(!emp)return;
-      const done=(trn.completed||[]).includes(empId);
-      const completedDate=(trn.completedDates||{})[empId]||"";
+      const passResult=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+      const done=!!passResult||(trn.completed||[]).includes(empId);
+      const completedDate=passResult?passResult.date:((trn.completedDates||{})[empId]||"");
       const result=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
       const cert=DB.certificates.find(c=>c.empId===empId&&c.training===trn.name)||null;
       rows.push({"Employee ID":empId,"Employee Name":emp.name,"Department":emp.dept,"Designation":emp.desig||"","Training Name":trn.name,"Category":trn.cat,"Cert Required":trn.cert?"Yes":"No","Pass Mark (%)":trn.passing||70,"Score (%)":result?result.score:"Not Taken","Correct":result?result.correct:"","Wrong":result?result.wrong:"","Total Questions":result?result.total:"","Attempts":DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,"Result":result?(result.pass?"PASS":"FAIL"):"Pending","Completion Date":completedDate||"","Certificate No":cert?cert.num:"","Certificate Issued":cert?cert.issued:"","Certificate Expiry":cert?cert.expiry:""});
@@ -3439,6 +3484,31 @@ function loadDBFromLocal(){
   }catch(e){console.warn("Local load failed:",e);return false;}
 }
 
+/* Reconcile: rebuild every training's completed/completedDates from testResults (source of truth) */
+function reconcileTrainingsFromResults(){
+  let updated=0;
+  DB.trainings.forEach(trn=>{
+    if(!trn.completed)trn.completed=[];
+    if(!trn.completedDates)trn.completedDates={};
+    // Find ALL passing test results for this training
+    const passResults=DB.testResults.filter(r=>r.pass&&r.training===trn.name);
+    passResults.forEach(r=>{
+      if(!trn.completed.includes(r.empId)){
+        trn.completed.push(r.empId);
+        trn.completedDates[r.empId]=r.date;
+        updated++;
+      }
+    });
+    // If an empId in completed has NO passing test result, remove it (was deleted/failed)
+    const validIds=new Set(passResults.map(r=>r.empId));
+    const beforeLen=trn.completed.length;
+    trn.completed=trn.completed.filter(eid=>validIds.has(eid));
+    if(trn.completed.length!==beforeLen)updated++;
+  });
+  if(updated)console.log('Reconciled '+updated+' training completions from testResults');
+  return updated;
+}
+
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
@@ -3458,6 +3528,8 @@ async function loadDBFromFirestore(){
     const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
     // Load settings separately (it's a single doc, not a collection)
     try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');}
+    // CRITICAL: Rebuild completed arrays from testResults (source of truth)
+    reconcileTrainingsFromResults();
     console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
     return true; // Always return true so firebaseReady stays ON
   }catch(e){
@@ -3469,6 +3541,8 @@ async function loadDBFromFirestore(){
 function loadDB(){
   // Synchronous: load from localStorage for immediate use
   loadDBFromLocal();
+  // Rebuild completed arrays from testResults (source of truth)
+  reconcileTrainingsFromResults();
   // Always ensure defaults exist
   if(!DB.admins.find(a=>a.username==="admin")){
     DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
