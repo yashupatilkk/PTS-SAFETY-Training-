@@ -985,8 +985,9 @@ function startAutoSync(){
     }catch(e){console.warn('Auto-sync error:',e);}
   },30000);
   // When user returns to the tab, pull latest from cloud
+  // But skip if a delete just happened (within 10s) to prevent pulling back deleted items
   document.addEventListener('visibilitychange',async function(){
-    if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady){
+    if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&(Date.now()-_lastDeleteTime)>10000){
       try{
         await loadDBFromFirestore();
         saveDB();
@@ -1675,7 +1676,7 @@ async function deleteEmp(id){
   const testResultIds=DB.testResults.filter(r=>r.empId===id).map(r=>r.id);
   const certNums=DB.certificates.filter(c=>c.empId===id).map(c=>c.num);
 
-  // === STEP 2: Clean ALL local data first ===
+  // === STEP 2: Clean ALL local data ===
   DB.employees=DB.employees.filter(e=>e.id!==id);
   DB.trainings.forEach(t=>{
     if(t.enrolled) t.enrolled=t.enrolled.filter(eid=>eid!==id);
@@ -1687,10 +1688,7 @@ async function deleteEmp(id){
   DB.videos.forEach(v=>{if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);});
   DB.notifications=DB.notifications.filter(n=>!n.msg||!n.msg.includes(id));
 
-  // === STEP 3: Save cleaned local data immediately (localStorage + push to Firebase) ===
-  saveDB();
-
-  // === STEP 4: Delete docs from Firebase one-by-one (no where queries = no index issues) ===
+  // === STEP 3: Delete from Firebase FIRST (before saveDB pushes) ===
   if(firebaseReady){
     try{await fbDB.collection('employees').doc(String(id)).delete();}catch(e){console.warn('FB del employee:',e);}
     for(const tid of testResultIds){
@@ -1701,7 +1699,11 @@ async function deleteEmp(id){
     }
   }
 
-  // === STEP 5: Re-render everything ===
+  // === STEP 4: Save cleaned local data now (cloud docs already deleted) ===
+  await new Promise(r=>{saveDB();setTimeout(r,1500);});
+
+  // === STEP 5: Mark deletion time and re-render ===
+  _lastDeleteTime=Date.now();
   renderEmployees();renderTrainings();renderCertificates();renderQuizMenu();updateBadges();
   toast("Employee PERMANENTLY deleted","warning");
 }
@@ -2035,22 +2037,24 @@ async function deleteTraining(id){
   const linkedTestIds=DB.testResults.filter(r=>r.training===trn.name).map(r=>r.id);
   const linkedCertNums=DB.certificates.filter(c=>c.training===trn.name).map(c=>c.num);
   const linkedVideoId=trn.fromVideo||null;
-  // Clean local data
+  // Clean local data FIRST
   DB.trainings=DB.trainings.filter(t=>t.id!==id);
   linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);});
   linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);});
-  // Also delete the linked video so it doesn't re-create the training
   if(linkedVideoId){
     DB.videos=DB.videos.filter(v=>v.id!==linkedVideoId);
   }
-  saveDB();
-  // Delete from Firebase
+  // Delete from Firebase FIRST (before saveDB pushes remaining data)
   if(firebaseReady){
     try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
     for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
     for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
     if(linkedVideoId){try{await fbDB.collection('videos').doc(String(linkedVideoId)).delete();}catch(e){}}
   }
+  // NOW save the cleaned local data (training is already deleted from cloud)
+  await new Promise(r=>{saveDB();setTimeout(r,1500);});
+  // Mark deletion timestamp so visibilitychange doesn't pull it back for 10s
+  _lastDeleteTime=Date.now();
   closeModal();renderTrainings();renderVideos();renderCertificates();updateBadges();
   toast("Training + linked video PERMANENTLY deleted","warning");
 }
@@ -2448,10 +2452,7 @@ async function deleteVideo(id){
   linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);});
   linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);});
 
-  // STEP 3: Save cleaned local data first
-  saveDB();
-
-  // STEP 4: Delete from Firebase one-by-one
+  // STEP 3: Delete from Firebase FIRST (before saveDB pushes)
   if(firebaseReady){
     try{await fbDB.collection('videos').doc(String(id)).delete();}catch(e){console.warn('FB del video:',e);}
     for(const tid of linkedTrnIds){
@@ -2465,7 +2466,11 @@ async function deleteVideo(id){
     }
   }
 
-  // STEP 5: Re-render
+  // STEP 4: Save cleaned local data now (cloud docs already deleted)
+  await new Promise(r=>{saveDB();setTimeout(r,1500);});
+
+  // STEP 5: Mark deletion time and re-render
+  _lastDeleteTime=Date.now();
   renderVideos();renderTrainings();renderCertificates();updateBadges();
   toast("Video PERMANENTLY deleted from all records and cloud","warning");
 }
@@ -2555,8 +2560,11 @@ function saveSOP(){
 async function deleteSOP(id){
   if(!confirm("Delete this SOP PERMANENTLY?"))return;
   DB.sops=DB.sops.filter(s=>s.id!==id);
-  saveDB();
+  // Delete from Firebase FIRST
   if(firebaseReady){try{await fbDB.collection('sops').doc(String(id)).delete();}catch(e){console.warn('FB del SOP:',e);}}
+  // Then save cleaned data
+  await new Promise(r=>{saveDB();setTimeout(r,1500);});
+  _lastDeleteTime=Date.now();
   renderSOP();updateBadges();toast("SOP PERMANENTLY deleted","warning");
 }
 
@@ -3401,6 +3409,7 @@ function exportFullStatusReport(){
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
 let _syncBusy=false;
+let _lastDeleteTime=0; // Timestamp of last deletion — prevents visibilitychange pull-back
 let _lastSyncTime=null;
 function updateSyncUI(status){
   const icon=document.getElementById('syncIcon');
