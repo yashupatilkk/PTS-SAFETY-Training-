@@ -946,7 +946,7 @@ function startAutoSync(){
   if(!firebaseReady)return;
   const interval=isAdmin?60000:30000;
   setInterval(async function(){
-    if(!currentUser||document.hidden)return;
+    if(!currentUser||document.hidden||_syncBusy)return;
     try{
       if(isAdmin){
         // Admin: push current data to cloud
@@ -2344,16 +2344,21 @@ function saveVideo(){
   const urlVal=document.getElementById("nv_url").value.trim();
   if(!title||!urlVal){toast("Title and URL required","error");return;}
   const ytId=extractYoutubeId(urlVal);
+  // Duplicate check: same YouTube ID or same title
+  if(ytId&&DB.videos.find(v=>v.youtubeId===ytId)){toast("This video already exists!","error");return;}
+  if(DB.videos.find(v=>v.title.toLowerCase()===title.toLowerCase())){toast("A video with this title already exists!","error");return;}
   const fullUrl=ytId?`https://www.youtube.com/watch?v=${ytId}`:urlVal;
   const vidId=genId("VID");
   const cat=document.getElementById("nv_cat").value;
   const dur=document.getElementById("nv_dur").value||"--";
   const today=new Date().toISOString().split("T")[0];
   DB.videos.push({id:vidId,title,cat,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:dur,views:0,likes:[],added:today,completedBy:[]});
-  // Auto-create a training linked to this video
+  // Auto-create a training linked to this video (only if not already exists)
   const trnName="Video: "+title;
-  const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title};
-  DB.trainings.push(trn);
+  if(!DB.trainings.find(t=>t.fromVideo===vidId)){
+    const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title};
+    DB.trainings.push(trn);
+  }
   closeModal();renderVideos();renderTrainings();updateBadges();saveDB();toast("Video added & Training auto-created: "+trnName,"success");
 }
 function deleteVideo(id){if(!confirm("Delete this video and its linked training?"))return;DB.videos=DB.videos.filter(v=>v.id!==id);DB.trainings=DB.trainings.filter(t=>t.fromVideo!==id);renderVideos();renderTrainings();updateBadges();saveDB();toast("Video and linked training deleted","warning");}
@@ -2592,6 +2597,20 @@ function submitQuiz(){
   }
   updateBadges();
   saveDB();
+  // Force immediate Firebase save for test result so it's not lost
+  if(firebaseReady){
+    (async function(){
+      try{
+        const r=DB.testResults[DB.testResults.length-1];
+        if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
+        if(certNum){
+          const c=DB.certificates[DB.certificates.length-1];
+          if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
+        }
+        console.log('Quiz result saved to Firebase immediately');
+      }catch(e){console.warn('Firebase quiz save error:',e);}
+    })();
+  }
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
