@@ -3383,9 +3383,7 @@ function loadDB(){
   if(!DB.admins.find(a=>a.username==="admin")){
     DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
   }
-  if(!DB.employees.find(e=>e.id==="EMP001")){
-    DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
-  }
+  // Default employee re-creation removed — deleted employees stay deleted
 }
 async function resetDBToDefault(){
   if(!confirm("Reset ALL data to defaults? This will delete all employees, trainings, test results, and certificates you added. This cannot be undone."))return;
@@ -3433,9 +3431,7 @@ async function initApp(){
     if(!DB.admins.find(a=>a.username==="admin")){
       DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
     }
-    if(!DB.employees.find(e=>e.id==="EMP001")){
-      DB.employees.unshift({id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"});
-    }
+    // Default employee re-creation removed — deleted employees stay deleted
     saveDB();
     await seedFirestore();
   }catch(e){
