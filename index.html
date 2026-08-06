@@ -873,7 +873,7 @@ function toEmail(user){
 }
 
 async function fbSaveCollection(collName,items,keyField){
-  if(!firebaseReady)return;
+  if(!firebaseReady)return {ok:false,error:'Firebase not ready'};
   try{
     const batch=fbDB.batch();
     const chunkSize=400;
@@ -891,8 +891,13 @@ async function fbSaveCollection(collName,items,keyField){
       await batch.commit();
     }
     console.log('Firebase saved: '+collName+' ('+saved+' docs)');
+    return {ok:true,count:saved};
   }catch(e){
-    console.warn('fbSaveCollection error ('+collName+'):',e);
+    console.error('fbSaveCollection ERROR ('+collName+'):',e);
+    // Show visible error to admin — don't hide it
+    const errMsg=e.message||String(e);
+    if(typeof toast==='function')toast('Firebase save failed ('+collName+'): '+errMsg,'error',6000);
+    return {ok:false,error:errMsg};
   }
 }
 
@@ -906,24 +911,72 @@ async function forceSyncToCloud(){
   toast('Syncing all data to cloud...','info',2000);
   updateSyncUI('syncing');
   try{
-    await fbSaveCollection('employees',DB.employees,'id');
-    await fbSaveCollection('admins',DB.admins,'username');
-    await fbSaveCollection('trainings',DB.trainings,'id');
-    await fbSaveCollection('testResults',DB.testResults,'id');
-    await fbSaveCollection('certificates',DB.certificates,'num');
-    await fbSaveCollection('notifications',DB.notifications,'id');
-    await fbSaveCollection('videos',DB.videos,'id');
-    await fbSaveCollection('sops',DB.sops,'id');
-    await fbSaveCollection('customEquipment',DB.customEquipment||[],'id');
-    await fbSaveCollection('customQuestions',DB.customQuestions||[],'ts');
-    await fbSaveSettings();
-    _lastSyncTime=Date.now();
-    updateSyncUI('idle');
-    toast('All data synced to cloud! 100 employees can now see it.','success',3000);
+    const results=await Promise.all([
+      fbSaveCollection('employees',DB.employees,'id'),
+      fbSaveCollection('admins',DB.admins,'username'),
+      fbSaveCollection('trainings',DB.trainings,'id'),
+      fbSaveCollection('testResults',DB.testResults,'id'),
+      fbSaveCollection('certificates',DB.certificates,'num'),
+      fbSaveCollection('notifications',DB.notifications,'id'),
+      fbSaveCollection('videos',DB.videos,'id'),
+      fbSaveCollection('sops',DB.sops,'id'),
+      fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+      fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+      fbSaveSettings()
+    ]);
+    const failed=results.filter(r=>r&&r.ok===false);
+    if(failed.length>0){
+      toast('Sync FAILED for: '+failed.map(f=>f.error).join(', '),'error',6000);
+      updateSyncUI('error');
+    }else{
+      _lastSyncTime=Date.now();
+      updateSyncUI('idle');
+      toast('All data synced to cloud! ('+DB.employees.length+' employees)','success',3000);
+    }
   }catch(e){
     updateSyncUI('error');
     toast('Sync error: '+e.message,'error',5000);
   }
+}
+
+// Test Firebase connection — writes and reads a test doc to verify permissions
+async function testFirebaseConnection(){
+  const el=document.getElementById('fbTestResult');
+  if(!el){toast('Test element not found','error');return;}
+  el.style.display='block';
+  el.innerHTML='<span style="color:var(--amber);">Testing Firebase connection...</span>';
+  const results=[];
+  // Test 1: Read from employees
+  try{
+    const snap=await fbDB.collection('employees').get();
+    results.push('<span style="color:var(--green);">READ employees: OK ('+snap.size+' docs)</span>');
+  }catch(e){
+    results.push('<span style="color:var(--red);">READ employees: FAILED — '+e.message+'</span>');
+  }
+  // Test 2: Write a test doc
+  try{
+    await fbDB.collection('config').doc('_connectionTest').set({testAt:Date.now(),testBy:'admin'});
+    results.push('<span style="color:var(--green);">WRITE test doc: OK</span>');
+    // Clean up
+    try{await fbDB.collection('config').doc('_connectionTest').delete();}catch(e){}
+  }catch(e){
+    results.push('<span style="color:var(--red);">WRITE test doc: FAILED — '+e.message+'</span>');
+  }
+  // Test 3: Write to employees collection (this is what fails most often)
+  try{
+    const batch=fbDB.batch();
+    const ref=fbDB.collection('employees').doc('__test__'+Date.now());
+    batch.set(ref,{id:'__test__',name:'Connection Test',_test:true},{merge:true});
+    await batch.commit();
+    results.push('<span style="color:var(--green);">WRITE employees: OK</span>');
+    // Clean up
+    try{await fbDB.collection('employees').doc(ref.id).delete();}catch(e){}
+  }catch(e){
+    results.push('<span style="color:var(--red);">WRITE employees: FAILED — '+e.message+'</span>');
+  }
+  // Test 4: Auth status
+  results.push('Auth user: '+(fbAuth.currentUser?fbAuth.currentUser.email:'NOT signed in'));
+  el.innerHTML=results.map(r=>'<div style="margin:2px 0;">'+r+'</div>').join('');
 }
 
 async function forceSyncFromCloud(){
@@ -1724,8 +1777,18 @@ async function saveEmployee(){
     try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
   }
   // AWAIT the save to Firebase so the employee is in the cloud before user can refresh
-  await saveDB();
-  toast(`Employee ${name} added & synced to cloud`,`success`);
+  const saveResults=await saveDB();
+  // Check if the employees collection actually saved to Firebase
+  if(saveResults&&Array.isArray(saveResults)){
+    const empResult=saveResults[0]; // employees is first in the list
+    if(empResult&&empResult.ok){
+      toast(`Employee ${name} saved to cloud successfully (${empResult.count} docs)`,'success',3000);
+    }else{
+      toast(`Employee ${name} saved locally BUT FAILED to save to Firebase! Error: ${empResult?.error||'Unknown'}. Employee will NOT appear on mobile. Check Firebase permissions.`,'error',8000);
+    }
+  }else{
+    toast(`Employee ${name} added`,'success');
+  }
 }
 function editEmp(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
@@ -3184,7 +3247,9 @@ function renderSettings(){
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-sm btn-green" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">cloud_upload</span> Force Sync to Cloud</button>
         <button class="btn btn-sm btn-outline" onclick="forceSyncFromCloud()"><span class="mat-ico" style="font-size:12px;">cloud_download</span> Pull from Cloud</button>
+        <button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="testFirebaseConnection()"><span class="mat-ico" style="font-size:12px;">science</span> Test Firebase</button>
       </div>
+      <div id="fbTestResult" style="margin-top:8px;font-size:11px;display:none;"></div>
     </div>
     <div class="settings-grid">
       <div class="form-section">
@@ -3654,8 +3719,16 @@ function saveDB(){
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveSettings()
-    ]);
-    const ret=syncPromise.then(async ()=>{
+    ]).then(results=>{
+      // Check if any collection FAILED to save to Firebase
+      const failed=results.filter(r=>r&&r.ok===false);
+      if(failed.length>0){
+        console.error('saveDB: '+failed.length+' collections failed to save to Firebase:',failed);
+        updateSyncUI('error');
+      }
+      return results;
+    });
+    const ret=syncPromise.then(async (results)=>{
       _lastSyncTime=Date.now();
       updateSyncUI('idle');
       // If another save was queued while we were busy, run it now
@@ -3665,6 +3738,7 @@ function saveDB(){
         console.log('saveDB: running pending save');
         await saveDB();
       }
+      return results; // Pass results through to caller
     }).catch(async ()=>{
       updateSyncUI('error');
       // Still run pending save even on error
