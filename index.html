@@ -1593,7 +1593,7 @@ function openAddEmpModal(){
     </div>
   `,"740px");
 }
-function saveEmployee(){
+async function saveEmployee(){
   const id=document.getElementById("ne_id").value.trim().toUpperCase();
   const name=document.getElementById("ne_name").value.trim();
   const mobile=document.getElementById("ne_mobile").value.trim();
@@ -1601,17 +1601,19 @@ function saveEmployee(){
   if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");return;}
   DB.employees.push({id,name,dept:document.getElementById("ne_dept").value,desig:document.getElementById("ne_desig").value,shift:document.getElementById("ne_shift").value,mobile,email:document.getElementById("ne_email").value,status:"active",joining:document.getElementById("ne_join").value||new Date().toISOString().split("T")[0],location:document.getElementById("ne_loc").value||"Site",password:document.getElementById("ne_pw").value||"emp123",company:DB.settings.companyName,photo:""});
   closeModal();renderEmployees();updateBadges();saveDB();toast(`Employee ${name} added`,`success`);
-  // Create Firebase Auth account for this employee (async)
+  // Create Firebase Auth account for this employee (ensure it exists for mobile login)
   if(firebaseReady){
     const empEmail=toEmail(id);
     const empPw=document.getElementById("ne_pw").value||"emp123";
-    fbAuth.signInWithEmailAndPassword(empEmail,empPw)
-      .then(()=>console.log('Auth account exists for',id))
-      .catch(()=>{
-        fbAuth.createUserWithEmailAndPassword(empEmail,empPw)
-          .then(()=>console.log('Auth account created for',id))
-          .catch(e=>{if(e.code!=='auth/email-already-in-use')console.warn('Auth create error for',id,e.message);});
-      });
+    // Create auth account first (so employee can login immediately)
+    try{await fbAuth.createUserWithEmailAndPassword(empEmail,empPw);}catch(e){
+      if(e.code==='auth/email-already-in-use'){
+        // Account exists — try signing in to verify password matches
+        try{await fbAuth.signInWithEmailAndPassword(empEmail,empPw);}catch(e2){console.warn('Auth verify error:',e2.message);}
+      }else{console.warn('Auth create error:',e.message);}
+    }
+    // Sign admin back in
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
   }
 }
 function editEmp(id){
@@ -3557,14 +3559,60 @@ function reconcileTrainingsFromResults(){
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
+    // Snapshot local data BEFORE cloud load (to merge back anything not in cloud)
+    const localSnapshot={
+      employees:DB.employees.map(e=>e.id),
+      trainings:DB.trainings.map(t=>t.id),
+      videos:DB.videos.map(v=>v.id),
+      sops:DB.sops.map(s=>s.id)
+    };
+    const localEmpMap=Object.fromEntries(DB.employees.map(e=>[e.id,e]));
+    const localTrnMap=Object.fromEntries(DB.trainings.map(t=>[t.id,t]));
+    const localVidMap=Object.fromEntries(DB.videos.map(v=>[v.id,v]));
+    const localSopMap=Object.fromEntries(DB.sops.map(s=>[s.id,s]));
+
     // Load each collection individually — one failure won't break the rest
+    // MERGE strategy: cloud data wins for existing items, local-only items are kept
     const cols=[
-      ['employees','id',d=>{if(d.size>0)DB.employees=d.docs.map(x=>x.data());}],
-      ['trainings','id',d=>{if(d.size>0)DB.trainings=d.docs.map(x=>x.data());}],
+      ['employees','id',d=>{
+        if(d.size>0){
+          const cloudEmps=d.docs.map(x=>x.data());
+          // Merge: start with cloud, add any local-only employees
+          const cloudIds=new Set(cloudEmps.map(e=>e.id));
+          const merged=[...cloudEmps];
+          Object.values(localEmpMap).forEach(e=>{if(!cloudIds.has(e.id))merged.push(e);});
+          DB.employees=merged;
+        }
+      }],
+      ['trainings','id',d=>{
+        if(d.size>0){
+          const cloudTrns=d.docs.map(x=>x.data());
+          const cloudIds=new Set(cloudTrns.map(t=>t.id));
+          const merged=[...cloudTrns];
+          Object.values(localTrnMap).forEach(t=>{if(!cloudIds.has(t.id))merged.push(t);});
+          DB.trainings=merged;
+        }
+      }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
       ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
-      ['videos','id',d=>{if(d.size>0)DB.videos=d.docs.map(x=>x.data());}],
-      ['sops','id',d=>{if(d.size>0)DB.sops=d.docs.map(x=>x.data());}],
+      ['videos','id',d=>{
+        if(d.size>0){
+          const cloudVids=d.docs.map(x=>x.data());
+          const cloudIds=new Set(cloudVids.map(v=>v.id));
+          const merged=[...cloudVids];
+          Object.values(localVidMap).forEach(v=>{if(!cloudIds.has(v.id))merged.push(v);});
+          DB.videos=merged;
+        }
+      }],
+      ['sops','id',d=>{
+        if(d.size>0){
+          const cloudSops=d.docs.map(x=>x.data());
+          const cloudIds=new Set(cloudSops.map(s=>s.id));
+          const merged=[...cloudSops];
+          Object.values(localSopMap).forEach(s=>{if(!cloudIds.has(s.id))merged.push(s);});
+          DB.sops=merged;
+        }
+      }],
       ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
       ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
       ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
@@ -3577,7 +3625,9 @@ async function loadDBFromFirestore(){
     reconcileTrainingsFromResults();
     // CRITICAL: Filter out anything that was permanently deleted (tombstone)
     applyTombstones();
-    console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
+    // Push merged data back to cloud so nothing is lost
+    saveDB();
+    console.log('Firestore loaded + merged: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
     return true; // Always return true so firebaseReady stays ON
   }catch(e){
     console.warn('Firestore load error:',e);
