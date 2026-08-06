@@ -930,7 +930,8 @@ async function forceSyncFromCloud(){
   updateSyncUI('syncing');
   try{
     await loadDBFromFirestore();
-    saveDB();
+    // Save to localStorage only (don't push back — cloud is source of truth)
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
     renderAll();
     _lastSyncTime=Date.now();
     updateSyncUI('idle');
@@ -947,7 +948,20 @@ function startAutoSync(){
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
-      // STEP 1: Push all local data to cloud
+      // CRITICAL: Pull tombstones from cloud FIRST before pushing anything
+      // This prevents pushing back items that were deleted by admin on another device
+      const newTombstones=await loadTombstonesFromCloud();
+      if(newTombstones>0){
+        const removed=applyTombstones();
+        if(removed>0){
+          console.log('Auto-sync: removed '+removed+' deleted items before push');
+          // Save cleaned data to localStorage
+          try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+          // Re-render UI to show items are gone
+          if(typeof renderAll==='function')renderAll();
+        }
+      }
+      // STEP 1: Push all local data to cloud (now filtered — no deleted items)
       await Promise.all([
         fbSaveCollection('employees',DB.employees,'id'),
         fbSaveCollection('trainings',DB.trainings,'id'),
@@ -990,7 +1004,8 @@ function startAutoSync(){
     if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&(Date.now()-_lastDeleteTime)>10000){
       try{
         await loadDBFromFirestore();
-        saveDB();
+        // Save to localStorage only (don't push back to cloud — cloud is source of truth)
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         if(typeof renderAll==='function')renderAll();
         _lastSyncTime=Date.now();
         updateSyncUI('idle');
@@ -1121,7 +1136,22 @@ async function doLogin(){
       if(admin.password!==pw){toast("Invalid admin credentials","error");return;}
       currentUser={...admin,type:"admin"};isAdmin=true;
     }else{
-      const emp=DB.employees.find(e=>e.id===id);
+      let emp=DB.employees.find(e=>e.id===id);
+      // If employee not found locally, try pulling fresh from cloud (mobile login fix)
+      if(!emp&&firebaseReady){
+        try{
+          toast('Syncing employee data...','info',2000);
+          const empSnap=await fbDB.collection('employees').doc(String(id)).get();
+          if(empSnap.exists){
+            emp=empSnap.data();
+            // Add to local DB so login works
+            if(!DB.employees.find(e=>e.id===emp.id)){
+              DB.employees.push(emp);
+              try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            }
+          }
+        }catch(e){console.warn('Cloud employee lookup failed:',e);}
+      }
       if(!emp){toast("Invalid Employee ID or password","error");return;}
       if(emp.password!==pw){toast("Invalid Employee ID or password","error");return;}
       currentUser={...emp,type:"employee"};isAdmin=false;
@@ -1599,8 +1629,11 @@ async function saveEmployee(){
   const mobile=document.getElementById("ne_mobile").value.trim();
   if(!id||!name||!mobile){toast("ID, Name and Mobile required","error");return;}
   if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");return;}
-  DB.employees.push({id,name,dept:document.getElementById("ne_dept").value,desig:document.getElementById("ne_desig").value,shift:document.getElementById("ne_shift").value,mobile,email:document.getElementById("ne_email").value,status:"active",joining:document.getElementById("ne_join").value||new Date().toISOString().split("T")[0],location:document.getElementById("ne_loc").value||"Site",password:document.getElementById("ne_pw").value||"emp123",company:DB.settings.companyName,photo:""});
-  closeModal();renderEmployees();updateBadges();saveDB();toast(`Employee ${name} added`,`success`);
+  // CRITICAL: Clear tombstone for this ID if it was previously deleted — AWAIT cloud delete
+  await removeFromTombstone('employees',id);
+  const _localAddedAt=Date.now();
+  DB.employees.push({id,name,dept:document.getElementById("ne_dept").value,desig:document.getElementById("ne_desig").value,shift:document.getElementById("ne_shift").value,mobile,email:document.getElementById("ne_email").value,status:"active",joining:document.getElementById("ne_join").value||new Date().toISOString().split("T")[0],location:document.getElementById("ne_loc").value||"Site",password:document.getElementById("ne_pw").value||"emp123",company:DB.settings.companyName,photo:"",_localAddedAt});
+  closeModal();renderEmployees();updateBadges();
   // Create Firebase Auth account for this employee (ensure it exists for mobile login)
   if(firebaseReady){
     const empEmail=toEmail(id);
@@ -1615,6 +1648,9 @@ async function saveEmployee(){
     // Sign admin back in
     try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
   }
+  // AWAIT the save to Firebase so the employee is in the cloud before user can refresh
+  await saveDB();
+  toast(`Employee ${name} added & synced to cloud`,`success`);
 }
 function editEmp(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
@@ -1678,20 +1714,22 @@ async function deleteEmp(id){
   const testResultIds=DB.testResults.filter(r=>r.empId===id).map(r=>r.id);
   const certNums=DB.certificates.filter(c=>c.empId===id).map(c=>c.num);
 
-  // === STEP 2: Clean ALL local data ===
+  // === STEP 2: Clean ALL local data + AWAIT tombstone cloud writes ===
   DB.employees=DB.employees.filter(e=>e.id!==id);
-  addToTombstone('employees',id);
+  const tombPromises=[addToTombstone('employees',id)];
   DB.trainings.forEach(t=>{
     if(t.enrolled) t.enrolled=t.enrolled.filter(eid=>eid!==id);
     if(t.completed) t.completed=t.completed.filter(eid=>eid!==id);
     if(t.completedDates) delete t.completedDates[id];
   });
   DB.testResults=DB.testResults.filter(r=>r.empId!==id);
-  testResultIds.forEach(tid=>addToTombstone('testResults',tid));
+  testResultIds.forEach(tid=>tombPromises.push(addToTombstone('testResults',tid)));
   DB.certificates=DB.certificates.filter(c=>c.empId!==id);
-  certNums.forEach(cnum=>addToTombstone('certificates',cnum));
+  certNums.forEach(cnum=>tombPromises.push(addToTombstone('certificates',cnum)));
   DB.videos.forEach(v=>{if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);});
   DB.notifications=DB.notifications.filter(n=>!n.msg||!n.msg.includes(id));
+  // AWAIT all tombstone cloud writes so other devices know about deletion immediately
+  await Promise.all(tombPromises);
 
   // === STEP 3: Delete from Firebase FIRST (before saveDB pushes) ===
   if(firebaseReady){
@@ -1911,7 +1949,7 @@ function getCustomQuestions(){
   }
   return qs;
 }
-function saveTraining(){
+async function saveTraining(){
   const name=document.getElementById("nt_name").value.trim();
   if(!name){toast("Training name required","error");return;}
   const cat=document.getElementById("nt_cat").value;
@@ -1926,10 +1964,11 @@ function saveTraining(){
   }
   const linkedVideoId=document.getElementById("nt_video").value;
   const linkedVideo=linkedVideoId?DB.videos.find(v=>v.id===linkedVideoId):null;
-  const t={id:document.getElementById("nt_id").value,name,cat,dept:document.getElementById("nt_dept").value,trainer:document.getElementById("nt_trainer").value,date:document.getElementById("nt_date").value,duration:linkedVideo?linkedVideo.duration:(document.getElementById("nt_dur").value||"4 hrs"),passing:parseInt(document.getElementById("nt_pass").value)||75,validity:document.getElementById("nt_val").value||"1 Year",cert:document.getElementById("nt_cert").value==="true",desc:document.getElementById("nt_desc").value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length};
+  const t={id:document.getElementById("nt_id").value,name,cat,dept:document.getElementById("nt_dept").value,trainer:document.getElementById("nt_trainer").value,date:document.getElementById("nt_date").value,duration:linkedVideo?linkedVideo.duration:(document.getElementById("nt_dur").value||"4 hrs"),passing:parseInt(document.getElementById("nt_pass").value)||75,validity:document.getElementById("nt_val").value||"1 Year",cert:document.getElementById("nt_cert").value==="true",desc:document.getElementById("nt_desc").value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,_localAddedAt:Date.now()};
   if(linkedVideoId){t.fromVideo=linkedVideoId;t.videoTitle=linkedVideo?t.videoTitle||linkedVideo.title:"";t.trainer="Video Training";}
   // Don't create duplicate video-linked training
   if(linkedVideoId&&DB.trainings.find(x=>x.fromVideo===linkedVideoId)){toast("A training already exists for this video. Use that one instead.","error");return;}
+  await removeFromTombstone('trainings',t.id);
   DB.trainings.push(t);
   closeModal();renderTrainings();updateBadges();saveDB();toast(`Training "${name}" created`,"success");
 }
@@ -2042,16 +2081,17 @@ async function deleteTraining(id){
   const linkedTestIds=DB.testResults.filter(r=>r.training===trn.name).map(r=>r.id);
   const linkedCertNums=DB.certificates.filter(c=>c.training===trn.name).map(c=>c.num);
   const linkedVideoId=trn.fromVideo||null;
-  // Clean local data FIRST
+  // Clean local data FIRST + AWAIT tombstone cloud writes
   DB.trainings=DB.trainings.filter(t=>t.id!==id);
-  // Record in tombstone so it NEVER comes back from Firestore
-  addToTombstone('trainings',id);
-  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);addToTombstone('testResults',tid);});
-  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);addToTombstone('certificates',cnum);});
+  const tombPromises=[addToTombstone('trainings',id)];
+  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);tombPromises.push(addToTombstone('testResults',tid));});
+  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);tombPromises.push(addToTombstone('certificates',cnum));});
   if(linkedVideoId){
     DB.videos=DB.videos.filter(v=>v.id!==linkedVideoId);
-    addToTombstone('videos',linkedVideoId);
+    tombPromises.push(addToTombstone('videos',linkedVideoId));
   }
+  // AWAIT all tombstone cloud writes so other devices know immediately
+  await Promise.all(tombPromises);
   // Delete from Firebase FIRST (before saveDB pushes remaining data)
   if(firebaseReady){
     try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
@@ -2423,11 +2463,11 @@ function saveVideo(){
   const cat=document.getElementById("nv_cat").value;
   const dur=document.getElementById("nv_dur").value||"--";
   const today=new Date().toISOString().split("T")[0];
-  DB.videos.push({id:vidId,title,cat,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:dur,views:0,likes:[],added:today,completedBy:[]});
+  DB.videos.push({id:vidId,title,cat,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:dur,views:0,likes:[],added:today,completedBy:[],_localAddedAt:Date.now()});
   // Auto-create a training linked to this video (only if not already exists)
   const trnName="Video: "+title;
   if(!DB.trainings.find(t=>t.fromVideo===vidId)){
-    const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title};
+    const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title,_localAddedAt:Date.now()};
     DB.trainings.push(trn);
   }
   _videoSaving=false;
@@ -2453,14 +2493,16 @@ async function deleteVideo(id){
     });
   });
 
-  // STEP 2: Clean all local data + tombstone everything
+  // STEP 2: Clean all local data + AWAIT tombstone cloud writes
   DB.videos=DB.videos.filter(v=>v.id!==id);
-  addToTombstone('videos',id);
-  linkedTrnIds.forEach(tid=>{addToTombstone('trainings',tid);});
+  const tombPromises=[addToTombstone('videos',id)];
+  linkedTrnIds.forEach(tid=>{tombPromises.push(addToTombstone('trainings',tid));});
   DB.trainings=DB.trainings.filter(t=>t.fromVideo!==id);
   // Also remove test results and certs linked to the deleted training
-  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);addToTombstone('testResults',tid);});
-  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);addToTombstone('certificates',cnum);});
+  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);tombPromises.push(addToTombstone('testResults',tid));});
+  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);tombPromises.push(addToTombstone('certificates',cnum));});
+  // AWAIT all tombstone cloud writes so other devices know immediately
+  await Promise.all(tombPromises);
 
   // STEP 3: Delete from Firebase FIRST (before saveDB pushes)
   if(firebaseReady){
@@ -2570,7 +2612,8 @@ function saveSOP(){
 async function deleteSOP(id){
   if(!confirm("Delete this SOP PERMANENTLY?"))return;
   DB.sops=DB.sops.filter(s=>s.id!==id);
-  addToTombstone('sops',id);
+  // AWAIT tombstone cloud write so other devices know immediately
+  await addToTombstone('sops',id);
   // Delete from Firebase FIRST
   if(firebaseReady){try{await fbDB.collection('sops').doc(String(id)).delete();}catch(e){console.warn('FB del SOP:',e);}}
   // Then save cleaned data
@@ -3432,9 +3475,43 @@ function loadTombstones(){
 function saveTombstones(){
   try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e){}
 }
-function addToTombstone(collection,id){
+async function addToTombstone(collection,id){
   if(!_deletedIds[collection])_deletedIds[collection]=[];
   if(!_deletedIds[collection].includes(id)){_deletedIds[collection].push(id);saveTombstones();}
+  // AWAIT cloud write so ALL devices see the deletion immediately
+  if(firebaseReady){
+    try{await fbDB.collection('deletedItems').doc(collection+'_'+id).set({collection,id,deletedAt:Date.now()});}catch(e){console.warn('Tombstone cloud write error:',e);}
+  }
+}
+async function removeFromTombstone(collection,id){
+  if(!_deletedIds[collection])return;
+  const before=_deletedIds[collection].length;
+  _deletedIds[collection]=_deletedIds[collection].filter(x=>x!==id);
+  if(_deletedIds[collection].length!==before)saveTombstones();
+  // AWAIT cloud delete so re-added items are not immediately re-tombstoned
+  if(firebaseReady){
+    try{await fbDB.collection('deletedItems').doc(collection+'_'+id).delete();}catch(e){console.warn('Tombstone cloud delete error:',e);}
+  }
+}
+async function loadTombstonesFromCloud(){
+  if(!firebaseReady)return 0;
+  try{
+    const snap=await fbDB.collection('deletedItems').get();
+    let added=0;
+    snap.docs.forEach(d=>{
+      const data=d.data();
+      if(data&&data.collection&&data.id){
+        if(!_deletedIds[data.collection])_deletedIds[data.collection]=[];
+        if(!_deletedIds[data.collection].includes(data.id)){
+          _deletedIds[data.collection].push(data.id);
+          added++;
+        }
+      }
+    });
+    if(added)saveTombstones();
+    console.log('Loaded tombstones from cloud: '+snap.size+' entries ('+added+' new)');
+    return added;
+  }catch(e){console.warn('Load cloud tombstones error:',e);return 0;}
 }
 /* Remove any doc from DB arrays that is in the tombstone list */
 function applyTombstones(){
@@ -3477,6 +3554,9 @@ function saveDB(){
   }catch(e){}
   // Firebase sync — show status, prevent double-sync
   if(firebaseReady&&!_syncBusy){
+    // CRITICAL: Filter out any tombstoned items before pushing to cloud
+    // This prevents any code path from resurrecting deleted items
+    applyTombstones();
     _syncBusy=true;
     updateSyncUI('syncing');
     const syncPromise=Promise.all([
@@ -3492,13 +3572,15 @@ function saveDB(){
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveSettings()
     ]);
-    syncPromise.then(()=>{
+    const ret=syncPromise.then(()=>{
       _lastSyncTime=Date.now();
       updateSyncUI('idle');
     }).catch(()=>{
       updateSyncUI('error');
     }).finally(()=>{_syncBusy=false;});
+    return ret; // Return promise so callers can await it
   }
+  return Promise.resolve();
 }
 function loadDBFromLocal(){
   try{
@@ -3560,37 +3642,33 @@ async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
     // Snapshot local data BEFORE cloud load (to merge back anything not in cloud)
-    const localSnapshot={
-      employees:DB.employees.map(e=>e.id),
-      trainings:DB.trainings.map(t=>t.id),
-      videos:DB.videos.map(v=>v.id),
-      sops:DB.sops.map(s=>s.id)
-    };
     const localEmpMap=Object.fromEntries(DB.employees.map(e=>[e.id,e]));
     const localTrnMap=Object.fromEntries(DB.trainings.map(t=>[t.id,t]));
     const localVidMap=Object.fromEntries(DB.videos.map(v=>[v.id,v]));
     const localSopMap=Object.fromEntries(DB.sops.map(s=>[s.id,s]));
 
     // Load each collection individually — one failure won't break the rest
-    // MERGE strategy: cloud data wins for existing items, local-only items are kept
+    // CLOUD-WINS strategy for shared collections (employees, trainings, videos, sops)
+    // This ensures deletions propagate to ALL devices
     const cols=[
       ['employees','id',d=>{
         if(d.size>0){
           const cloudEmps=d.docs.map(x=>x.data());
-          // Merge: start with cloud, add any local-only employees
+          // Cloud wins — do NOT add back local-only items (they were deleted from cloud)
+          // Exception: items added locally but not yet pushed (within last 60s)
           const cloudIds=new Set(cloudEmps.map(e=>e.id));
-          const merged=[...cloudEmps];
-          Object.values(localEmpMap).forEach(e=>{if(!cloudIds.has(e.id))merged.push(e);});
-          DB.employees=merged;
+          const cutoff=Date.now()-60000;
+          const localOnly=Object.values(localEmpMap).filter(e=>!cloudIds.has(e.id)&&(e._localAddedAt&&e._localAddedAt>cutoff));
+          DB.employees=[...cloudEmps,...localOnly];
         }
       }],
       ['trainings','id',d=>{
         if(d.size>0){
           const cloudTrns=d.docs.map(x=>x.data());
           const cloudIds=new Set(cloudTrns.map(t=>t.id));
-          const merged=[...cloudTrns];
-          Object.values(localTrnMap).forEach(t=>{if(!cloudIds.has(t.id))merged.push(t);});
-          DB.trainings=merged;
+          const cutoff=Date.now()-60000;
+          const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id)&&(t._localAddedAt&&t._localAddedAt>cutoff));
+          DB.trainings=[...cloudTrns,...localOnly];
         }
       }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
@@ -3599,18 +3677,18 @@ async function loadDBFromFirestore(){
         if(d.size>0){
           const cloudVids=d.docs.map(x=>x.data());
           const cloudIds=new Set(cloudVids.map(v=>v.id));
-          const merged=[...cloudVids];
-          Object.values(localVidMap).forEach(v=>{if(!cloudIds.has(v.id))merged.push(v);});
-          DB.videos=merged;
+          const cutoff=Date.now()-60000;
+          const localOnly=Object.values(localVidMap).filter(v=>!cloudIds.has(v.id)&&(v._localAddedAt&&v._localAddedAt>cutoff));
+          DB.videos=[...cloudVids,...localOnly];
         }
       }],
       ['sops','id',d=>{
         if(d.size>0){
           const cloudSops=d.docs.map(x=>x.data());
           const cloudIds=new Set(cloudSops.map(s=>s.id));
-          const merged=[...cloudSops];
-          Object.values(localSopMap).forEach(s=>{if(!cloudIds.has(s.id))merged.push(s);});
-          DB.sops=merged;
+          const cutoff=Date.now()-60000;
+          const localOnly=Object.values(localSopMap).filter(s=>!cloudIds.has(s.id)&&(s._localAddedAt&&s._localAddedAt>cutoff));
+          DB.sops=[...cloudSops,...localOnly];
         }
       }],
       ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
@@ -3621,13 +3699,15 @@ async function loadDBFromFirestore(){
     const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
     // Load settings separately (it's a single doc, not a collection)
     try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');}
+    // CRITICAL: Load tombstones from cloud so deletions propagate to ALL devices
+    await loadTombstonesFromCloud();
     // CRITICAL: Rebuild completed arrays from testResults (source of truth)
     reconcileTrainingsFromResults();
     // CRITICAL: Filter out anything that was permanently deleted (tombstone)
     applyTombstones();
-    // Push merged data back to cloud so nothing is lost
-    saveDB();
-    console.log('Firestore loaded + merged: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
+    // Save merged data to localStorage only (don't push back to avoid loop)
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
     return true; // Always return true so firebaseReady stays ON
   }catch(e){
     console.warn('Firestore load error:',e);
@@ -3653,10 +3733,10 @@ function loadDB(){
 async function resetDBToDefault(){
   if(!confirm("Reset ALL data to defaults? This will delete all employees, trainings, test results, and certificates you added. This cannot be undone."))return;
   localStorage.removeItem(DB_STORAGE_KEY);
-  localStorage.removeItem(TOMBSTONE_KEY); // Clear tombstones on full reset
+  localStorage.removeItem(TOMBSTONE_KEY);
   if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
     try{
-      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config'];
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems'];
       for(const c of cols){
         const snap=await fbDB.collection(c).get();
         const batch=fbDB.batch();
@@ -3696,9 +3776,9 @@ async function initApp(){
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
       DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
+      // Only push to cloud if we added something new
+      await saveDB();
     }
-    // Default employee re-creation removed — deleted employees stay deleted
-    saveDB();
     await seedFirestore();
   }catch(e){
     console.warn('Firebase init error:',e);
