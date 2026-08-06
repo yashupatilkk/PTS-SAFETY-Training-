@@ -395,7 +395,8 @@ select.form-control-sm{background:var(--sur2);}
         <label class="checkbox-label"><input type="checkbox" id="rememberMe"> Remember me</label>
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
-      <button class="btn-primary-full" id="loginBtn" onclick="doLogin()">PTS SAFETY SIGN IN</button>
+      <button class="btn-primary-full" id="loginBtn" onclick="doLogin()" disabled><span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Loading data...</button>
+      <button class="link-btn" id="loginSyncBtn" style="margin-top:8px;display:none;" onclick="loginForceSync()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry</button>
 
     </div>
     <div class="login-footer">PTS SAFETY — Training Management System</div>
@@ -1113,6 +1114,8 @@ async function doLogin(){
   const id=document.getElementById("loginId").value.trim();
   const pw=document.getElementById("loginPw").value;
   if(!id||!pw){toast("Please enter credentials","error");return;}
+  // Block login if init hasn't finished loading data from cloud
+  if(!_initDone){toast("Still loading data, please wait...","info");return;}
   // Auto-detect login type based on input
   if(loginType==="admin"&&id.toUpperCase().startsWith("EMP")){setLoginType("employee");}
   if(loginType==="employee"&&(id.toLowerCase()==="admin")){setLoginType("admin");}
@@ -1139,23 +1142,34 @@ async function doLogin(){
       // Normalize employee ID to UPPERCASE for matching (admin saves IDs in uppercase)
       const empId=id.toUpperCase();
       let emp=DB.employees.find(e=>e.id===empId);
-      // If employee not found locally, try pulling fresh from cloud (mobile login fix)
+      // If employee not found locally, force-pull ALL employees from cloud
       if(!emp&&firebaseReady){
         try{
-          toast('Syncing employee data...','info',2000);
-          const empSnap=await fbDB.collection('employees').doc(String(empId)).get();
-          if(empSnap.exists){
-            emp=empSnap.data();
-            // Add to local DB so login works
-            if(!DB.employees.find(e=>e.id===emp.id)){
-              DB.employees.push(emp);
-              try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-            }
+          toast('Syncing from cloud...','info',3000);
+          // Pull the FULL employees collection (not just one doc) to handle all cases
+          const empSnap=await fbDB.collection('employees').get();
+          if(empSnap.size>0){
+            const cloudEmps=empSnap.docs.map(x=>x.data());
+            // Replace local employees with cloud data
+            DB.employees=cloudEmps;
+            // Apply tombstones in case this employee was deleted
+            await loadTombstonesFromCloud();
+            applyTombstones();
+            // Save to localStorage for next time
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            // Now search again with the fresh data
+            emp=DB.employees.find(e=>e.id===empId);
           }
         }catch(e){console.warn('Cloud employee lookup failed:',e);}
       }
-      if(!emp){toast("Invalid Employee ID or password","error");return;}
-      if(emp.password!==pw){toast("Invalid Employee ID or password","error");return;}
+      if(!emp){
+        toast("Employee ID \""+empId+"\" not found. Ask admin to add you.","error",4000);
+        return;
+      }
+      if(emp.password!==pw){
+        toast("Wrong password for \""+emp.name+"\" (ID: "+empId+")","error",4000);
+        return;
+      }
       currentUser={...emp,type:"employee"};isAdmin=false;
     }
     // If Firebase is ready but auth failed above (wrong pw in Firebase), update it
@@ -1184,7 +1198,42 @@ async function doLogin(){
     if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
   }
 }
-function showForgot(){toast("Please contact your system administrator","info");}
+async function showForgot(){
+  // On employee mobile, offer to sync from cloud first
+  const id=prompt('Enter your Employee ID:');
+  if(!id)return;
+  const empId=id.trim().toUpperCase();
+  let emp=DB.employees.find(e=>e.id===empId);
+  if(!emp&&firebaseReady){
+    try{
+      toast('Looking up '+empId+' in cloud...','info',2000);
+      const snap=await fbDB.collection('employees').get();
+      if(snap.size>0){DB.employees=snap.docs.map(x=>x.data());await loadTombstonesFromCloud();applyTombstones();}
+      emp=DB.employees.find(e=>e.id===empId);
+    }catch(e){}
+  }
+  if(!emp){toast('Employee '+empId+' not found. Ask admin to add you.','error',4000);return;}
+  toast('Employee found: '+emp.name+'. Contact admin for password reset.','info',4000);
+}
+
+// Force sync from cloud on login page — used when employee can not login
+async function loginForceSync(){
+  const syncBtn=document.getElementById('loginSyncBtn');
+  const loginBtn=document.getElementById('loginBtn');
+  if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;animation:spin 1s linear infinite">sync</span> Syncing...';}
+  if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
+  try{
+    _initDone=false;
+    await loadDBFromFirestore();
+    _initDone=true;
+    toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+  }catch(e){
+    toast('Sync failed: '+e.message,'error',4000);
+    _initDone=true;
+  }
+  if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+  if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry';}
+}
 function doLogout(){
   currentUser=null;isAdmin=false;
   localStorage.removeItem("mep_user");
@@ -3469,6 +3518,8 @@ let _deletedIds={trainings:[],videos:[],employees:[],sops:[],testResults:[],cert
 let _syncBusy=false;
 let _lastDeleteTime=0; // Timestamp of last deletion — prevents visibilitychange pull-back
 let _lastSyncTime=null;
+let _initDone=false; // Whether initApp() has completed — blocks login until true
+let _pendingSave=false; // When _syncBusy, queue a save to run after current sync finishes
 
 /* Tombstone: remember deleted IDs so they never come back from Firestore */
 function loadTombstones(){
@@ -3555,10 +3606,16 @@ function saveDB(){
     localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(data));
   }catch(e){}
   // Firebase sync — show status, prevent double-sync
-  if(firebaseReady&&!_syncBusy){
+  if(firebaseReady){
     // CRITICAL: Filter out any tombstoned items before pushing to cloud
     // This prevents any code path from resurrecting deleted items
     applyTombstones();
+    if(_syncBusy){
+      // Another sync is running — queue this save to run after it finishes
+      _pendingSave=true;
+      console.log('saveDB: sync busy, queuing pending save');
+      return Promise.resolve();
+    }
     _syncBusy=true;
     updateSyncUI('syncing');
     const syncPromise=Promise.all([
@@ -3574,11 +3631,25 @@ function saveDB(){
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveSettings()
     ]);
-    const ret=syncPromise.then(()=>{
+    const ret=syncPromise.then(async ()=>{
       _lastSyncTime=Date.now();
       updateSyncUI('idle');
-    }).catch(()=>{
+      // If another save was queued while we were busy, run it now
+      if(_pendingSave){
+        _pendingSave=false;
+        _syncBusy=false; // Clear before recursing to avoid infinite loop
+        console.log('saveDB: running pending save');
+        await saveDB();
+      }
+    }).catch(async ()=>{
       updateSyncUI('error');
+      // Still run pending save even on error
+      if(_pendingSave){
+        _pendingSave=false;
+        _syncBusy=false; // Clear before recursing
+        console.log('saveDB: running pending save after error');
+        await saveDB();
+      }
     }).finally(()=>{_syncBusy=false;});
     return ret; // Return promise so callers can await it
   }
@@ -3766,7 +3837,9 @@ async function initApp(){
   // Show loading state
   const loginForm=document.querySelector('.login-wrap');
   const loadMsg=document.getElementById('fbLoadStatus');
+  const loginBtn=document.getElementById('loginBtn');
   if(loadMsg)loadMsg.style.display='block';
+  if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Loading data...';}
 
   // 1. Load from localStorage immediately (sync)
   loadDB();
@@ -3788,6 +3861,11 @@ async function initApp(){
   }
 
   if(loadMsg)loadMsg.style.display='none';
+  // CRITICAL: Enable login ONLY after all data is loaded
+  _initDone=true;
+  if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+  const syncBtn=document.getElementById('loginSyncBtn');
+  if(syncBtn)syncBtn.style.display='inline-block';
 
   // Double-check: guarantee default admin always present
   if(!DB.admins.find(a=>a.username==="admin")){
