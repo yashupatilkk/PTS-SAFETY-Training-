@@ -1136,12 +1136,14 @@ async function doLogin(){
       if(admin.password!==pw){toast("Invalid admin credentials","error");return;}
       currentUser={...admin,type:"admin"};isAdmin=true;
     }else{
-      let emp=DB.employees.find(e=>e.id===id);
+      // Normalize employee ID to UPPERCASE for matching (admin saves IDs in uppercase)
+      const empId=id.toUpperCase();
+      let emp=DB.employees.find(e=>e.id===empId);
       // If employee not found locally, try pulling fresh from cloud (mobile login fix)
       if(!emp&&firebaseReady){
         try{
           toast('Syncing employee data...','info',2000);
-          const empSnap=await fbDB.collection('employees').doc(String(id)).get();
+          const empSnap=await fbDB.collection('employees').doc(String(empId)).get();
           if(empSnap.exists){
             emp=empSnap.data();
             // Add to local DB so login works
