@@ -428,7 +428,6 @@ select.form-control-sm{background:var(--sur2);}
     <div id="reportsNav">
       <button class="nav-item" data-view="reports" onclick="gotoView('reports')"><span class="mat-ico">bar_chart</span><span>Reports</span></button>
       <button class="nav-item" data-view="trainstatus" onclick="gotoView('trainstatus')"><span class="mat-ico">fact_check</span><span>Training Status</span></button>
-      <button class="nav-item" data-view="employeeanalytics" onclick="gotoView('employeeanalytics')"><span class="mat-ico">insights</span><span>Employee Analytics</span></button>
     </div>
     <button class="nav-item" data-view="notifications" onclick="gotoView('notifications')"><span class="mat-ico">notifications</span><span>Notifications</span><span class="nav-badge" id="nb-notif" style="background:rgba(232,72,58,.2);color:var(--red)">3</span></button>
     <div id="adminNav">
@@ -485,7 +484,6 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-certificates"></div>
     <div class="view" id="view-reports"></div>
     <div class="view" id="view-trainstatus"></div>
-    <div class="view" id="view-employeeanalytics"></div>
     <div class="view" id="view-notifications"></div>
     <div class="view" id="view-settings"></div>
   </div>
@@ -942,55 +940,6 @@ async function forceSyncToCloud(){
   }
 }
 
-/* Force-pull latest test results, certificates & video completion from Firebase 
-   so admin immediately sees employee activity without waiting for 30s auto-sync */
-async function forcePullResults(){
-  if(!firebaseReady||!isAdmin) return false;
-  try{
-    updateSyncUI('syncing');
-    // Pull test results
-    const fbTestSnap=await fbDB.collection('testResults').get();
-    const fbTests=fbTestSnap.docs.map(d=>d.data());
-    let newTests=0;
-    fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
-    // Pull certificates
-    const fbCertSnap=await fbDB.collection('certificates').get();
-    const fbCerts=fbCertSnap.docs.map(d=>d.data());
-    let newCerts=0;
-    fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
-    // Pull videos (for completedBy updates)
-    const fbVidSnap=await fbDB.collection('videos').get();
-    if(fbVidSnap.size>0){
-      const fbVids=fbVidSnap.docs.map(d=>d.data());
-      fbVids.forEach(fbV=>{
-        const local=DB.videos.find(v=>v.id===fbV.id);
-        if(local){local.completedBy=fbV.completedBy||[];local.views=fbV.views||0;}
-      });
-    }
-    // Pull trainings (for enrolled/completed updates)
-    const fbTrnSnap=await fbDB.collection('trainings').get();
-    if(fbTrnSnap.size>0){
-      const fbTrns=fbTrnSnap.docs.map(d=>d.data());
-      fbTrns.forEach(fbT=>{
-        const local=DB.trainings.find(t=>t.id===fbT.id);
-        if(local){local.enrolled=fbT.enrolled||[];local.completed=fbT.completed||[];local.completedDates=fbT.completedDates||{};}
-      });
-    }
-    // Reconcile training completions from test results
-    reconcileTrainingsFromResults();
-    // Save to localStorage
-    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-    updateSyncUI('idle');
-    _lastSyncTime=Date.now();
-    console.log('Force-pull: '+newTests+' new test results, '+newCerts+' new certificates');
-    return newTests>0||newCerts>0;
-  }catch(e){
-    console.warn('Force-pull error:',e);
-    updateSyncUI('idle');
-    return false;
-  }
-}
-
 // Test Firebase connection — writes and reads a test doc to verify permissions
 async function testFirebaseConnection(){
   const el=document.getElementById('fbTestResult');
@@ -1292,7 +1241,7 @@ async function doLogin(){
         }
       }
       if(!emp){
-        console.error('[LOGIN] Employee not found. Local employees:',DB.employees.map(e=>e.id),'Cloud error occurred:',!!fbLoadError);
+        console.error('[LOGIN] Employee not found. Local employees:',DB.employees.map(e=>e.id),'Total in DB:',DB.employees.length);
         toast("Employee ID \""+empId+"\" not found. "+(DB.employees.length===0?'No employees loaded from cloud. Admin must fix Firebase first.':'Available: '+DB.employees.map(e=>e.id).join(', ')),"error",6000);
         return;
       }
@@ -1330,7 +1279,8 @@ async function doLogin(){
     if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
     startApp();
   }catch(e){
-    toast("Login failed. Please try again.","error");
+    console.error('doLogin CRASH:',e);
+    toast("Login error: "+(e.message||e),"error",6000);
   }finally{
     const btn=document.getElementById("loginBtn");
     if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
@@ -1439,10 +1389,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",videos:"Video Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",employeeanalytics:"Employee Analytics",notifications:"Notifications",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",videos:"Video Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,videos:renderVideos,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,employeeanalytics:renderEmployeeAnalytics,notifications:renderNotifications,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,videos:renderVideos,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,settings:renderSettings};
   if(renderers[v])renderers[v]();
   closeSidebar();
 }
@@ -1480,6 +1430,13 @@ function renderNotifPanel(){
 }
 function readNotif(id){const n=DB.notifications.find(x=>x.id===id);if(n){n.read=true;renderNotifPanel();updateBadges();saveDB();}}
 function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel();updateBadges();saveDB();}
+// CRITICAL: Re-render all views — called after sync to show latest data
+function renderAll(){
+  updateBadges();
+  renderNotifPanel();
+  const fn={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,videos:renderVideos,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,settings:renderSettings};
+  if(currentView&&fn[currentView])fn[currentView]();
+}
 renderNotifPanel();
 
 /* ============================================================
@@ -1518,6 +1475,7 @@ function renderDashboard(){
   const compPct=DB.testResults.length?Math.round(completed/DB.testResults.length*100):0;
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn btn-sm btn-green" onclick="pullLatestResults()"><span class="mat-ico" style="font-size:12px;">cloud_download</span> Pull Latest Scores from Employee Phones</button></div>
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
     <p style="color:var(--muted);font-size:13px;">PTS SAFETY Training Management — ${new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p></div>
     <div class="stat-grid" style="margin-bottom:18px;">
@@ -2204,18 +2162,6 @@ async function saveTraining(){
 }
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
-  // CRITICAL FIX: Force-pull latest results from Firebase so admin sees fresh data
-  if(isAdmin&&firebaseReady){
-    (async function(){
-      const pulled=await forcePullResults();
-      if(pulled) toast('Latest employee results loaded','success',2000);
-      showTrainingDetailModal(t);
-    })();
-  }else{
-    showTrainingDetailModal(t);
-  }
-}
-function showTrainingDetailModal(t){
   const enrolledEmps=DB.employees.filter(e=>(t.enrolled||[]).includes(e.id));
   openModal(`
     <div class="modal-accent"></div>
@@ -2235,37 +2181,32 @@ function showTrainingDetailModal(t){
       </div>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn btn-amber" onclick="assignEmployees('${t.id}')"><span class="mat-ico">person_add</span> Assign Employees</button>
-        <button class="btn btn-green" onclick="openTrainingDetail('${t.id}')"><span class="mat-ico">refresh</span> Refresh Scores</button>
         <button class="btn btn-outline" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico">quiz</span> Take Test</button>
         <button class="btn btn-red" onclick="deleteTraining('${t.id}')"><span class="mat-ico">delete</span> Delete</button>
       </div>
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status & Scores</div>
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table>
-        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Video</th><th>Status</th><th>Best Score</th><th>All Attempts</th><th>Completion Date</th><th>Certificate</th></tr></thead>
+        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
-          const allResults=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
-          const bestResult=allResults.find(r=>r.pass);
-          const anyResult=allResults[0]||null;
-          const done=!!bestResult||(t.completed||[]).includes(e.id);
+          const bestResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+          const anyResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
+          const doneFromResult=!!bestResult;
+          const done=doneFromResult||(t.completed||[]).includes(e.id);
           const completedDate=bestResult?bestResult.date:((t.completedDates||{})[e.id]||"");
           const result=bestResult||anyResult;
           const cert=DB.certificates.find(c=>c.empId===e.id&&c.training===t.name);
-          const videoData=t.fromVideo?DB.videos.find(v=>v.id===t.fromVideo):null;
-          const videoWatched=videoData&&(videoData.completedBy||[]).includes(e.id);
           return`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${e.id}</td>
             <td><b>${e.name}</b></td>
             <td><span class="badge badge-info">${e.dept}</span></td>
-            <td>${t.fromVideo?`<span class="badge badge-${videoWatched?"active":"warning"}">${videoWatched?"✅ Watched":"⏳ Not Watched"}</span>`:"<span style=\"color:var(--muted);font-size:11px;\">N/A</span>`}</td>
             <td><span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span></td>
-            <td>${result?`<b style="color:${result.pass?"var(--green)":"var(--red)"}">${result.score}%</b> <span style=\"font-size:10px;color:var(--muted);\">(${result.correct}/${result.total})</span>`:"—"}</td>
-            <td>${allResults.length?`<div style=\"display:flex;flex-direction:column;gap:2px;\">${allResults.map((r,i)=>`<div style=\"font-size:10px;\"><span style=\"color:var(--muted);\">#${r.attempt||i+1}</span> <b style=\"color:${r.pass?"var(--green)":"var(--red)"}\">${r.score}%</b> <span style=\"color:var(--muted);\">${formatDate(r.date)}</span></div>`).join("")}</div>`:"—"}</td>
             <td style="font-weight:600;">${completedDate?formatDate(completedDate):"—"}</td>
+            <td>${result?`<b style="color:${result.pass?"var(--green)":"var(--red)"}">${result.score}%</b>`:"—"}</td>
             <td>${cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${cert.num}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`:"—"}</td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
     </div>
-  `,"900px");
+  `,"800px");
 }
 function assignEmployees(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
@@ -3020,6 +2961,8 @@ function submitQuiz(){
   updateBadges();
   saveDB();
   // Force immediate Firebase save for test result so it's not lost
+  let cloudSaveOk=true;
+  let cloudSaveErr='';
   if(firebaseReady){
     (async function(){
       try{
@@ -3030,9 +2973,26 @@ function submitQuiz(){
           if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
         }
         console.log('Quiz result saved to Firebase immediately');
-      }catch(e){console.warn('Firebase quiz save error:',e);}
+        // Update the sync status indicator on the result screen
+        const syncEl=document.getElementById('quizCloudSyncStatus');
+        if(syncEl){syncEl.style.display='none';}
+      }catch(e){
+        cloudSaveOk=false;
+        cloudSaveErr=e.message||String(e);
+        console.error('Firebase quiz save error:',e);
+        // Show VISIBLE error on the result screen so employee knows
+        const syncEl=document.getElementById('quizCloudSyncStatus');
+        if(syncEl){
+          syncEl.style.display='flex';
+          syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--red);">cloud_off</span><div><b style="color:var(--red);">Score NOT saved to cloud!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">Error: '+cloudSaveErr.substring(0,100)+'</div><button class="btn btn-sm btn-amber" style="margin-top:6px;" onclick="retryQuizCloudSave(\''+result.id+'\',\''+certNum+'\')"><span class="mat-ico" style="font-size:11px;">refresh</span> Retry Upload</button></div>';
+        }
+        if(typeof toast==='function') toast('Cloud save FAILED! Your score is saved locally but admin cannot see it yet. Tap Retry.','error',8000);
+      }
     })();
   }
+  // Store result ID globally for retry
+  window._lastQuizResultId=result.id;
+  window._lastQuizCertNum=certNum;
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
@@ -3071,11 +3031,75 @@ function submitQuiz(){
         <button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${(quizState.training||"").replace(/'/g,"\\'")}')"><span class="mat-ico">refresh</span> Retake Test</button>
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
+      <div id="quizCloudSyncStatus" style="display:none;align-items:flex-start;gap:10px;margin-top:14px;padding:12px;background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);">
+        <span class="mat-ico" style="font-size:16px;color:var(--green);">sync</span>
+        <div><b style="color:var(--green);font-size:12px;">Saving score to cloud...</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">Admin will see your score once upload completes.</div></div>
+      </div>
     </div>
   `;
+  if(firebaseReady){const ss=document.getElementById("quizCloudSyncStatus");if(ss)ss.style.display="flex";}
   if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
   else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
+}
+
+/* ============================================================
+   PULL LATEST RESULTS (Admin)
+============================================================ */
+async function pullLatestResults(){
+  if(!firebaseReady){toast("Firebase not connected","error");return;}
+  toast("Pulling latest scores from cloud...","info",2000);
+  try{
+    const fbTestSnap=await fbDB.collection('testResults').get();
+    const fbTests=fbTestSnap.docs.map(d=>d.data());
+    let newTests=0;
+    fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
+    const fbCertSnap=await fbDB.collection('certificates').get();
+    const fbCerts=fbCertSnap.docs.map(d=>d.data());
+    let newCerts=0;
+    fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
+    reconcileTrainingsFromResults();
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    updateBadges();
+    if(typeof renderAll==='function') renderAll();
+    toast("Pulled "+newTests+" new test results, "+newCerts+" new certificates","success",4000);
+  }catch(e){
+    toast("Pull failed: "+e.message,"error",6000);
+  }
+}
+
+/* ============================================================
+   QUIZ CLOUD RETRY
+============================================================ */
+async function retryQuizCloudSave(resultId, certNum){
+  const syncEl=document.getElementById('quizCloudSyncStatus');
+  if(syncEl){
+    syncEl.style.display='flex';
+    syncEl.style.background='rgba(255,176,32,.06)';
+    syncEl.style.borderColor='rgba(255,176,32,.2)';
+    syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--amber);animation:spin 1s linear infinite;">sync</span><div><b style="color:var(--amber);font-size:12px;">Retrying upload...</b></div>';
+  }
+  try{
+    const r=DB.testResults.find(x=>x.id===resultId);
+    if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
+    if(certNum){
+      const c=DB.certificates.find(x=>x.num===certNum);
+      if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
+    }
+    if(syncEl){
+      syncEl.style.background='rgba(62,207,142,.06)';
+      syncEl.style.borderColor='rgba(62,207,142,.2)';
+      syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--green);">cloud_done</span><div><b style="color:var(--green);font-size:12px;">Score uploaded to cloud!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">Admin can now see your result.</div></div>';
+    }
+    toast('Score uploaded to cloud successfully!','success',4000);
+  }catch(e){
+    if(syncEl){
+      syncEl.style.background='rgba(232,72,58,.06)';
+      syncEl.style.borderColor='rgba(232,72,58,.2)';
+      syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--red);">cloud_off</span><div><b style="color:var(--red);font-size:12px;">Upload FAILED again!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(e.message||'Unknown error').substring(0,80)+'</div><button class="btn btn-sm btn-amber" style="margin-top:6px;" onclick="retryQuizCloudSave(\''+resultId+'\',\''+certNum+'\')"><span class="mat-ico" style="font-size:11px;">refresh</span> Retry Again</button></div>';
+    }
+    toast('Upload failed: '+(e.message||'error'),'error',6000);
+  }
 }
 
 /* ============================================================
@@ -3184,7 +3208,7 @@ function renderReports(){
   const passCount=DB.testResults.filter(r=>r.pass).length;
   const failCount=DB.testResults.filter(r=>!r.pass).length;
   document.getElementById("view-reports").innerHTML=`
-    <div class="section-header"><div class="section-title">Reports & <span>Analytics</span></div></div>
+    <div class="section-header"><div class="section-title">Reports & <span>Analytics</span></div><div style="display:flex;gap:6px;"><button class="btn btn-green" onclick="pullLatestResults()"><span class="mat-ico">cloud_download</span> Pull Latest Scores</button></div></div>
     <div class="report-grid">
       ${reportCard("people","Employee Report","All employee details","#3ea0e8","exportEmpExcel()")}
       ${reportCard("school","Training Report","All training records","#8b6de8","exportTrnReport()")}
@@ -3194,6 +3218,24 @@ function renderReports(){
       ${reportCard("cancel","Fail Report","Failed employees","#e8483a","exportFailReport()")}
       ${reportCard("pending","Pending Report","Pending trainings","#ffb020","exportPendingReport()")}
       ${reportCard("bar_chart","Monthly Report","Month-wise stats","#3ea0e8","exportMonthlyReport()")}
+    </div>
+    <div class="chart-card" style="margin-bottom:14px;">
+      <div class="chart-card-title"><span class="dot"></span>Employee Activity Log (Latest Test Results)</div>
+      <div style="max-height:320px;overflow-y:auto;">
+        <table>
+          <thead><tr><th>Date</th><th>Employee</th><th>ID</th><th>Training</th><th>Score</th><th>Result</th></tr></thead>
+          <tbody>
+            ${DB.testResults.slice().reverse().slice(0,20).map(r=>`<tr>
+              <td style="font-size:11px;white-space:nowrap;">${formatDate(r.date)}</td>
+              <td style="font-weight:600;">${r.empName}</td>
+              <td class="mono" style="color:var(--amber);font-size:11px;">${r.empId}</td>
+              <td style="font-size:12px;">${r.training}</td>
+              <td><b style="color:${r.score>=70?"var(--green)":"var(--red)"};">${r.score}%</b></td>
+              <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
     </div>
     <div class="chart-card" style="margin-bottom:14px;">
       <div class="chart-card-title"><span class="dot"></span>Training Completion Overview</div>
@@ -3548,220 +3590,9 @@ async function testSheetConnection(){
    TRAINING STATUS MATRIX
 ============================================================ */
 let ts_filter_result="All",ts_filter_cert="All",ts_search="",ts_sort="empName";
-let ea_search="";let ea_filter_dept="All";let ea_sort="lastActivity";
-
-function renderEmployeeAnalytics(){
-  if(!isAdmin){document.getElementById("view-employeeanalytics").innerHTML="<div class='empty-state'><span class='mat-ico'>lock</span><h3>Admin Access Only</h3></div>";return;}
-  const emps=DB.employees.map(e=>{
-    const empTests=DB.testResults.filter(r=>r.empId===e.id);
-    const empCerts=DB.certificates.filter(c=>c.empId===e.id);
-    const assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(e.id)||t.dept==="All"||t.dept===e.dept);
-    const passedTrns=assignedTrns.filter(t=>DB.testResults.find(r=>r.empId===e.id&&r.training===t.name&&r.pass));
-    const pendingTrns=assignedTrns.filter(t=>!DB.testResults.find(r=>r.empId===e.id&&r.training===t.name&&r.pass));
-    // Video watch activity
-    const videosWatched=DB.videos.filter(v=>(v.completedBy||[]).includes(e.id));
-    const videoLinkedTrns=assignedTrns.filter(t=>t.fromVideo);
-    const videosPending=videoLinkedTrns.filter(t=>{const v=DB.videos.find(vv=>vv.id===t.fromVideo);return v&&!(v.completedBy||[]).includes(e.id);});
-    // Latest activity
-    const latestTest=empTests.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
-    const lastActivity=latestTest?latestTest.date:"No activity";
-    const bestScore=empTests.length?Math.max(...empTests.map(r=>r.score)):0;
-    const avgScore=empTests.length?Math.round(empTests.reduce((s,r)=>s+r.score,0)/empTests.length):0;
-    const totalAttempts=empTests.length;
-    const passCount=empTests.filter(r=>r.pass).length;
-    const failCount=empTests.filter(r=>!r.pass).length;
-    return{id:e.id,name:e.name,dept:e.dept,desig:e.desig,status:e.status,assignedTrns,passedTrns,pendingTrns,videosWatched,videosPending,latestTest,lastActivity,bestScore,avgScore,totalAttempts,passCount,failCount,empCerts,empTests};
-  });
-  // Filter
-  let filtered=emps.filter(e=>{
-    const q=ea_search.toLowerCase();
-    const matchSearch=!q||e.name.toLowerCase().includes(q)||e.id.toLowerCase().includes(q)||e.dept.toLowerCase().includes(q);
-    const matchDept=ea_filter_dept==="All"||e.dept===ea_filter_dept;
-    return matchSearch&&matchDept;
-  });
-  filtered.sort((a,b)=>{
-    if(ea_sort==="name")return a.name.localeCompare(b.name);
-    if(ea_sort==="score")return b.bestScore-a.bestScore;
-    if(ea_sort==="attempts")return b.totalAttempts-a.totalAttempts;
-    if(ea_sort==="completion")return b.passedTrns.length-a.passedTrns.length;
-    if(ea_sort==="lastActivity")return(b.lastActivity||"").localeCompare(a.lastActivity||"");
-    return 0;
-  });
-  // Summary stats
-  const totalEmps=filtered.length;
-  const totalTests=filtered.reduce((s,e)=>s+e.totalAttempts,0);
-  const totalPass=filtered.reduce((s,e)=>s+e.passCount,0);
-  const totalFail=filtered.reduce((s,e)=>s+e.failCount,0);
-  const totalPending=filtered.reduce((s,e)=>s+e.pendingTrns.length,0);
-  const totalCerts=filtered.reduce((s,e)=>s+e.empCerts.length,0);
-  const depts=["All",...[...new Set(DB.employees.map(e=>e.dept))]];
-  document.getElementById("view-employeeanalytics").innerHTML=`
-    <div class="section-header">
-      <div class="section-title">Employee <span>Analytics</span></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-green" onclick="(async function(){const p=await forcePullResults();renderEmployeeAnalytics();if(p)toast('Latest data pulled from cloud','success');else toast('Data is up to date','info');})()"><span class="mat-ico">cloud_download</span> Pull Latest Data</button>
-        <button class="btn btn-outline" onclick="exportAnalyticsExcel()"><span class="mat-ico">download</span> Export Excel</button>
-      </div>
-    </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 16px;display:flex;align-items:center;gap:8px;">
-        <span class="mat-ico" style="color:var(--blue);font-size:18px;">people</span>
-        <div><div style="font-size:18px;font-weight:700;">${totalEmps}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Employees</div></div>
-      </div>
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 16px;display:flex;align-items:center;gap:8px;">
-        <span class="mat-ico" style="color:var(--purple);font-size:18px;">quiz</span>
-        <div><div style="font-size:18px;font-weight:700;">${totalTests}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Total Attempts</div></div>
-      </div>
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 16px;display:flex;align-items:center;gap:8px;">
-        <span class="mat-ico" style="color:var(--green);font-size:18px;">check_circle</span>
-        <div><div style="font-size:18px;font-weight:700;color:var(--green);">${totalPass}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Passed</div></div>
-      </div>
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 16px;display:flex;align-items:center;gap:8px;">
-        <span class="mat-ico" style="color:var(--red);font-size:18px;">cancel</span>
-        <div><div style="font-size:18px;font-weight:700;color:var(--red);">${totalFail}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Failed</div></div>
-      </div>
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 16px;display:flex;align-items:center;gap:8px;">
-        <span class="mat-ico" style="color:var(--orange);font-size:18px;">pending</span>
-        <div><div style="font-size:18px;font-weight:700;color:var(--orange);">${totalPending}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Pending</div></div>
-      </div>
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 16px;display:flex;align-items:center;gap:8px;">
-        <span class="mat-ico" style="color:var(--amber);font-size:18px;">workspace_premium</span>
-        <div><div style="font-size:18px;font-weight:700;color:var(--amber);">${totalCerts}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Certificates</div></div>
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-      <div class="search-wrap" style="flex:1;min-width:200px;max-width:340px;">
-        <span class="mat-ico">search</span>
-        <input class="search-bar" placeholder="Search name, ID, department..." oninput="ea_search=this.value;renderEmployeeAnalytics()" value="${ea_search}">
-      </div>
-      <select class="form-control-sm" style="width:140px;" onchange="ea_filter_dept=this.value;renderEmployeeAnalytics()">
-        ${depts.map(d=>`<option value="${d}" ${ea_filter_dept===d?"selected":""}>${d==="All"?"All Departments":d}</option>`).join("")}
-      </select>
-      <select class="form-control-sm" style="width:150px;" onchange="ea_sort=this.value;renderEmployeeAnalytics()">
-        <option value="lastActivity" ${ea_sort==="lastActivity"?"selected":""}>Sort: Last Activity</option>
-        <option value="name" ${ea_sort==="name"?"selected":""}>Sort: Name</option>
-        <option value="score" ${ea_sort==="score"?"selected":""}>Sort: Best Score</option>
-        <option value="attempts" ${ea_sort==="attempts"?"selected":""}>Sort: Attempts</option>
-        <option value="completion" ${ea_sort==="completion"?"selected":""}>Sort: Completion</option>
-      </select>
-      <span style="font-size:11.5px;color:var(--muted);">Showing <b>${filtered.length}</b> employees</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>#</th><th>Employee</th><th>Department</th><th>Trainings</th><th>Completed</th><th>Pending</th><th>Video Watched</th><th>Video Pending</th><th>Total Attempts</th><th>Pass / Fail</th><th>Best Score</th><th>Avg Score</th><th>Latest Activity</th><th>Certificates</th><th>Action</th></tr></thead>
-        <tbody>
-          ${filtered.length?filtered.map((e,i)=>{
-            const completionPct=e.assignedTrns.length?Math.round(e.passedTrns.length/e.assignedTrns.length*100):0;
-            return`<tr>
-              <td style="color:var(--muted);font-size:11px;">${i+1}</td>
-              <td><div style="display:flex;align-items:center;gap:7px;"><div class="avatar" style="width:30px;height:30px;font-size:11px;background:${avatarColor(e.name)}">${avatarInitials(e.name)}</div><div><div style="font-weight:700;font-size:12.5px;">${e.name}</div><div class="mono" style="font-size:10px;color:var(--amber);">${e.id}</div><div style="font-size:10px;color:var(--muted);">${e.desig||""}</div></div></div></td>
-              <td><span class="badge badge-info" style="font-size:9px;">${e.dept}</span></td>
-              <td style="text-align:center;font-weight:600;">${e.assignedTrns.length}</td>
-              <td style="text-align:center;"><span style="color:var(--green);font-weight:700;">${e.passedTrns.length}</span></td>
-              <td style="text-align:center;"><span style="color:${e.pendingTrns.length?"var(--orange)":"var(--green)"};font-weight:600;">${e.pendingTrns.length}</span></td>
-              <td style="text-align:center;"><span style="color:var(--green);font-weight:600;">${e.videosWatched.length}</span></td>
-              <td style="text-align:center;"><span style="color:${e.videosPending.length?"var(--orange)":"var(--green)"};font-weight:600;">${e.videosPending.length}</span></td>
-              <td style="text-align:center;font-weight:600;">${e.totalAttempts}</td>
-              <td style="text-align:center;"><span style="color:var(--green);font-weight:700;">${e.passCount}</span> / <span style="color:var(--red);font-weight:700;">${e.failCount}</span></td>
-              <td style="text-align:center;"><b style="color:${e.bestScore>=70?"var(--green)":"var(--red)"};font-size:14px;">${e.totalAttempts?e.bestScore+"%":"—"}</b></td>
-              <td style="text-align:center;">${e.totalAttempts?e.avgScore+"%":"—"}</td>
-              <td style="font-size:11px;white-space:nowrap;">${e.lastActivity!=="No activity"?formatDate(e.lastActivity):"<span style=\"color:var(--muted);\">No activity</span>"}</td>
-              <td>${e.empCerts.length?`<span style="color:var(--amber);font-weight:700;">${e.empCerts.length}</span>`:"<span style=\"color:var(--muted);\">0</span>"}</td>
-              <td><div style="display:flex;gap:4px;flex-wrap:wrap;">
-                <button class="btn btn-sm btn-outline" style="padding:4px 8px;" onclick="showEmployeeDetail('${e.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button>
-                ${e.empCerts.length?e.empCerts.map(c=>`<button class="btn btn-sm btn-amber" style="padding:4px 8px;" onclick="downloadCertificate('${c.num}')" title="${c.training}"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`).join(""):""}
-              </div></td>
-            </tr>`;
-          }).join(""):`<tr><td colspan="15" style="text-align:center;padding:40px;color:var(--muted);"><span class="mat-ico" style="font-size:36px;display:block;margin-bottom:8px;opacity:.3;">insights</span>No employee data found.</td></tr>`}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function showEmployeeDetail(empId){
-  const emp=DB.employees.find(e=>e.id===empId);if(!emp)return;
-  const empTests=DB.testResults.filter(r=>r.empId===empId).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-  const empCerts=DB.certificates.filter(c=>c.empId===empId);
-  const assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||t.dept==="All"||t.dept===emp.dept);
-  const videosWatched=DB.videos.filter(v=>(v.completedBy||[]).includes(empId));
-  const videoLinkedPending=assignedTrns.filter(t=>{if(!t.fromVideo)return false;const v=DB.videos.find(vv=>vv.id===t.fromVideo);return v&&!(v.completedBy||[]).includes(empId);});
-  openModal(`
-    <div class="modal-accent"></div>
-    <div class="modal-head">
-      <div class="avatar" style="width:40px;height:40px;font-size:16px;background:${avatarColor(emp.name)}">${avatarInitials(emp.name)}</div>
-      <div><h2>${emp.name}</h2><span class="badge badge-info">${emp.dept}</span> <span class="badge" style="background:var(--sur3);color:var(--muted);">${emp.desig||""}</span> <span class="mono" style="font-size:11px;color:var(--amber);">${emp.id}</span></div>
-      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
-    </div>
-    <div class="modal-body">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
-        <div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--green);">${empCerts.length}</div><div style="font-size:10px;color:var(--muted);">Certificates</div></div>
-        <div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--purple);">${empTests.length}</div><div style="font-size:10px;color:var(--muted);">Test Attempts</div></div>
-        <div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--blue);">${videosWatched.length}</div><div style="font-size:10px;color:var(--muted);">Videos Watched</div></div>
-        <div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;text-align:center;"><div style="font-size:20px;font-weight:700;color:var(--orange);">${videoLinkedPending.length}</div><div style="font-size:10px;color:var(--muted);">Videos Pending</div></div>
-      </div>
-      ${videosWatched.length?`<div style="margin-bottom:14px;"><div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--green);margin-bottom:6px;">Videos Watched (${videosWatched.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${videosWatched.map(v=>`<span class="badge badge-active">${v.title}</span>`).join("")}</div></div>`:""}
-      ${videoLinkedPending.length?`<div style="margin-bottom:14px;"><div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--orange);margin-bottom:6px;">Videos Not Yet Watched (${videoLinkedPending.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${videoLinkedPending.map(t=>`<span class="badge badge-warning">${t.videoTitle||t.name}</span>`).join("")}</div></div>`:""}
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Full Test History (${empTests.length} attempts)</div>
-      ${empTests.length?`<div class="table-wrap" style="max-height:350px;overflow-y:auto;"><table>
-        <thead><tr><th>#</th><th>Training</th><th>Category</th><th>Score</th><th>Correct/Wrong/Total</th><th>Result</th><th>Date</th><th>Certificate</th></tr></thead>
-        <tbody>${empTests.map((r,i)=>{
-          const cert=DB.certificates.find(c=>c.empId===empId&&c.training===r.training&&c.issued===r.date);
-          return`<tr>
-            <td style="color:var(--muted);font-size:11px;">${i+1}</td>
-            <td style="font-weight:600;font-size:12px;">${r.training}</td>
-            <td style="font-size:11px;color:var(--muted);">${r.cat||""}</td>
-            <td><b style="color:${r.pass?"var(--green)":"var(--red)"};font-size:14px;">${r.score}%</b></td>
-            <td style="font-size:11px;"><span style="color:var(--green);">${r.correct}</span> / <span style="color:var(--red);">${r.wrong}</span> / ${r.total}</td>
-            <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
-            <td style="font-size:11px;white-space:nowrap;">${formatDate(r.date)}</td>
-            <td>${cert?`<button class="btn btn-sm btn-amber" style="padding:3px 6px;" onclick="downloadCertificate('${cert.num}')"><span class="mat-ico" style="font-size:10px;">workspace_premium</span></button>`:"—"}</td>
-          </tr>`;
-        }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No test attempts yet.</p>"}
-      ${empCerts.length?`<div style="margin-top:14px;"><div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:6px;">Certificates Earned (${empCerts.length})</div><div class="table-wrap"><table><thead><tr><th>Cert No</th><th>Training</th><th>Score</th><th>Issued</th><th>Expiry</th><th>Action</th></tr></thead><tbody>${empCerts.map(c=>`<tr><td class="mono" style="font-size:10px;color:var(--purple);">${c.num}</td><td style="font-size:12px;">${c.training}</td><td><b>${c.score}%</b></td><td style="font-size:11px;">${formatDate(c.issued)}</td><td style="font-size:11px;">${formatDate(c.expiry)}</td><td><button class="btn btn-sm btn-amber" style="padding:3px 6px;" onclick="downloadCertificate('${c.num}')"><span class="mat-ico" style="font-size:10px;">download</span></button></td></tr>`).join("")}</tbody></table></div></div>`:""}
-    </div>
-  `,"900px");
-}
-
-function exportAnalyticsExcel(){
-  const rows=DB.employees.map(e=>{
-    const empTests=DB.testResults.filter(r=>r.empId===e.id);
-    const empCerts=DB.certificates.filter(c=>c.empId===e.id);
-    const assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(e.id)||t.dept==="All"||t.dept===e.dept);
-    const passedTrns=assignedTrns.filter(t=>DB.testResults.find(r=>r.empId===e.id&&r.training===t.name&&r.pass));
-    const pendingTrns=assignedTrns.filter(t=>!DB.testResults.find(r=>r.empId===e.id&&r.training===t.name&&r.pass));
-    const videosWatched=DB.videos.filter(v=>(v.completedBy||[]).includes(e.id)).length;
-    const bestScore=empTests.length?Math.max(...empTests.map(r=>r.score)):0;
-    const avgScore=empTests.length?Math.round(empTests.reduce((s,r)=>s+r.score,0)/empTests.length):0;
-    const latestTest=empTests.sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
-    return{"Employee ID":e.id,"Name":e.name,"Department":e.dept,"Designation":e.desig||"","Total Trainings":assignedTrns.length,"Completed":passedTrns.length,"Pending":pendingTrns.length,"Videos Watched":videosWatched,"Total Test Attempts":empTests.length,"Passed":empTests.filter(r=>r.pass).length,"Failed":empTests.filter(r=>!r.pass).length,"Best Score (%)":bestScore,"Avg Score (%)":avgScore,"Latest Activity":latestTest?latestTest.date:"No activity","Certificates":empCerts.length,"Cert Numbers":empCerts.map(c=>c.num).join(", ")};
-  });
-  if(!rows.length){toast("No data to export","warning");return;}
-  // Main sheet
-  const ws=XLSX.utils.json_to_sheet(rows);
-  ws["!cols"]=[{wch:12},{wch:22},{wch:16},{wch:20},{wch:14},{wch:10},{wch:10},{wch:14},{wch:14},{wch:8},{wch:8},{wch:12},{wch:12},{wch:14},{wch:12},{wch:30}];
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,"Employee Analytics");
-  // Detailed test results sheet
-  const detailRows=DB.testResults.map(r=>({"Employee ID":r.empId,"Employee Name":r.empName,"Department":r.dept,"Training":r.training,"Category":r.cat||"","Score (%)":r.score,"Correct":r.correct,"Wrong":r.wrong,"Total":r.total,"Result":r.pass?"PASS":"FAIL","Attempt #":r.attempt||1,"Date":r.date,"Certificate":r.cert||""}));
-  if(detailRows.length){const ws2=XLSX.utils.json_to_sheet(detailRows);ws2["!cols"]=[{wch:12},{wch:22},{wch:16},{wch:30},{wch:18},{wch:10},{wch:8},{wch:8},{wch:8},{wch:10},{wch:10},{wch:12},{wch:20}];XLSX.utils.book_append_sheet(wb,ws2,"All Test Results");}
-  XLSX.writeFile(wb,"Employee_Analytics_"+new Date().toISOString().split("T")[0]+".xlsx");
-  toast("Analytics exported","success");
-}
-
 function renderTrainStatus(){
   if(!isAdmin){document.getElementById("view-trainstatus").innerHTML="<div class='empty-state'><span class='mat-ico'>lock</span><h3>Admin Access Only</h3></div>";return;}
-  // Auto-pull latest results from Firebase when admin opens this view
-  if(firebaseReady){
-    (async function(){
-      await forcePullResults();
-      _renderTrainStatusTable();
-    })();
-  }else{
-    _renderTrainStatusTable();
-  }
-}
-function _renderTrainStatusTable(){
+  const rows=[];
   DB.trainings.forEach(trn=>{
     (trn.enrolled||[]).forEach(empId=>{
       const emp=DB.employees.find(e=>e.id===empId);if(!emp)return;
@@ -3804,8 +3635,8 @@ function _renderTrainStatusTable(){
     <div class="section-header">
       <div class="section-title">Training Completion <span>Status</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="btn btn-green" onclick="(async function(){await forcePullResults();_renderTrainStatusTable();toast('Data refreshed from cloud','success');})()"><span class="mat-ico">cloud_download</span> Pull Latest</button>
-        <button class="btn btn-outline" onclick="syncToGoogleSheet()"><span class="mat-ico">table_chart</span> Sync to Google Sheets</button>
+        <button class="btn btn-green" onclick="pullLatestResults()"><span class="mat-ico">cloud_download</span> Pull Latest Scores</button>
+        <button class="btn btn-green" onclick="syncToGoogleSheet()"><span class="mat-ico">table_chart</span> Sync to Google Sheets</button>
         <button class="btn btn-outline" onclick="exportFullStatusReport()"><span class="mat-ico">download</span> Export Excel</button>
       </div>
     </div>
@@ -4163,8 +3994,8 @@ async function loadDBFromFirestore(){
           DB.trainings=[...cloudTrns,...localOnly];
         }
       }],
-      ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
-      ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
+      ['testResults','id',d=>{if(d.size>0){const cloudTests=d.docs.map(x=>x.data());cloudTests.forEach(ct=>{if(!DB.testResults.find(r=>r.id===ct.id)){DB.testResults.push(ct);}});}}],
+      ['certificates','num',d=>{if(d.size>0){const cloudCerts=d.docs.map(x=>x.data());cloudCerts.forEach(cc=>{if(!DB.certificates.find(c=>c.num===cc.num)){DB.certificates.push(cc);}});}}],
       ['videos','id',d=>{
         if(d.size>0){
           const cloudVids=d.docs.map(x=>x.data());
@@ -4362,3 +4193,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
