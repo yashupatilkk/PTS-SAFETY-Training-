@@ -1735,18 +1735,20 @@ async function saveEmployee(){
   var empLoc=document.getElementById('ne_loc').value||'Site';
   // 1. Add to local array
   DB.employees.push({id:id,name:name,dept:empDept,desig:empDesig,shift:empShift,mobile:mobile,email:empEmail,status:'active',joining:empJoin,location:empLoc,password:empPw,company:DB.settings.companyName,photo:'',_localAddedAt:Date.now()});
-  // 2. Save to localStorage IMMEDIATELY (guaranteed save)
+  // 2. ALWAYS remove tombstone for this ID (even if Firebase is not ready)
+  //    This prevents applyTombstones() from filtering out a re-added employee on next reload
+  try{removeFromTombstone('employees',id);}catch(e){console.warn('removeFromTombstone error:',e);}
+  // 3. Save to localStorage IMMEDIATELY (guaranteed save)
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save error:',e);}
-  // 3. Close modal and re-render
+  // 4. Close modal and re-render
   try{closeModal();}catch(e){console.warn('closeModal error:',e);}
   try{renderEmployees();updateBadges();}catch(e){console.warn('renderEmployees error:',e);}
   saved=true;
-  toast('Employee '+name+' added successfully! ('+DB.employees.length+' total)','success');
-  // 4. Firebase sync in BACKGROUND
+  toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
+  // 5. Firebase sync in BACKGROUND (non-blocking)
   if(firebaseReady){
     (async function(){
       try{
-        await removeFromTombstone('employees',id);
         var authEmail=toEmail(id);
         try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);}catch(authErr){
           if(authErr.code==='auth/email-already-in-use'){
@@ -1832,30 +1834,37 @@ function viewEmpHistory(id){
 }
 function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
 async function deleteEmp(id){
-  if(!confirm("Delete this employee PERMANENTLY? All data will be erased from everywhere. This cannot be undone."))return;
+  const emp=DB.employees.find(e=>e.id===id);
+  const empName=emp?emp.name:id;
+  if(!confirm("Delete employee \""+empName+"\" ("+id+") PERMANENTLY? All data will be erased. This cannot be undone."))return;
 
   // === STEP 1: Collect IDs to delete from Firebase BEFORE touching local arrays ===
   const testResultIds=DB.testResults.filter(r=>r.empId===id).map(r=>r.id);
   const certNums=DB.certificates.filter(c=>c.empId===id).map(c=>c.num);
 
-  // === STEP 2: Clean ALL local data + AWAIT tombstone cloud writes ===
+  // === STEP 2: Clean ALL local data + save to localStorage IMMEDIATELY
   DB.employees=DB.employees.filter(e=>e.id!==id);
-  const tombPromises=[addToTombstone('employees',id)];
+  DB.testResults=DB.testResults.filter(r=>r.empId!==id);
+  DB.certificates=DB.certificates.filter(c=>c.empId!==id);
   DB.trainings.forEach(t=>{
     if(t.enrolled) t.enrolled=t.enrolled.filter(eid=>eid!==id);
     if(t.completed) t.completed=t.completed.filter(eid=>eid!==id);
     if(t.completedDates) delete t.completedDates[id];
   });
-  DB.testResults=DB.testResults.filter(r=>r.empId!==id);
-  testResultIds.forEach(tid=>tombPromises.push(addToTombstone('testResults',tid)));
-  DB.certificates=DB.certificates.filter(c=>c.empId!==id);
-  certNums.forEach(cnum=>tombPromises.push(addToTombstone('certificates',cnum)));
   DB.videos.forEach(v=>{if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);});
   DB.notifications=DB.notifications.filter(n=>!n.msg||!n.msg.includes(id));
-  // AWAIT all tombstone cloud writes so other devices know about deletion immediately
+  // CRITICAL: Save to localStorage IMMEDIATELY so delete is persistent even if Firebase fails
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
+  // Re-render immediately so UI reflects the deletion
+  renderEmployees();renderTrainings();renderCertificates();renderQuizMenu();updateBadges();
+
+  // === STEP 3: Add tombstones (local + cloud) for cross-device sync ===
+  const tombPromises=[addToTombstone('employees',id)];
+  testResultIds.forEach(tid=>tombPromises.push(addToTombstone('testResults',tid)));
+  certNums.forEach(cnum=>tombPromises.push(addToTombstone('certificates',cnum)));
   await Promise.all(tombPromises);
 
-  // === STEP 3: Delete from Firebase FIRST (before saveDB pushes) ===
+  // === STEP 4: Delete from Firebase directly (best-effort) ===
   if(firebaseReady){
     try{await fbDB.collection('employees').doc(String(id)).delete();}catch(e){console.warn('FB del employee:',e);}
     for(const tid of testResultIds){
@@ -1866,13 +1875,12 @@ async function deleteEmp(id){
     }
   }
 
-  // === STEP 4: Save cleaned local data now (cloud docs already deleted) ===
-  await new Promise(r=>{saveDB();setTimeout(r,1500);});
+  // === STEP 5: Push cleaned data to cloud ===
+  if(firebaseReady){await new Promise(r=>{saveDB();setTimeout(r,1500);});}
 
-  // === STEP 5: Mark deletion time and re-render ===
+  // === STEP 6: Mark deletion time ===
   _lastDeleteTime=Date.now();
-  renderEmployees();renderTrainings();renderCertificates();renderQuizMenu();updateBadges();
-  toast("Employee PERMANENTLY deleted","warning");
+  toast("Employee \""+empName+"\" ("+id+") deleted permanently","warning");
 }
 function exportEmpExcel(){
   const ws=XLSX.utils.json_to_sheet(DB.employees.map(e=>({
@@ -3657,9 +3665,24 @@ async function loadTombstonesFromCloud(){
   try{
     const snap=await fbDB.collection('deletedItems').get();
     let added=0;
+    // Build sets of IDs that EXIST in current DB — if an item was re-added locally,
+    // do NOT apply its old tombstone (it was intentionally re-added)
+    const existingEmpIds=new Set(DB.employees.map(e=>e.id));
+    const existingTrnIds=new Set(DB.trainings.map(t=>t.id));
+    const existingVidIds=new Set(DB.videos.map(v=>v.id));
+    const existingSopIds=new Set(DB.sops.map(s=>s.id));
+    const existingTestIds=new Set(DB.testResults.map(r=>r.id));
+    const existingCertNums=new Set(DB.certificates.map(c=>c.num));
     snap.docs.forEach(d=>{
       const data=d.data();
       if(data&&data.collection&&data.id){
+        // Skip tombstones for items that currently exist in DB (re-added items)
+        if(data.collection==='employees'&&existingEmpIds.has(data.id))return;
+        if(data.collection==='trainings'&&existingTrnIds.has(data.id))return;
+        if(data.collection==='videos'&&existingVidIds.has(data.id))return;
+        if(data.collection==='sops'&&existingSopIds.has(data.id))return;
+        if(data.collection==='testResults'&&existingTestIds.has(data.id))return;
+        if(data.collection==='certificates'&&existingCertNums.has(data.id))return;
         if(!_deletedIds[data.collection])_deletedIds[data.collection]=[];
         if(!_deletedIds[data.collection].includes(data.id)){
           _deletedIds[data.collection].push(data.id);
@@ -3668,7 +3691,7 @@ async function loadTombstonesFromCloud(){
       }
     });
     if(added)saveTombstones();
-    console.log('Loaded tombstones from cloud: '+snap.size+' entries ('+added+' new)');
+    console.log('Loaded tombstones from cloud: '+snap.size+' entries ('+added+' new, skipped items that exist in DB)');
     return added;
   }catch(e){console.warn('Load cloud tombstones error:',e);return 0;}
 }
