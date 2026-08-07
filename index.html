@@ -768,62 +768,11 @@ TRAINING_CATS.forEach(cat=>{
    DATABASE
 ============================================================ */
 let DB={
-  employees:[
-    {id:"EMP001",name:"Rajesh Kumar",dept:"Electrical",desig:"Electrical Technician",shift:"Day",mobile:"9876543210",email:"rajesh@site.com",status:"active",joining:"2022-01-15",manager:"MGR001",location:"Main Building",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP002",name:"Suresh Patel",dept:"Fire Fighting",desig:"Fire Marshal",shift:"Day",mobile:"9876543211",email:"suresh@site.com",status:"active",joining:"2021-06-01",manager:"MGR001",location:"Zone A",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP003",name:"Priya Sharma",dept:"HVAC",desig:"HVAC Technician",shift:"Night",mobile:"9876543212",email:"priya@site.com",status:"active",joining:"2023-03-10",manager:"MGR002",location:"Plant Room",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP004",name:"Amit Singh",dept:"Plumbing",desig:"Plumber",shift:"Day",mobile:"9876543213",email:"amit@site.com",status:"inactive",joining:"2020-11-20",manager:"MGR001",location:"Pump Room",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP005",name:"Kavya Reddy",dept:"Soft Services",desig:"Housekeeper",shift:"Morning",mobile:"9876543214",email:"kavya@site.com",status:"active",joining:"2023-07-01",manager:"MGR003",location:"All Floors",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP006",name:"Mohammed Ali",dept:"Security",desig:"Security Guard",shift:"Night",mobile:"9876543215",email:"mali@site.com",status:"active",joining:"2022-09-15",manager:"MGR003",location:"Entry Gate",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP007",name:"Deepa Nair",dept:"Admin",desig:"Admin Executive",shift:"Day",mobile:"9876543216",email:"deepa@site.com",status:"active",joining:"2021-04-05",manager:"MGR001",location:"Admin Office",photo:"",password:"emp123",company:"MEP Solutions"},
-    {id:"EMP008",name:"Venkat Rao",dept:"STP",desig:"STP Operator",shift:"Rotating",mobile:"9876543217",email:"venkat@site.com",status:"active",joining:"2022-12-01",manager:"MGR002",location:"STP Room",photo:"",password:"emp123",company:"MEP Solutions"},
-  ],
-  trainings:[
-    {id:"TRN001",name:"Fire Safety Induction",cat:"Fire Fighting",dept:"All",trainer:"Safety Officer",date:"2025-08-10",duration:"4 hrs",passing:75,validity:"1 Year",cert:true,desc:"Basic fire safety awareness and extinguisher usage",enrolled:[],completed:[],completedDates:{}},
-    {id:"TRN002",name:"Electrical Safety & LOTO",cat:"Electrical Safety",dept:"Electrical",trainer:"EHS Manager",date:"2025-08-15",duration:"8 hrs",passing:80,validity:"1 Year",cert:true,desc:"Lockout Tagout procedures and electrical hazards",enrolled:["EMP001","EMP004"],completed:["EMP001"],completedDates:{"EMP001":"2025-08-01"}},
-    {id:"TRN003",name:"Working at Heights",cat:"Work at Height",dept:"Engineering",trainer:"External Trainer",date:"2025-08-20",duration:"8 hrs",passing:75,validity:"1 Year",cert:true,desc:"Fall protection, harness inspection, permit procedures",enrolled:["EMP002","EMP003"],completed:[],completedDates:{}},
-    {id:"TRN004",name:"Confined Space Entry",cat:"Confined Space",dept:"MEP",trainer:"Safety Officer",date:"2025-09-01",duration:"8 hrs",passing:75,validity:"6 Months",cert:true,desc:"Gas testing, standby person, rescue procedures",enrolled:["EMP008"],completed:["EMP008"],completedDates:{"EMP008":"2025-07-28"}},
-    {id:"TRN005",name:"PPE Usage & Inspection",cat:"PPE Usage",dept:"All",trainer:"Safety Supervisor",date:"2025-09-05",duration:"2 hrs",passing:70,validity:"1 Year",cert:false,desc:"Correct usage, inspection and storage of all PPE",enrolled:["EMP005","EMP006","EMP007"],completed:["EMP005","EMP007"],completedDates:{"EMP005":"2025-08-05","EMP007":"2025-08-05"}},
-    {id:"TRN006",name:"HVAC Chiller Operation",cat:"Chiller Operation",dept:"HVAC",trainer:"OEM Trainer",date:"2025-09-10",duration:"16 hrs",passing:80,validity:"2 Years",cert:true,desc:"Chiller startup, shutdown, alarms and troubleshooting",enrolled:["EMP003"],completed:[],completedDates:{}},
-  ],
-  testResults:[
-    {id:"TST001",empId:"EMP001",empName:"Rajesh Kumar",training:"Electrical Safety & LOTO",cat:"Electrical Safety",score:85,correct:17,wrong:3,total:20,pass:true,date:"2025-08-01",cert:"CERT-2025-001",attempt:1,dept:"Electrical",trainer:"EHS Manager"},
-    {id:"TST002",empId:"EMP002",empName:"Suresh Patel",training:"Fire Safety Induction",cat:"Fire Fighting",score:90,correct:18,wrong:2,total:20,pass:true,date:"2025-07-20",cert:"CERT-2025-002",attempt:1,dept:"Fire Fighting",trainer:"Safety Officer"},
-    {id:"TST003",empId:"EMP008",empName:"Venkat Rao",training:"Confined Space Entry",cat:"Confined Space",score:78,correct:14,wrong:4,total:18,pass:true,date:"2025-07-28",cert:"CERT-2025-003",attempt:1,dept:"STP",trainer:"Safety Officer"},
-    {id:"TST004",empId:"EMP005",empName:"Kavya Reddy",training:"PPE Usage & Inspection",cat:"PPE Usage",score:62,correct:9,wrong:5,total:14,pass:false,date:"2025-08-05",cert:"",attempt:1,dept:"Soft Services",trainer:"Safety Supervisor"},
-    {id:"TST005",empId:"EMP007",empName:"Deepa Nair",training:"PPE Usage & Inspection",cat:"PPE Usage",score:79,correct:11,wrong:3,total:14,pass:true,date:"2025-08-05",cert:"CERT-2025-004",attempt:1,dept:"Admin",trainer:"Safety Supervisor"},
-  ],
-  certificates:[
-    {num:"CERT-2025-001",empId:"EMP001",empName:"Rajesh Kumar",training:"Electrical Safety & LOTO",score:85,dept:"Electrical",trainer:"EHS Manager",issued:"2025-08-01",expiry:"2026-08-01",completedDate:"2025-08-01"},
-    {num:"CERT-2025-002",empId:"EMP002",empName:"Suresh Patel",training:"Fire Safety Induction",score:90,dept:"Fire Fighting",trainer:"Safety Officer",issued:"2025-07-20",expiry:"2026-07-20",completedDate:"2025-07-20"},
-    {num:"CERT-2025-003",empId:"EMP008",empName:"Venkat Rao",training:"Confined Space Entry",score:78,dept:"STP",trainer:"Safety Officer",issued:"2025-07-28",expiry:"2026-01-28",completedDate:"2025-07-28"},
-    {num:"CERT-2025-004",empId:"EMP007",empName:"Deepa Nair",training:"PPE Usage & Inspection",score:79,dept:"Admin",trainer:"Safety Supervisor",issued:"2025-08-05",expiry:"2026-08-05",completedDate:"2025-08-05"},
-  ],
-  videos:[
-    {id:"VID001",title:"Fire Extinguisher Operation — PASS Technique",cat:"Fire Fighting",type:"youtube",url:"https://www.youtube.com/watch?v=H5-qHlN1I8",youtubeId:"H5-qHlN1I8",duration:"4:23",views:142,likes:[],added:"2025-07-01"},
-    {id:"VID002",title:"Electrical Safety & LOTO Full Procedure",cat:"Electrical Safety",type:"youtube",url:"https://www.youtube.com/watch?v=qG6VqGW2Z0",youtubeId:"qG6VqGW2Z0",duration:"6:15",views:98,likes:[],added:"2025-07-05"},
-    {id:"VID003",title:"Working at Heights — Full Body Harness Inspection",cat:"Work at Height",type:"youtube",url:"https://www.youtube.com/watch?v=WlF-ct05mXI",youtubeId:"WlF-ct05mXI",duration:"8:42",views:76,likes:[],added:"2025-07-10"},
-    {id:"VID004",title:"Confined Space Entry — Permit & Rescue",cat:"Confined Space",type:"youtube",url:"https://www.youtube.com/watch?v=eOqGJJg1dE",youtubeId:"eOqGJJg1dE",duration:"10:05",views:54,likes:[],added:"2025-07-15"},
-    {id:"VID005",title:"PPE Selection, Inspection & Correct Usage",cat:"PPE Usage",type:"youtube",url:"https://www.youtube.com/watch?v=qEo9vFAfFE",youtubeId:"qEo9vFAfFE",duration:"7:30",views:120,likes:[],added:"2025-07-20"},
-    {id:"VID006",title:"Chiller Plant — Operation & Startup Sequence",cat:"Chiller Operation",type:"youtube",url:"https://www.youtube.com/watch?v=5PtNw2fFSI",youtubeId:"5PtNw2fFSI",duration:"15:20",views:43,likes:[],added:"2025-07-25"},
-    {id:"VID007",title:"First Aid & CPR — Basic Life Support",cat:"First Aid",type:"youtube",url:"https://www.youtube.com/watch?v=ILxj0RcQPI",youtubeId:"ILxj0RcQPI",duration:"12:45",views:200,likes:[],added:"2025-06-01"},
-    {id:"VID008",title:"Emergency Evacuation Drill — Best Practices",cat:"Emergency Evacuation",type:"youtube",url:"https://www.youtube.com/watch?v=3uRfKmG2Vg",youtubeId:"3uRfKmG2Vg",duration:"5:10",views:88,likes:[],added:"2025-06-15"},
-    {id:"VID009",title:"Fire Hydrant System — Operation & Maintenance",cat:"Fire Fighting",type:"youtube",url:"https://www.youtube.com/watch?v=7eSyh4OVcgA",youtubeId:"7eSyh4OVcgA",duration:"9:30",views:65,likes:[],added:"2025-06-20"},
-    {id:"VID010",title:"Chemical Handling — MSDS & Safe Storage",cat:"Chemical Handling",type:"youtube",url:"https://www.youtube.com/watch?v=3_HkBrH1wsc",youtubeId:"3_HkBrH1wsc",duration:"11:00",views:47,likes:[],added:"2025-06-22"},
-    {id:"VID011",title:"AHU — Air Handling Unit Maintenance",cat:"AHU Maintenance",type:"youtube",url:"https://www.youtube.com/watch?v=3kA2jqn0P3M",youtubeId:"3kA2jqn0P3M",duration:"13:20",views:33,likes:[],added:"2025-06-25"},
-    {id:"VID012",title:"DG Set — Diesel Generator Operation",cat:"DG Operation",type:"youtube",url:"https://www.youtube.com/watch?v=cF7HmX9hOE",youtubeId:"cF7HmX9hOE",duration:"10:45",views:58,likes:[],added:"2025-06-28"},
-    {id:"VID013",title:"STP — Sewage Treatment Plant Operation",cat:"STP Operation",type:"youtube",url:"https://www.youtube.com/watch?v=Dy7O3CsYuCA",youtubeId:"Dy7O3CsYuCA",duration:"18:00",views:39,likes:[],added:"2025-07-02"},
-    {id:"VID014",title:"Permit to Work — PTW System Explained",cat:"Permit To Work",type:"youtube",url:"https://www.youtube.com/watch?v=sBYQQkWxuYk",youtubeId:"sBYQQkWxuYk",duration:"7:50",views:71,likes:[],added:"2025-07-06"},
-    {id:"VID015",title:"HIRA — Hazard Identification Risk Assessment",cat:"HIRA",type:"youtube",url:"https://www.youtube.com/watch?v=LT0FLVq2YCA",youtubeId:"LT0FLVq2YCA",duration:"14:15",views:55,likes:[],added:"2025-07-08"},
-    {id:"VID016",title:"Incident Reporting — Near Miss & Root Cause",cat:"Incident Reporting",type:"youtube",url:"https://www.youtube.com/watch?v=rQVxJv3WKtk",youtubeId:"rQVxJv3WKtk",duration:"8:30",views:44,likes:[],added:"2025-07-09"},
-    {id:"VID017",title:"Cooling Tower — Operation & Water Treatment",cat:"Cooling Tower",type:"youtube",url:"https://www.youtube.com/watch?v=Xzbt1X9DJIY",youtubeId:"Xzbt1X9DJIY",duration:"12:00",views:36,likes:[],added:"2025-07-12"},
-    {id:"VID018",title:"Transformer Safety — HT/LT Handling",cat:"Transformer Safety",type:"youtube",url:"https://www.youtube.com/watch?v=vFGe0L2WnFM",youtubeId:"vFGe0L2WnFM",duration:"9:45",views:52,likes:[],added:"2025-07-14"},
-    {id:"VID019",title:"Pump Room — Operation, Priming & Maintenance",cat:"Pump Room",type:"youtube",url:"https://www.youtube.com/watch?v=zXrVLaMSmUU",youtubeId:"zXrVLaMSmUU",duration:"11:20",views:41,likes:[],added:"2025-07-16"},
-    {id:"VID020",title:"UPS System — Operation & Battery Maintenance",cat:"UPS Operation",type:"youtube",url:"https://www.youtube.com/watch?v=BmPhpuH-A7c",youtubeId:"BmPhpuH-A7c",duration:"8:00",views:49,likes:[],added:"2025-07-18"},
-    {id:"VID021",title:"BMS — Building Management System Overview",cat:"BMS",type:"youtube",url:"https://www.youtube.com/watch?v=d8diTd3CV_E",youtubeId:"d8diTd3CV_E",duration:"17:30",views:31,likes:[],added:"2025-07-20"},
-    {id:"VID022",title:"Waste Management — Segregation & Disposal",cat:"Waste Management",type:"youtube",url:"https://www.youtube.com/watch?v=rp8hvyjZPHs",youtubeId:"rp8hvyjZPHs",duration:"6:45",views:62,likes:[],added:"2025-07-21"},
-    {id:"VID023",title:"Energy Conservation — HVAC Best Practices",cat:"Energy Conservation",type:"youtube",url:"https://www.youtube.com/watch?v=JLp1WBbGjFI",youtubeId:"JLp1WBbGjFI",duration:"10:10",views:37,likes:[],added:"2025-07-22"},
-  ],
+  employees:[],
+  trainings:[],
+  testResults:[],
+  certificates:[],
+  videos:[],
   sops:[
     {id:"SOP001",title:"Fire Extinguisher Inspection & Maintenance",cat:"Fire Fighting",version:"v2.1",updated:"2025-06-01",pages:8,file:"",desc:"Comprehensive guide for monthly inspection, annual servicing, and replacement of all fire extinguisher types (ABC, CO2, Foam, Water) as per IS 2878 / IS 15683.",keyPoints:["Check pressure gauge in green zone","Inspect nozzle and hose for blockage","Verify weight of extinguisher","Check safety pin and tamper seal","Record inspection in logbook","Replace expired extinguishers immediately"],hazards:"Accidental discharge; pressurized cylinder; asphyxiation risk (CO2 type)",reviewedBy:"Safety Officer",emergency:"Call Fire Emergency: Ext 101"},
     {id:"SOP002",title:"Electrical Isolation — LOTO Procedure",cat:"Electrical Safety",version:"v3.0",updated:"2025-05-15",pages:12,file:"",desc:"Lock Out Tag Out procedure for safe isolation of all electrical equipment before maintenance. Mandatory for all voltages above 50V AC / 120V DC as per IS 5216.",keyPoints:["Identify all energy sources","Notify all affected personnel","Switch off isolator and MCCB","Apply personal padlock and tag","Verify dead using voltage tester","Never remove others LOTO locks"],hazards:"Electrocution; arc flash; unintended startup",reviewedBy:"EHS Manager",emergency:"Emergency shutdown: Main LT Panel | Ambulance: Ext 999"},
@@ -834,13 +783,7 @@ let DB={
     {id:"SOP007",title:"Emergency Response Plan — ERP",cat:"Emergency Evacuation",version:"v4.0",updated:"2025-07-10",pages:32,file:"",desc:"Comprehensive site emergency response plan covering fire, explosion, chemical spill, medical emergency, gas leak.",keyPoints:["On fire alarm: RACE — Rescue, Alarm, Contain, Evacuate","Assembly point: Front Car Park (Gate 2)","Fire wardens designated per floor","Do NOT use lifts during fire","Practice drills: Twice per year minimum"],hazards:"Panic; blocked exits; failure to account for all persons",reviewedBy:"EHS Manager",emergency:"Fire: 101 | Ambulance: 999 | Police: 100"},
     {id:"SOP008",title:"Permit to Work — PTW System",cat:"Permit To Work",version:"v2.0",updated:"2025-06-10",pages:20,file:"",desc:"PTW system covering Hot Work, Cold Work, Electrical Isolation, Confined Space, Work at Height, Excavation.",keyPoints:["PTW mandatory for all non-routine hazardous work","Originator raises permit — Issuing authority approves","Valid max 1 shift (8 hrs) — revalidate if needed","Toolbox talk mandatory before work starts","All PTWs filed in Safety Office for 3 years"],hazards:"Unauthorized work; multiple energy sources; concurrent operations",reviewedBy:"Safety Officer",emergency:"PTW Control: Safety Office Ext 103"},
   ],
-  notifications:[
-    {id:"N001",msg:"Fire Safety Induction training scheduled for 2025-08-10. 8 employees enrolled.",time:"2 hours ago",read:false,icon:"school"},
-    {id:"N002",msg:"Certificate CERT-2025-001 for Rajesh Kumar issued successfully.",time:"1 day ago",read:false,icon:"workspace_premium"},
-    {id:"N003",msg:"PPE Usage test — Kavya Reddy FAILED with 62%. Retraining required.",time:"2 days ago",read:false,icon:"warning"},
-    {id:"N004",msg:"3 certificates expiring this month. Review and schedule renewal.",time:"3 days ago",read:true,icon:"notification_important"},
-    {id:"N005",msg:"New SOP uploaded: Emergency Response Plan v4.0",time:"5 days ago",read:true,icon:"description"},
-  ],
+  notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
@@ -1089,9 +1032,6 @@ async function seedFirestore(){
     // Create default Firebase Auth accounts
     try{
       await fbAuth.createUserWithEmailAndPassword(toEmail('admin'),'admin123');
-    }catch(e){}
-    try{
-      await fbAuth.createUserWithEmailAndPassword(toEmail('EMP001'),'emp123');
     }catch(e){}
     console.log('Firestore seeded successfully');
   }catch(e){console.warn('Seed error:',e);}
@@ -3882,6 +3822,7 @@ function reconcileTrainingsFromResults(){
   return updated;
 }
 
+async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      videos:['VID001','VID002','VID003','VID004','VID005','VID006','VID007','VID008','VID009','VID010','VID011','VID012','VID013','VID014','VID015','VID016','VID017','VID018','VID019','VID020','VID021','VID022','VID023'],      employees:['EMP001','EMP002','EMP003','EMP004','EMP005','EMP006','EMP007','EMP008'],      trainings:['TRN001','TRN002','TRN003','TRN004','TRN005','TRN006'],      testResults:['TST001','TST002','TST003','TST004','TST005'],      certificates:['CERT-2025-001','CERT-2025-002','CERT-2025-003','CERT-2025-004'],      notifications:['N001','N002','N003','N004','N005']    };    const batch=fbDB.batch();    let count=0;    for(const [coll,ids] of Object.entries(sampleIds)){      for(const id of ids){        const ref=fbDB.collection(coll).doc(id);        batch.delete(ref);        count++;      }    }    await batch.commit();    if(count>0)console.log('Cleaned up '+count+' sample docs from cloud');  }catch(e){console.warn('Sample data cleanup error:',e);}}
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
@@ -4019,6 +3960,7 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
+    await cleanupSampleDataFromCloud();
     const loadResult=await loadDBFromFirestore();
     if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
       fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
