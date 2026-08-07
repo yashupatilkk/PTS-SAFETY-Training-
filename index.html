@@ -1772,17 +1772,21 @@ function openAddEmpModal(){
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-amber" onclick="saveEmployee()"><span class="mat-ico">save</span> Add Employee</button>
+      <button class="btn btn-amber" id="saveEmpBtn" onclick="saveEmployee()"><span class="mat-ico">save</span> Add Employee</button>
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
     </div>
   `,"740px");
 }
 async function saveEmployee(){
+  // Show loading state on button immediately
+  const btn=document.getElementById('saveEmpBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Saving...';}
+  try{
   const id=document.getElementById("ne_id").value.trim().toUpperCase();
   const name=document.getElementById("ne_name").value.trim();
   const mobile=document.getElementById("ne_mobile").value.trim();
-  if(!id||!name||!mobile){toast("ID, Name and Mobile required","error");return;}
-  if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");return;}
+  if(!id||!name||!mobile){toast("ID, Name and Mobile required","error");if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Add Employee';}return;}
+  if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Add Employee';}return;}
   // CRITICAL: Read ALL form values BEFORE closing modal (closeModal removes the DOM elements)
   const empPw=document.getElementById("ne_pw").value||"emp123";
   const empDept=document.getElementById("ne_dept").value;
@@ -1810,22 +1814,21 @@ async function saveEmployee(){
     try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
   }
   // AWAIT the save to Firebase so the employee is in the cloud before user can refresh
-  try{
-    const saveResults=await saveDB();
-    // Check if the employees collection actually saved to Firebase
-    if(saveResults&&Array.isArray(saveResults)){
-      const empResult=saveResults[0]; // employees is first in the list
-      if(empResult&&empResult.ok){
-        toast(`Employee ${name} saved to cloud successfully (${empResult.count} docs)`,'success',3000);
-      }else{
-        toast(`Employee ${name} saved locally BUT Firebase save failed: ${empResult?.error||'Unknown'}. Employee may not appear on mobile.`,'error',8000);
-      }
+  const saveResults=await saveDB();
+  // Check if the employees collection actually saved to Firebase
+  if(saveResults&&Array.isArray(saveResults)){
+    const empResult=saveResults[0]; // employees is first in the list
+    if(empResult&&empResult.ok){
+      toast(`Employee ${name} saved to cloud successfully (${empResult.count} docs)`,'success',3000);
     }else{
-      toast(`Employee ${name} added`,'success');
+      toast(`Employee ${name} saved locally BUT Firebase save failed: ${empResult?.error||'Unknown'}. Employee may not appear on mobile.`,'error',8000);
     }
+  }else{
+    toast(`Employee ${name} added`,'success');
+  }
   }catch(e){
-    console.error('saveEmployee error:',e);
-    toast(`Employee ${name} added (save error: ${e.message})`,'error',5000);
+    console.error('saveEmployee CRASH:',e);
+    toast('Error adding employee: '+e.message,'error',6000);
   }
 }
 function editEmp(id){
@@ -4079,4 +4082,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
