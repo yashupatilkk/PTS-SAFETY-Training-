@@ -1430,13 +1430,6 @@ function renderNotifPanel(){
 }
 function readNotif(id){const n=DB.notifications.find(x=>x.id===id);if(n){n.read=true;renderNotifPanel();updateBadges();saveDB();}}
 function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel();updateBadges();saveDB();}
-// CRITICAL: Re-render all views — called after sync to show latest data
-function renderAll(){
-  updateBadges();
-  renderNotifPanel();
-  const fn={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,videos:renderVideos,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,settings:renderSettings};
-  if(currentView&&fn[currentView])fn[currentView]();
-}
 renderNotifPanel();
 
 /* ============================================================
@@ -1475,7 +1468,6 @@ function renderDashboard(){
   const compPct=DB.testResults.length?Math.round(completed/DB.testResults.length*100):0;
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn btn-sm btn-green" onclick="pullLatestResults()"><span class="mat-ico" style="font-size:12px;">cloud_download</span> Pull Latest Scores from Employee Phones</button></div>
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
     <p style="color:var(--muted);font-size:13px;">PTS SAFETY Training Management — ${new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p></div>
     <div class="stat-grid" style="margin-bottom:18px;">
@@ -1978,6 +1970,7 @@ function renderTrainings(){
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
+            ${t.youtubeLink?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
           </div>
           <div class="training-body">
@@ -2021,11 +2014,14 @@ function renderEmpTrainings(){
         const videoDone=videoData&&(videoData.completedBy||[]).includes(empId);
         const showVideoGate=isVideoTraining&&!videoDone;
         const ytId=videoData?.youtubeId||"";
+        const hasYTLink=!!t.youtubeLink;
+        const ytLinkEmbedId=hasYTLink?extractYoutubeId(t.youtubeLink):null;
         return`<div class="training-card">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
             ${isVideoTraining?`<span class="badge badge-danger" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">play_circle</span> Video Training</span>`:""}
+            ${hasYTLink&&!isVideoTraining?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
           </div>
           <div class="training-body">
@@ -2035,6 +2031,12 @@ function renderEmpTrainings(){
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
               <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration}</span>
             </div>
+            ${ytLinkEmbedId?`
+            <div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);">
+              <iframe src="https://www.youtube.com/embed/${ytLinkEmbedId}?rel=0" style="width:100%;height:160px;border:none;" allowfullscreen></iframe>
+            </div>
+            <a href="${t.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">open_in_new</span> Watch on YouTube</a>
+            `:""}
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
@@ -2058,27 +2060,28 @@ function renderEmpTrainings(){
   `;
 }
 function openAddTrnModal(){
+  const today=new Date().toISOString().split('T')[0];
   openModal(`
     <div class="modal-accent"></div>
     <div class="modal-head"><div class="modal-ico" style="background:rgba(139,109,232,.15)"><span class="mat-ico" style="color:var(--purple);font-size:22px;">school</span></div><h2>Create New Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
     <div class="modal-body">
       <div class="form-section"><div class="form-grid">
-        <div class="form-group"><label class="form-label-sm">Training ID</label><input class="form-control-sm" id="nt_id" value="TRN${String(DB.trainings.length+1).padStart(3,"0")}"></div>
-        <div class="form-group"><label class="form-label-sm">Training Name *</label><input class="form-control-sm" id="nt_name" placeholder="e.g. Fire Safety Induction"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Training Name *</label><input class="form-control-sm" id="nt_name" placeholder="e.g. Fire Safety Induction"></div>
         <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="nt_dept"><option>All</option>${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Trainer *</label><select class="form-control-sm" id="nt_trainer">${DB.settings.trainerList.map(t=>`<option>${t}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Training Date *</label><input class="form-control-sm" id="nt_date" type="date"></div>
-        <div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="nt_dur" placeholder="4 hrs"></div>
+        <div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="nt_trainer">${DB.settings.trainerList.map(t=>`<option>${t}</option>`).join("")}</select></div>
+        <div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="nt_date" type="date" value="${today}"></div>
+        <div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="nt_dur" placeholder="e.g. 30 min, 2 hrs"></div>
         <div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="nt_pass" type="number" value="75" min="0" max="100"></div>
-        <div class="form-group"><label class="form-label-sm">Validity</label><input class="form-control-sm" id="nt_val" placeholder="1 Year"></div>
-        <div class="form-group"><label class="form-label-sm">Certificate Required</label><select class="form-control-sm" id="nt_cert"><option value="true">Yes</option><option value="false">No</option></select></div>
+        <div class="form-group"><label class="form-label-sm">Certificate</label><select class="form-control-sm" id="nt_cert"><option value="true">Yes</option><option value="false">No</option></select></div>
       </div>
       <div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="nt_desc" rows="2" placeholder="Training description..."></textarea></div>
-      <div class="form-section" style="margin-top:14px;border:1px solid rgba(232,72,58,.2);background:rgba(232,72,58,.03);">
-        <div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> Link Video (Optional)</div>
-        <div class="form-group"><label class="form-label-sm">Select Video from Library</label><select class="form-control-sm" id="nt_video"><option value="">-- No Video Link --</option>${DB.videos.map(v=>`<option value="${v.id}">${v.title} (${v.duration})</option>`).join("")}</select></div>
-        <div style="font-size:10.5px;color:var(--muted);margin-top:4px;">If linked, employees must watch 90% of the video before they can take the test.</div>
+      </div>
+      <div class="form-section" style="margin-top:14px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);">
+        <div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> YouTube Video Link (Easy - Just Paste URL)</div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="nt_yturl" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." oninput="previewTrnVideo(this.value)"></div>
+        <div id="trnVideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div class="video-embed-wrap" style="max-height:180px;"><iframe id="trnVideoFrame" src="" allowfullscreen></iframe></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Employees will see this video directly. They can watch and take the test immediately.</div></div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--bdr);padding-top:8px;">Or select from existing library (enables 90% watch tracking): <select class="form-control-sm" id="nt_video" style="width:100%;margin-top:4px;"><option value="">-- Use YouTube URL above (simple) --</option>${DB.videos.map(v=>`<option value="${v.id}">${v.title} (${v.duration})</option>`).join("")}</select></div>
       </div>
     </div></div>
     <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
@@ -2091,12 +2094,13 @@ function openAddTrnModal(){
     </div>
     </div></div>
     <div class="modal-foot">
-      <button class="btn btn-amber" onclick="saveTraining()"><span class="mat-ico">save</span> Create Training</button>
+      <button class="btn btn-amber" id="saveTrnBtn" onclick="saveTraining()"><span class="mat-ico">save</span> Create Training</button>
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
     </div>
   `,"740px");
 }
 let customQCount=0;
+function previewTrnVideo(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById('trnVideoPreview');const frame=document.getElementById('trnVideoFrame');if(ytId&&wrap&&frame){wrap.style.display='block';frame.src='https://www.youtube.com/embed/'+ytId+'?rel=0';}else if(wrap){wrap.style.display='none';}}
 function addCustomQuestion(){
   const n=customQCount++;
   const container=document.getElementById('customQuestionsList');
@@ -2138,39 +2142,58 @@ function getCustomQuestions(){
   return qs;
 }
 async function saveTraining(){
-  const name=document.getElementById("nt_name").value.trim();
-  if(!name){toast("Training name required","error");return;}
-  const cat=document.getElementById("nt_cat").value;
+  const btn=document.getElementById('saveTrnBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Saving...';}
+  try{
+  const name=document.getElementById('nt_name').value.trim();
+  if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
+  const cat=document.getElementById('nt_cat').value;
   const customQs=getCustomQuestions();
   if(customQs.length){
     if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
-    customQs.forEach(cq=>{cq.customFor=name;QUESTION_BANK[cat].push(cq);});
-    customQs.forEach(cq=>{
+    customQs.forEach(function(cq){cq.customFor=name;QUESTION_BANK[cat].push(cq);});
+    customQs.forEach(function(cq){
       DB.customQuestions.push({cat:cat,trainingName:name,q:cq.q,o:cq.o,a:cq.a,customFor:name,ts:Date.now()});
     });
-    toast(`${customQs.length} custom question(s) added to ${cat} question bank`,'info');
   }
-  const linkedVideoId=document.getElementById("nt_video").value;
-  const linkedVideo=linkedVideoId?DB.videos.find(v=>v.id===linkedVideoId):null;
-  const t={id:document.getElementById("nt_id").value,name,cat,dept:document.getElementById("nt_dept").value,trainer:document.getElementById("nt_trainer").value,date:document.getElementById("nt_date").value,duration:linkedVideo?linkedVideo.duration:(document.getElementById("nt_dur").value||"4 hrs"),passing:parseInt(document.getElementById("nt_pass").value)||75,validity:document.getElementById("nt_val").value||"1 Year",cert:document.getElementById("nt_cert").value==="true",desc:document.getElementById("nt_desc").value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,_localAddedAt:Date.now()};
-  if(linkedVideoId){t.fromVideo=linkedVideoId;t.videoTitle=linkedVideo?t.videoTitle||linkedVideo.title:"";t.trainer="Video Training";}
-  // Don't create duplicate video-linked training
-  if(linkedVideoId&&DB.trainings.find(x=>x.fromVideo===linkedVideoId)){toast("A training already exists for this video. Use that one instead.","error");return;}
+  // YouTube URL: save as simple link (no video library auto-create)
+  var ytUrlEl=document.getElementById('nt_yturl');
+  var ytUrl=ytUrlEl?ytUrlEl.value.trim():'';
+  var ytId=extractYoutubeId(ytUrl);
+  var linkedVideoId=document.getElementById('nt_video').value;
+  var linkedVideo=linkedVideoId?DB.videos.find(function(v){return v.id===linkedVideoId;}):null;
+  var trnId=genId('TRN');
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,_localAddedAt:Date.now()};
+  if(ytUrl){t.youtubeLink=ytUrl;}
+  if(linkedVideoId){t.fromVideo=linkedVideoId;t.videoTitle=linkedVideo?linkedVideo.title||name:name;t.trainer='Video Training';t.duration=linkedVideo?linkedVideo.duration:t.duration;}
+  if(linkedVideoId&&DB.trainings.find(function(x){return x.fromVideo===linkedVideoId;})){toast('A training already exists for this video.','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   await removeFromTombstone('trainings',t.id);
   DB.trainings.push(t);
-  closeModal();renderTrainings();updateBadges();saveDB();toast(`Training "${name}" created`,"success");
+  DB.notifications.unshift({id:genId('N'),msg:'New training: '+name,read:false,time:'Just now',icon:'school'});
+  closeModal();renderTrainings();updateBadges();saveDB();toast('Training created successfully!','success');
+  }catch(e){
+    toast('Error: '+e.message,'error',6000);
+  }
+  if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}
 }
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
   const enrolledEmps=DB.employees.filter(e=>(t.enrolled||[]).includes(e.id));
+  const ytLinkId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
   openModal(`
     <div class="modal-accent"></div>
     <div class="modal-head">
       <div class="modal-ico" style="background:${CATEGORIES[t.cat]?.color||"#ffb020"}22;font-size:24px;">${CATEGORIES[t.cat]?.icon||"📚"}</div>
-      <div><h2>${t.name}</h2><span class="badge badge-info">${t.cat}</span></div>
+      <div><h2>${t.name}</h2><span class="badge badge-info">${t.cat}</span>${t.youtubeLink?`<span class="badge" style="background:rgba(232,72,58,.85);color:#fff;margin-left:6px;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}</div>
       <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
     </div>
     <div class="modal-body">
+      ${ytLinkId?`
+      <div style="margin-bottom:14px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);">
+        <iframe src="https://www.youtube.com/embed/${ytLinkId}?rel=0" style="width:100%;height:220px;border:none;" allowfullscreen></iframe>
+      </div>
+      <a href="${t.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--red);margin-bottom:14px;"><span class="mat-ico" style="font-size:16px;">open_in_new</span> Open in YouTube</a>
+      `:""}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:12.5px;">
         <div><span style="color:var(--muted);">Trainer</span><div><b>${t.trainer}</b></div></div>
         <div><span style="color:var(--muted);">Date</span><div><b>${formatDate(t.date)}</b></div></div>
@@ -2961,8 +2984,6 @@ function submitQuiz(){
   updateBadges();
   saveDB();
   // Force immediate Firebase save for test result so it's not lost
-  let cloudSaveOk=true;
-  let cloudSaveErr='';
   if(firebaseReady){
     (async function(){
       try{
@@ -2973,26 +2994,9 @@ function submitQuiz(){
           if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
         }
         console.log('Quiz result saved to Firebase immediately');
-        // Update the sync status indicator on the result screen
-        const syncEl=document.getElementById('quizCloudSyncStatus');
-        if(syncEl){syncEl.style.display='none';}
-      }catch(e){
-        cloudSaveOk=false;
-        cloudSaveErr=e.message||String(e);
-        console.error('Firebase quiz save error:',e);
-        // Show VISIBLE error on the result screen so employee knows
-        const syncEl=document.getElementById('quizCloudSyncStatus');
-        if(syncEl){
-          syncEl.style.display='flex';
-          syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--red);">cloud_off</span><div><b style="color:var(--red);">Score NOT saved to cloud!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">Error: '+cloudSaveErr.substring(0,100)+'</div><button class="btn btn-sm btn-amber" style="margin-top:6px;" onclick="retryQuizCloudSave(\''+result.id+'\',\''+certNum+'\')"><span class="mat-ico" style="font-size:11px;">refresh</span> Retry Upload</button></div>';
-        }
-        if(typeof toast==='function') toast('Cloud save FAILED! Your score is saved locally but admin cannot see it yet. Tap Retry.','error',8000);
-      }
+      }catch(e){console.warn('Firebase quiz save error:',e);}
     })();
   }
-  // Store result ID globally for retry
-  window._lastQuizResultId=result.id;
-  window._lastQuizCertNum=certNum;
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
@@ -3031,75 +3035,11 @@ function submitQuiz(){
         <button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${(quizState.training||"").replace(/'/g,"\\'")}')"><span class="mat-ico">refresh</span> Retake Test</button>
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
-      <div id="quizCloudSyncStatus" style="display:none;align-items:flex-start;gap:10px;margin-top:14px;padding:12px;background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);">
-        <span class="mat-ico" style="font-size:16px;color:var(--green);">sync</span>
-        <div><b style="color:var(--green);font-size:12px;">Saving score to cloud...</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">Admin will see your score once upload completes.</div></div>
-      </div>
     </div>
   `;
-  if(firebaseReady){const ss=document.getElementById("quizCloudSyncStatus");if(ss)ss.style.display="flex";}
   if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
   else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
-}
-
-/* ============================================================
-   PULL LATEST RESULTS (Admin)
-============================================================ */
-async function pullLatestResults(){
-  if(!firebaseReady){toast("Firebase not connected","error");return;}
-  toast("Pulling latest scores from cloud...","info",2000);
-  try{
-    const fbTestSnap=await fbDB.collection('testResults').get();
-    const fbTests=fbTestSnap.docs.map(d=>d.data());
-    let newTests=0;
-    fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
-    const fbCertSnap=await fbDB.collection('certificates').get();
-    const fbCerts=fbCertSnap.docs.map(d=>d.data());
-    let newCerts=0;
-    fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
-    reconcileTrainingsFromResults();
-    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-    updateBadges();
-    if(typeof renderAll==='function') renderAll();
-    toast("Pulled "+newTests+" new test results, "+newCerts+" new certificates","success",4000);
-  }catch(e){
-    toast("Pull failed: "+e.message,"error",6000);
-  }
-}
-
-/* ============================================================
-   QUIZ CLOUD RETRY
-============================================================ */
-async function retryQuizCloudSave(resultId, certNum){
-  const syncEl=document.getElementById('quizCloudSyncStatus');
-  if(syncEl){
-    syncEl.style.display='flex';
-    syncEl.style.background='rgba(255,176,32,.06)';
-    syncEl.style.borderColor='rgba(255,176,32,.2)';
-    syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--amber);animation:spin 1s linear infinite;">sync</span><div><b style="color:var(--amber);font-size:12px;">Retrying upload...</b></div>';
-  }
-  try{
-    const r=DB.testResults.find(x=>x.id===resultId);
-    if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
-    if(certNum){
-      const c=DB.certificates.find(x=>x.num===certNum);
-      if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
-    }
-    if(syncEl){
-      syncEl.style.background='rgba(62,207,142,.06)';
-      syncEl.style.borderColor='rgba(62,207,142,.2)';
-      syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--green);">cloud_done</span><div><b style="color:var(--green);font-size:12px;">Score uploaded to cloud!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">Admin can now see your result.</div></div>';
-    }
-    toast('Score uploaded to cloud successfully!','success',4000);
-  }catch(e){
-    if(syncEl){
-      syncEl.style.background='rgba(232,72,58,.06)';
-      syncEl.style.borderColor='rgba(232,72,58,.2)';
-      syncEl.innerHTML='<span class="mat-ico" style="font-size:16px;color:var(--red);">cloud_off</span><div><b style="color:var(--red);font-size:12px;">Upload FAILED again!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(e.message||'Unknown error').substring(0,80)+'</div><button class="btn btn-sm btn-amber" style="margin-top:6px;" onclick="retryQuizCloudSave(\''+resultId+'\',\''+certNum+'\')"><span class="mat-ico" style="font-size:11px;">refresh</span> Retry Again</button></div>';
-    }
-    toast('Upload failed: '+(e.message||'error'),'error',6000);
-  }
 }
 
 /* ============================================================
@@ -3208,7 +3148,7 @@ function renderReports(){
   const passCount=DB.testResults.filter(r=>r.pass).length;
   const failCount=DB.testResults.filter(r=>!r.pass).length;
   document.getElementById("view-reports").innerHTML=`
-    <div class="section-header"><div class="section-title">Reports & <span>Analytics</span></div><div style="display:flex;gap:6px;"><button class="btn btn-green" onclick="pullLatestResults()"><span class="mat-ico">cloud_download</span> Pull Latest Scores</button></div></div>
+    <div class="section-header"><div class="section-title">Reports & <span>Analytics</span></div></div>
     <div class="report-grid">
       ${reportCard("people","Employee Report","All employee details","#3ea0e8","exportEmpExcel()")}
       ${reportCard("school","Training Report","All training records","#8b6de8","exportTrnReport()")}
@@ -3218,24 +3158,6 @@ function renderReports(){
       ${reportCard("cancel","Fail Report","Failed employees","#e8483a","exportFailReport()")}
       ${reportCard("pending","Pending Report","Pending trainings","#ffb020","exportPendingReport()")}
       ${reportCard("bar_chart","Monthly Report","Month-wise stats","#3ea0e8","exportMonthlyReport()")}
-    </div>
-    <div class="chart-card" style="margin-bottom:14px;">
-      <div class="chart-card-title"><span class="dot"></span>Employee Activity Log (Latest Test Results)</div>
-      <div style="max-height:320px;overflow-y:auto;">
-        <table>
-          <thead><tr><th>Date</th><th>Employee</th><th>ID</th><th>Training</th><th>Score</th><th>Result</th></tr></thead>
-          <tbody>
-            ${DB.testResults.slice().reverse().slice(0,20).map(r=>`<tr>
-              <td style="font-size:11px;white-space:nowrap;">${formatDate(r.date)}</td>
-              <td style="font-weight:600;">${r.empName}</td>
-              <td class="mono" style="color:var(--amber);font-size:11px;">${r.empId}</td>
-              <td style="font-size:12px;">${r.training}</td>
-              <td><b style="color:${r.score>=70?"var(--green)":"var(--red)"};">${r.score}%</b></td>
-              <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
-            </tr>`).join("")}
-          </tbody>
-        </table>
-      </div>
     </div>
     <div class="chart-card" style="margin-bottom:14px;">
       <div class="chart-card-title"><span class="dot"></span>Training Completion Overview</div>
@@ -3635,7 +3557,6 @@ function renderTrainStatus(){
     <div class="section-header">
       <div class="section-title">Training Completion <span>Status</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="btn btn-green" onclick="pullLatestResults()"><span class="mat-ico">cloud_download</span> Pull Latest Scores</button>
         <button class="btn btn-green" onclick="syncToGoogleSheet()"><span class="mat-ico">table_chart</span> Sync to Google Sheets</button>
         <button class="btn btn-outline" onclick="exportFullStatusReport()"><span class="mat-ico">download</span> Export Excel</button>
       </div>
@@ -3994,8 +3915,8 @@ async function loadDBFromFirestore(){
           DB.trainings=[...cloudTrns,...localOnly];
         }
       }],
-      ['testResults','id',d=>{if(d.size>0){const cloudTests=d.docs.map(x=>x.data());cloudTests.forEach(ct=>{if(!DB.testResults.find(r=>r.id===ct.id)){DB.testResults.push(ct);}});}}],
-      ['certificates','num',d=>{if(d.size>0){const cloudCerts=d.docs.map(x=>x.data());cloudCerts.forEach(cc=>{if(!DB.certificates.find(c=>c.num===cc.num)){DB.certificates.push(cc);}});}}],
+      ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
+      ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
       ['videos','id',d=>{
         if(d.size>0){
           const cloudVids=d.docs.map(x=>x.data());
