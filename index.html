@@ -396,6 +396,7 @@ select.form-control-sm{background:var(--sur2);}
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
+      <div id="loginFbStatus" style="display:none;font-size:11px;text-align:center;margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05);"></div>
       <button class="btn-primary-full" id="loginBtn" onclick="doLogin()" disabled><span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Loading data...</button>
       <button class="link-btn" id="loginSyncBtn" style="margin-top:8px;display:none;" onclick="loginForceSync()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry</button>
 
@@ -1228,11 +1229,20 @@ async function doLogin(){
             // Now search again with the fresh data
             emp=DB.employees.find(e=>e.id===empId);
           }
-        }catch(e){console.warn('Cloud employee lookup failed:',e);}
+        }catch(cloudErr){
+          // SHOW the Firebase error — don't hide it!
+          const fbMsg=cloudErr.message||String(cloudErr);
+          console.error('[LOGIN] Cloud employee lookup FAILED:',fbMsg);
+          toast('Cloud read FAILED: '+fbMsg+'. Firebase rules may be blocking access. Tell admin to check Firebase Security Rules.','error',8000);
+          // Update the status on login page
+          const fbStatus=document.getElementById('loginFbStatus');
+          if(fbStatus){fbStatus.style.display='block';fbStatus.style.color='var(--red)';fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Firebase blocked: '+fbMsg;}
+          return;
+        }
       }
       if(!emp){
-        console.error('[LOGIN] Employee not found after cloud search:',empId,'Local employees:',DB.employees.map(e=>e.id));
-        toast("Employee ID \""+empId+"\" not found. Ask admin to add you.","error",4000);
+        console.error('[LOGIN] Employee not found. Local employees:',DB.employees.map(e=>e.id),'Cloud error occurred:',!!fbLoadError);
+        toast("Employee ID \""+empId+"\" not found. "+(DB.employees.length===0?'No employees loaded from cloud. Admin must fix Firebase first.':'Available: '+DB.employees.map(e=>e.id).join(', ')),"error",6000);
         return;
       }
       // Accept EITHER the employee's name OR their password in the second field
@@ -1301,9 +1311,25 @@ async function loginForceSync(){
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
   try{
     _initDone=false;
-    await loadDBFromFirestore();
+    const result=await loadDBFromFirestore();
     _initDone=true;
-    toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+    // Update the Firebase status display
+    const fbStatus=document.getElementById('loginFbStatus');
+    if(fbStatus){
+      if(result&&result.failed&&result.failed.length>0){
+        fbStatus.style.display='block';
+        fbStatus.style.color='var(--red)';
+        fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sync FAILED for: '+result.failed.join(', ')+(result.error?' — '+result.error:'')+'. Firebase Security Rules may be blocking access.';
+        toast('Sync FAILED! '+result.failed.join(', ')+' could not load from Firebase.','error',6000);
+      }else{
+        fbStatus.style.display='block';
+        fbStatus.style.color='var(--green)';
+        fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees loaded';
+        toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+      }
+    }else{
+      toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+    }
   }catch(e){
     toast('Sync failed: '+e.message,'error',4000);
     _initDone=true;
@@ -3879,10 +3905,10 @@ async function loadDBFromFirestore(){
     // Save merged data to localStorage only (don't push back to avoid loop)
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
     console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
-    return true; // Always return true so firebaseReady stays ON
+    return {ok:true,loaded,failed}; // Return detailed result
   }catch(e){
     console.warn('Firestore load error:',e);
-    return true; // Still return true — keep Firebase active for saves
+    return {ok:false,loaded:0,failed:['all'],error:e.message||String(e)}; // Return error info
   }
 }
 
@@ -3943,9 +3969,13 @@ async function initApp(){
   loadDB();
 
   // 2. Try Firebase/Firestore
+  let fbLoadError=null;
   try{
     firebaseReady=true;
-    await loadDBFromFirestore();
+    const loadResult=await loadDBFromFirestore();
+    if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
+      fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
+    }
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
       DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
@@ -3955,10 +3985,29 @@ async function initApp(){
     await seedFirestore();
   }catch(e){
     console.warn('Firebase init error:',e);
+    fbLoadError=e.message||String(e);
     // Do NOT set firebaseReady=false — keep trying to save
   }
 
   if(loadMsg)loadMsg.style.display='none';
+
+  // Show Firebase load status on login page
+  const fbStatus=document.getElementById('loginFbStatus');
+  if(fbStatus){
+    if(fbLoadError){
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--red)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Cloud load error: '+fbLoadError+' — Employees may not appear. Click "Sync Data" below.';
+    }else if(DB.employees.length===0){
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--amber)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">warning</span> 0 employees loaded from cloud. Ask admin to add you first.';
+    }else{
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--green)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees loaded';
+    }
+  }
   // CRITICAL: Enable login ONLY after all data is loaded
   _initDone=true;
   if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
