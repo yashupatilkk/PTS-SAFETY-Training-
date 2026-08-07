@@ -1804,6 +1804,7 @@ function updateEmployee(id){
   e.dept=document.getElementById("ee_dept").value;e.desig=document.getElementById("ee_desig").value;
   e.shift=document.getElementById("ee_shift").value;e.status=document.getElementById("ee_status").value;
   e.location=document.getElementById("ee_loc").value;
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   closeModal();renderEmployees();saveDB();toast("Employee updated","success");
 }
 function viewEmpHistory(id){
@@ -2094,13 +2095,14 @@ function getCustomQuestions(){
   return qs;
 }
 async function saveTraining(){
-  const btn=document.getElementById('saveTrnBtn');
-  if(btn){btn.disabled=true;btn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Saving...';}
+  var btn=document.getElementById('saveTrnBtn');
+  var saved=false;
+  if(btn){btn.disabled=true;btn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Saving...';}
   try{
-  const name=document.getElementById('nt_name').value.trim();
+  var name=document.getElementById('nt_name').value.trim();
   if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
-  const cat=document.getElementById('nt_cat').value;
-  const customQs=getCustomQuestions();
+  var cat=document.getElementById('nt_cat').value;
+  var customQs=getCustomQuestions();
   if(customQs.length){
     if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
     customQs.forEach(function(cq){cq.customFor=name;QUESTION_BANK[cat].push(cq);});
@@ -2114,19 +2116,43 @@ async function saveTraining(){
   var ytId=extractYoutubeId(ytUrl);
   var linkedVideoId=document.getElementById('nt_video').value;
   var linkedVideo=linkedVideoId?DB.videos.find(function(v){return v.id===linkedVideoId;}):null;
+  if(linkedVideoId&&DB.trainings.find(function(x){return x.fromVideo===linkedVideoId;})){toast('A training already exists for this video.','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
   var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,_localAddedAt:Date.now()};
   if(ytUrl){t.youtubeLink=ytUrl;}
   if(linkedVideoId){t.fromVideo=linkedVideoId;t.videoTitle=linkedVideo?linkedVideo.title||name:name;t.trainer='Video Training';t.duration=linkedVideo?linkedVideo.duration:t.duration;}
-  if(linkedVideoId&&DB.trainings.find(function(x){return x.fromVideo===linkedVideoId;})){toast('A training already exists for this video.','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
-  await removeFromTombstone('trainings',t.id);
+
+  // 1. Add to local array
   DB.trainings.push(t);
   DB.notifications.unshift({id:genId('N'),msg:'New training: '+name,read:false,time:'Just now',icon:'school'});
-  closeModal();renderTrainings();updateBadges();saveDB();toast('Training created successfully!','success');
+  // 2. ALWAYS remove tombstone for this ID (even if Firebase not ready)
+  try{removeFromTombstone('trainings',t.id);}catch(e){}
+  // 3. Save to localStorage IMMEDIATELY (guaranteed save)
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save error:',e);}
+  // 4. Close modal and re-render
+  try{closeModal();}catch(e){}
+  try{renderTrainings();updateBadges();}catch(e){}
+  saved=true;
+  toast('Training "'+name+'" saved! ('+DB.trainings.length+' total)','success');
+  // 5. Firebase sync in BACKGROUND (non-blocking)
+  if(firebaseReady){
+    (async function(){
+      try{
+        // Also remove tombstone from cloud
+        try{await fbDB.collection('deletedItems').doc('trainings_'+t.id).delete();}catch(e){}
+        await saveDB();
+      }catch(fbErr){
+        console.warn('Background sync error for training '+t.id+':',fbErr);
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }
+    })();
+  }
   }catch(e){
     toast('Error: '+e.message,'error',6000);
+  }finally{
+    if(saved){try{renderTrainings();}catch(e){}}
+    if(btn&&btn.isConnected){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}
   }
-  if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}
 }
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
@@ -2238,36 +2264,46 @@ function confirmAssignAllDept(trnId){
 }
 async function deleteTraining(id){
   if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
-  const trn=DB.trainings.find(t=>t.id===id);
+  var trn=DB.trainings.find(function(t){return t.id===id;});
   if(!trn)return;
+  var trnName=trn.name||id;
   // Collect IDs before cleaning
-  const linkedTestIds=DB.testResults.filter(r=>r.training===trn.name).map(r=>r.id);
-  const linkedCertNums=DB.certificates.filter(c=>c.training===trn.name).map(c=>c.num);
-  const linkedVideoId=trn.fromVideo||null;
-  // Clean local data FIRST + AWAIT tombstone cloud writes
-  DB.trainings=DB.trainings.filter(t=>t.id!==id);
-  const tombPromises=[addToTombstone('trainings',id)];
-  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);tombPromises.push(addToTombstone('testResults',tid));});
-  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);tombPromises.push(addToTombstone('certificates',cnum));});
-  if(linkedVideoId){
-    DB.videos=DB.videos.filter(v=>v.id!==linkedVideoId);
-    tombPromises.push(addToTombstone('videos',linkedVideoId));
-  }
-  // AWAIT all tombstone cloud writes so other devices know immediately
+  var linkedTestIds=DB.testResults.filter(function(r){return r.training===trn.name;}).map(function(r){return r.id;});
+  var linkedCertNums=DB.certificates.filter(function(c){return c.training===trn.name;}).map(function(c){return c.num;});
+  var linkedVideoId=trn.fromVideo||null;
+
+  // === STEP 1: Clean ALL local data IMMEDIATELY ===
+  DB.trainings=DB.trainings.filter(function(t){return t.id!==id;});
+  linkedTestIds.forEach(function(tid){DB.testResults=DB.testResults.filter(function(r){return r.id!==tid;});});
+  linkedCertNums.forEach(function(cnum){DB.certificates=DB.certificates.filter(function(c){return c.num!==cnum;});});
+  if(linkedVideoId){DB.videos=DB.videos.filter(function(v){return v.id!==linkedVideoId;});}
+  // CRITICAL: Save to localStorage IMMEDIATELY so delete persists even if Firebase fails
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
+  // Re-render immediately so UI reflects deletion
+  try{closeModal();}catch(e){}
+  renderTrainings();renderVideos();renderCertificates();updateBadges();
+
+  // === STEP 2: Add tombstones (local + cloud) for cross-device sync ===
+  var tombPromises=[addToTombstone('trainings',id)];
+  linkedTestIds.forEach(function(tid){tombPromises.push(addToTombstone('testResults',tid));});
+  linkedCertNums.forEach(function(cnum){tombPromises.push(addToTombstone('certificates',cnum));});
+  if(linkedVideoId){tombPromises.push(addToTombstone('videos',linkedVideoId));}
   await Promise.all(tombPromises);
-  // Delete from Firebase FIRST (before saveDB pushes remaining data)
+
+  // === STEP 3: Delete from Firebase directly (best-effort) ===
   if(firebaseReady){
     try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
     for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
     for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
     if(linkedVideoId){try{await fbDB.collection('videos').doc(String(linkedVideoId)).delete();}catch(e){}}
   }
-  // NOW save the cleaned local data (training is already deleted from cloud)
-  await new Promise(r=>{saveDB();setTimeout(r,1500);});
-  // Mark deletion timestamp so visibilitychange doesn't pull it back for 10s
+
+  // === STEP 4: Push cleaned data to cloud ===
+  if(firebaseReady){await new Promise(function(r){saveDB();setTimeout(r,1500);});}
+
+  // === STEP 5: Mark deletion time ===
   _lastDeleteTime=Date.now();
-  closeModal();renderTrainings();renderVideos();renderCertificates();updateBadges();
-  toast("Training + linked video PERMANENTLY deleted","warning");
+  toast('Training "'+trnName+'" deleted permanently','warning');
 }
 
 /* ============================================================
@@ -3730,17 +3766,23 @@ function updateSyncUI(status){
   }
 }
 function saveDB(){
+  // Step 1: Always save current in-memory DB to localStorage first (source of truth)
   try{
     const data=JSON.parse(JSON.stringify(DB));
     localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(data));
   }catch(e){}
-  // Firebase sync — show status, prevent double-sync
+  // Step 2: Firebase sync — use CLEAN COPIES for upload, never modify in-memory DB
   if(firebaseReady){
-    // CRITICAL: Filter out any tombstoned items before pushing to cloud
-    // This prevents any code path from resurrecting deleted items
-    applyTombstones();
+    // Create tombstone-filtered copies ONLY for Firebase upload
+    // This prevents deleted items from being resurrected in the cloud
+    // WITHOUT touching the in-memory DB (which is the source of truth for localStorage)
+    var cleanEmployees=_deletedIds.employees?.length?DB.employees.filter(function(e){return !_deletedIds.employees.includes(e.id);}):DB.employees;
+    var cleanTrainings=_deletedIds.trainings?.length?DB.trainings.filter(function(t){return !_deletedIds.trainings.includes(t.id);}):DB.trainings;
+    var cleanVideos=_deletedIds.videos?.length?DB.videos.filter(function(v){return !_deletedIds.videos.includes(v.id);}):DB.videos;
+    var cleanSops=_deletedIds.sops?.length?DB.sops.filter(function(s){return !_deletedIds.sops.includes(s.id);}):DB.sops;
+    var cleanTestResults=_deletedIds.testResults?.length?DB.testResults.filter(function(r){return !_deletedIds.testResults.includes(r.id);}):DB.testResults;
+    var cleanCerts=_deletedIds.certificates?.length?DB.certificates.filter(function(c){return !_deletedIds.certificates.includes(c.num);}):DB.certificates;
     if(_syncBusy){
-      // Another sync is running — queue this save to run after it finishes
       _pendingSave=true;
       console.log('saveDB: sync busy, queuing pending save');
       return Promise.resolve();
@@ -3748,14 +3790,14 @@ function saveDB(){
     _syncBusy=true;
     updateSyncUI('syncing');
     const syncPromise=Promise.all([
-      fbSaveCollection('employees',DB.employees,'id'),
+      fbSaveCollection('employees',cleanEmployees,'id'),
       fbSaveCollection('admins',DB.admins,'username'),
-      fbSaveCollection('trainings',DB.trainings,'id'),
-      fbSaveCollection('testResults',DB.testResults,'id'),
-      fbSaveCollection('certificates',DB.certificates,'num'),
+      fbSaveCollection('trainings',cleanTrainings,'id'),
+      fbSaveCollection('testResults',cleanTestResults,'id'),
+      fbSaveCollection('certificates',cleanCerts,'num'),
       fbSaveCollection('notifications',DB.notifications,'id'),
-      fbSaveCollection('videos',DB.videos,'id'),
-      fbSaveCollection('sops',DB.sops,'id'),
+      fbSaveCollection('videos',cleanVideos,'id'),
+      fbSaveCollection('sops',cleanSops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveSettings()
