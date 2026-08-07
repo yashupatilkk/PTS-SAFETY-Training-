@@ -838,10 +838,8 @@ async function fbSaveCollection(collName,items,keyField){
     return {ok:true,count:saved};
   }catch(e){
     console.error('fbSaveCollection ERROR ('+collName+'):',e);
-    // Show visible error to admin — don't hide it
-    const errMsg=e.message||String(e);
-    if(typeof toast==='function')toast('Firebase save failed ('+collName+'): '+errMsg,'error',6000);
-    return {ok:false,error:errMsg};
+    // Do NOT show toast for individual collection errors — saveDB handles the summary
+    return {ok:false,error:e.message||String(e)};
   }
 }
 
@@ -1719,57 +1717,63 @@ function openAddEmpModal(){
   `,"740px");
 }
 async function saveEmployee(){
-  // Show loading state on button immediately
-  const btn=document.getElementById('saveEmpBtn');
-  if(btn){btn.disabled=true;btn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Saving...';}
+  var btn=document.getElementById('saveEmpBtn');
+  var saved=false;
+  if(btn){btn.disabled=true;btn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Saving...';}
   try{
-  const id=document.getElementById("ne_id").value.trim().toUpperCase();
-  const name=document.getElementById("ne_name").value.trim();
-  const mobile=document.getElementById("ne_mobile").value.trim();
-  if(!id||!name||!mobile){toast("ID, Name and Mobile required","error");if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Add Employee';}return;}
-  if(DB.employees.find(e=>e.id===id)){toast("Employee ID already exists","error");if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Add Employee';}return;}
-  // CRITICAL: Read ALL form values BEFORE closing modal (closeModal removes the DOM elements)
-  const empPw=document.getElementById("ne_pw").value||"emp123";
-  const empDept=document.getElementById("ne_dept").value;
-  const empDesig=document.getElementById("ne_desig").value;
-  const empShift=document.getElementById("ne_shift").value;
-  const empEmail=document.getElementById("ne_email").value;
-  const empJoin=document.getElementById("ne_join").value||new Date().toISOString().split("T")[0];
-  const empLoc=document.getElementById("ne_loc").value||"Site";
-  // CRITICAL: Clear tombstone for this ID if it was previously deleted — AWAIT cloud delete
-  await removeFromTombstone('employees',id);
-  const _localAddedAt=Date.now();
-  DB.employees.push({id,name,dept:empDept,desig:empDesig,shift:empShift,mobile,email:empEmail,status:"active",joining:empJoin,location:empLoc,password:empPw,company:DB.settings.companyName,photo:"",_localAddedAt});
-  closeModal();renderEmployees();updateBadges();
-  // Create Firebase Auth account for this employee (ensure it exists for mobile login)
+  var id=document.getElementById('ne_id').value.trim().toUpperCase();
+  var name=document.getElementById('ne_name').value.trim();
+  var mobile=document.getElementById('ne_mobile').value.trim();
+  if(!id||!name||!mobile){toast('ID, Name and Mobile required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Add Employee';}return;}
+  if(DB.employees.find(function(e){return e.id===id;})){toast('Employee ID already exists','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Add Employee';}return;}
+  var empPw=document.getElementById('ne_pw').value||'emp123';
+  var empDept=document.getElementById('ne_dept').value;
+  var empDesig=document.getElementById('ne_desig').value;
+  var empShift=document.getElementById('ne_shift').value;
+  var empEmail=document.getElementById('ne_email').value;
+  var empJoin=document.getElementById('ne_join').value||new Date().toISOString().split('T')[0];
+  var empLoc=document.getElementById('ne_loc').value||'Site';
+  // 1. Add to local array
+  DB.employees.push({id:id,name:name,dept:empDept,desig:empDesig,shift:empShift,mobile:mobile,email:empEmail,status:'active',joining:empJoin,location:empLoc,password:empPw,company:DB.settings.companyName,photo:'',_localAddedAt:Date.now()});
+  // 2. Save to localStorage IMMEDIATELY (guaranteed save)
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save error:',e);}
+  // 3. Close modal and re-render
+  try{closeModal();}catch(e){console.warn('closeModal error:',e);}
+  try{renderEmployees();updateBadges();}catch(e){console.warn('renderEmployees error:',e);}
+  saved=true;
+  toast('Employee '+name+' added successfully! ('+DB.employees.length+' total)','success');
+  // 4. Firebase sync in BACKGROUND
   if(firebaseReady){
-    const authEmail=toEmail(id);
-    // Create auth account first (so employee can login immediately)
-    try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);}catch(e){
-      if(e.code==='auth/email-already-in-use'){
-        // Account exists — try signing in to verify password matches
-        try{await fbAuth.signInWithEmailAndPassword(authEmail,empPw);}catch(e2){console.warn('Auth verify error:',e2.message);}
-      }else{console.warn('Auth create error:',e.message);}
-    }
-    // Sign admin back in
-    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
-  }
-  // AWAIT the save to Firebase so the employee is in the cloud before user can refresh
-  const saveResults=await saveDB();
-  // Check if the employees collection actually saved to Firebase
-  if(saveResults&&Array.isArray(saveResults)){
-    const empResult=saveResults[0]; // employees is first in the list
-    if(empResult&&empResult.ok){
-      toast(`Employee ${name} saved to cloud successfully (${empResult.count} docs)`,'success',3000);
-    }else{
-      toast(`Employee ${name} saved locally BUT Firebase save failed: ${empResult?.error||'Unknown'}. Employee may not appear on mobile.`,'error',8000);
-    }
-  }else{
-    toast(`Employee ${name} added`,'success');
+    (async function(){
+      try{
+        await removeFromTombstone('employees',id);
+        var authEmail=toEmail(id);
+        try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);}catch(authErr){
+          if(authErr.code==='auth/email-already-in-use'){
+            try{await fbAuth.signInWithEmailAndPassword(authEmail,empPw);}catch(e2){}
+          }
+        }
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+        await saveDB();
+      }catch(fbErr){
+        console.warn('Background sync error for employee '+id+':',fbErr);
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }
+    })();
   }
   }catch(e){
     console.error('saveEmployee CRASH:',e);
-    toast('Error adding employee: '+e.message,'error',6000);
+    toast('Error: '+e.message,'error',6000);
+  }finally{
+    // Always make sure UI is usable — re-render employee list if we saved
+    if(saved){
+      try{renderEmployees();}catch(e){}
+    }
+    // Re-enable button if modal is still open (validation failure case)
+    if(btn&&btn.isConnected){
+      btn.disabled=false;
+      btn.innerHTML='<span class="mat-ico">save</span> Add Employee';
+    }
   }
 }
 function editEmp(id){
@@ -3837,44 +3841,32 @@ async function loadDBFromFirestore(){
     // This ensures deletions propagate to ALL devices
     const cols=[
       ['employees','id',d=>{
-        if(d.size>0){
-          const cloudEmps=d.docs.map(x=>x.data());
-          // Cloud wins — do NOT add back local-only items (they were deleted from cloud)
-          // Exception: items added locally but not yet pushed (within last 60s)
-          const cloudIds=new Set(cloudEmps.map(e=>e.id));
-          const cutoff=Date.now()-60000;
-          const localOnly=Object.values(localEmpMap).filter(e=>!cloudIds.has(e.id)&&(e._localAddedAt&&e._localAddedAt>cutoff));
-          DB.employees=[...cloudEmps,...localOnly];
-        }
+        const cloudEmps=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudEmps.map(e=>e.id));
+        // Keep ALL local items not in cloud (they may not have synced yet)
+        // Tombstones will filter out truly deleted items later
+        const localOnly=Object.values(localEmpMap).filter(e=>!cloudIds.has(e.id));
+        DB.employees=[...cloudEmps,...localOnly];
       }],
       ['trainings','id',d=>{
-        if(d.size>0){
-          const cloudTrns=d.docs.map(x=>x.data());
-          const cloudIds=new Set(cloudTrns.map(t=>t.id));
-          const cutoff=Date.now()-60000;
-          const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id)&&(t._localAddedAt&&t._localAddedAt>cutoff));
-          DB.trainings=[...cloudTrns,...localOnly];
-        }
+        const cloudTrns=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudTrns.map(t=>t.id));
+        const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id));
+        DB.trainings=[...cloudTrns,...localOnly];
       }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
       ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
       ['videos','id',d=>{
-        if(d.size>0){
-          const cloudVids=d.docs.map(x=>x.data());
-          const cloudIds=new Set(cloudVids.map(v=>v.id));
-          const cutoff=Date.now()-60000;
-          const localOnly=Object.values(localVidMap).filter(v=>!cloudIds.has(v.id)&&(v._localAddedAt&&v._localAddedAt>cutoff));
-          DB.videos=[...cloudVids,...localOnly];
-        }
+        const cloudVids=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudVids.map(v=>v.id));
+        const localOnly=Object.values(localVidMap).filter(v=>!cloudIds.has(v.id));
+        DB.videos=[...cloudVids,...localOnly];
       }],
       ['sops','id',d=>{
-        if(d.size>0){
-          const cloudSops=d.docs.map(x=>x.data());
-          const cloudIds=new Set(cloudSops.map(s=>s.id));
-          const cutoff=Date.now()-60000;
-          const localOnly=Object.values(localSopMap).filter(s=>!cloudIds.has(s.id)&&(s._localAddedAt&&s._localAddedAt>cutoff));
-          DB.sops=[...cloudSops,...localOnly];
-        }
+        const cloudSops=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudSops.map(s=>s.id));
+        const localOnly=Object.values(localSopMap).filter(s=>!cloudIds.has(s.id));
+        DB.sops=[...cloudSops,...localOnly];
       }],
       ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
       ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
@@ -3960,7 +3952,8 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
-    await cleanupSampleDataFromCloud();
+    // Run sample data cleanup in background (don't block login)
+    cleanupSampleDataFromCloud();
     const loadResult=await loadDBFromFirestore();
     if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
       fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
@@ -3968,10 +3961,9 @@ async function initApp(){
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
       DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
-      // Only push to cloud if we added something new
-      await saveDB();
+      saveDB();
     }
-    await seedFirestore();
+    seedFirestore();
   }catch(e){
     console.warn('Firebase init error:',e);
     fbLoadError=e.message||String(e);
