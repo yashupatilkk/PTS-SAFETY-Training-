@@ -3895,21 +3895,27 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
-    // Snapshot local data BEFORE cloud load (to merge back anything not in cloud)
-    const localEmpMap=Object.fromEntries(DB.employees.map(e=>[e.id,e]));
-    const localTrnMap=Object.fromEntries(DB.trainings.map(t=>[t.id,t]));
-    const localVidMap=Object.fromEntries(DB.videos.map(v=>[v.id,v]));
-    const localSopMap=Object.fromEntries(DB.sops.map(s=>[s.id,s]));
+    // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
+    // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
+    var localSnapshot={
+      employees:JSON.parse(JSON.stringify(DB.employees)),
+      trainings:JSON.parse(JSON.stringify(DB.trainings)),
+      videos:JSON.parse(JSON.stringify(DB.videos)),
+      sops:JSON.parse(JSON.stringify(DB.sops)),
+      testResults:JSON.parse(JSON.stringify(DB.testResults)),
+      certificates:JSON.parse(JSON.stringify(DB.certificates)),
+      notifications:JSON.parse(JSON.stringify(DB.notifications))
+    };
+    var localEmpMap=Object.fromEntries(DB.employees.map(e=>[e.id,e]));
+    var localTrnMap=Object.fromEntries(DB.trainings.map(t=>[t.id,t]));
+    var localVidMap=Object.fromEntries(DB.videos.map(v=>[v.id,v]));
+    var localSopMap=Object.fromEntries(DB.sops.map(s=>[s.id,s]));
 
     // Load each collection individually — one failure won't break the rest
-    // CLOUD-WINS strategy for shared collections (employees, trainings, videos, sops)
-    // This ensures deletions propagate to ALL devices
     const cols=[
       ['employees','id',d=>{
         const cloudEmps=d.docs.map(x=>x.data());
         const cloudIds=new Set(cloudEmps.map(e=>e.id));
-        // Keep ALL local items not in cloud (they may not have synced yet)
-        // Tombstones will filter out truly deleted items later
         const localOnly=Object.values(localEmpMap).filter(e=>!cloudIds.has(e.id));
         DB.employees=[...cloudEmps,...localOnly];
       }],
@@ -3941,19 +3947,38 @@ async function loadDBFromFirestore(){
     const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
     // Load settings separately (it's a single doc, not a collection)
     try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');}
-    // CRITICAL: Load tombstones from cloud so deletions propagate to ALL devices
+    // Load tombstones from cloud
     await loadTombstonesFromCloud();
-    // CRITICAL: Rebuild completed arrays from testResults (source of truth)
+    // Rebuild completed arrays from testResults (source of truth)
     reconcileTrainingsFromResults();
-    // CRITICAL: Filter out anything that was permanently deleted (tombstone)
+    // Filter out permanently deleted items (tombstone)
     applyTombstones();
-    // Save merged data to localStorage only (don't push back to avoid loop)
+
+    // === SAFETY RESTORE: bring back any locally-added item that was lost ===
+    // An item is "locally-added" if it has _localAddedAt and is NOT in the tombstone list
+    // This catches any edge case where cloud merge or tombstones accidentally drop data
+    ['employees','trainings','videos','sops'].forEach(function(coll){
+      var snapshotIds=new Set(DB[coll].map(function(x){return x.id;}));
+      localSnapshot[coll].forEach(function(item){
+        if(!snapshotIds.has(item.id)&&item._localAddedAt){
+          // This item was in localStorage but is now missing — restore it
+          // Only if NOT tombstoned (was intentionally deleted)
+          var tombList=_deletedIds[coll]||[];
+          if(!tombList.includes(item.id)){
+            DB[coll].push(item);
+            console.warn('SAFETY RESTORE: recovered '+coll+' '+item.id+' from local snapshot');
+          }
+        }
+      });
+    });
+
+    // Save merged data to localStorage
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-    console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':''));
-    return {ok:true,loaded,failed}; // Return detailed result
+    console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':'')+' — Trainings: '+DB.trainings.length+', Employees: '+DB.employees.length);
+    return {ok:true,loaded,failed};
   }catch(e){
     console.warn('Firestore load error:',e);
-    return {ok:false,loaded:0,failed:['all'],error:e.message||String(e)}; // Return error info
+    return {ok:false,loaded:0,failed:['all'],error:e.message||String(e)};
   }
 }
 
