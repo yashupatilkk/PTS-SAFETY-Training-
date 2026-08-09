@@ -420,7 +420,6 @@ select.form-control-sm{background:var(--sur2);}
     <button class="nav-item" data-view="trainings" onclick="gotoView('trainings')"><span class="mat-ico">school</span><span>Trainings</span><span class="nav-badge" id="nb-trainings">0</span></button>
     <button class="nav-item" data-view="equipment" onclick="gotoView('equipment')"><span class="mat-ico">build</span><span>Equipment Library</span><span class="nav-badge" id="nb-equipment">0</span></button>
     <div class="nav-section-title">Resources</div>
-    <button class="nav-item" data-view="videos" onclick="gotoView('videos')"><span class="mat-ico">play_circle</span><span>Video Library</span></button>
     <button class="nav-item" data-view="sop" onclick="gotoView('sop')"><span class="mat-ico">description</span><span>SOP Library</span></button>
     <button class="nav-item" data-view="quiz" onclick="gotoView('quiz')"><span class="mat-ico">quiz</span><span>Online Tests</span></button>
     <button class="nav-item" data-view="certificates" onclick="gotoView('certificates')"><span class="mat-ico">workspace_premium</span><span>Certificates</span></button>
@@ -478,7 +477,6 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-employees"></div>
     <div class="view" id="view-trainings"></div>
     <div class="view" id="view-equipment"></div>
-    <div class="view" id="view-videos"></div>
     <div class="view" id="view-sop"></div>
     <div class="view" id="view-quiz"></div>
     <div class="view" id="view-certificates"></div>
@@ -772,7 +770,7 @@ let DB={
   trainings:[],
   testResults:[],
   certificates:[],
-  videos:[],
+  // videos removed — YouTube links are stored directly on training objects
   sops:[
     {id:"SOP001",title:"Fire Extinguisher Inspection & Maintenance",cat:"Fire Fighting",version:"v2.1",updated:"2025-06-01",pages:8,file:"",desc:"Comprehensive guide for monthly inspection, annual servicing, and replacement of all fire extinguisher types (ABC, CO2, Foam, Water) as per IS 2878 / IS 15683.",keyPoints:["Check pressure gauge in green zone","Inspect nozzle and hose for blockage","Verify weight of extinguisher","Check safety pin and tamper seal","Record inspection in logbook","Replace expired extinguishers immediately"],hazards:"Accidental discharge; pressurized cylinder; asphyxiation risk (CO2 type)",reviewedBy:"Safety Officer",emergency:"Call Fire Emergency: Ext 101"},
     {id:"SOP002",title:"Electrical Isolation — LOTO Procedure",cat:"Electrical Safety",version:"v3.0",updated:"2025-05-15",pages:12,file:"",desc:"Lock Out Tag Out procedure for safe isolation of all electrical equipment before maintenance. Mandatory for all voltages above 50V AC / 120V DC as per IS 5216.",keyPoints:["Identify all energy sources","Notify all affected personnel","Switch off isolator and MCCB","Apply personal padlock and tag","Verify dead using voltage tester","Never remove others LOTO locks"],hazards:"Electrocution; arc flash; unintended startup",reviewedBy:"EHS Manager",emergency:"Emergency shutdown: Main LT Panel | Ambulance: Ext 999"},
@@ -860,7 +858,6 @@ async function forceSyncToCloud(){
       fbSaveCollection('testResults',DB.testResults,'id'),
       fbSaveCollection('certificates',DB.certificates,'num'),
       fbSaveCollection('notifications',DB.notifications,'id'),
-      fbSaveCollection('videos',DB.videos,'id'),
       fbSaveCollection('sops',DB.sops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
@@ -962,7 +959,6 @@ function startAutoSync(){
       await Promise.all([
         fbSaveCollection('employees',DB.employees,'id'),
         fbSaveCollection('trainings',DB.trainings,'id'),
-        fbSaveCollection('videos',DB.videos,'id'),
         fbSaveCollection('sops',DB.sops,'id'),
         fbSaveCollection('testResults',DB.testResults,'id'),
         fbSaveCollection('certificates',DB.certificates,'num'),
@@ -1024,7 +1020,6 @@ async function seedFirestore(){
     await fbSaveCollection('testResults',DB.testResults,'id');
     await fbSaveCollection('certificates',DB.certificates,'num');
     await fbSaveCollection('notifications',DB.notifications,'id');
-    await fbSaveCollection('videos',DB.videos,'id');
     await fbSaveCollection('sops',DB.sops,'id');
     await fbSaveSettings();
     // Create default Firebase Auth accounts
@@ -1040,8 +1035,7 @@ async function seedFirestore(){
 ============================================================ */
 let currentUser=null,isAdmin=false,currentView="dashboard";
 let quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0};
-let equip_filter="All",equip_search="",emp_search="",trn_search="",vid_search="",sop_search="";
-let vid_cat_filter="All";
+let equip_filter="All",equip_search="",emp_search="",trn_search="",sop_search="";
 let charts={};
 
 /* ============================================================
@@ -1065,7 +1059,14 @@ function openModal(html,size="800px"){
   document.body.style.overflow="hidden";
 }
 function closeModal(){
-  destroyVideoTracker();
+  // Clean up training video trackers when closing modals
+  if(typeof trnVideoTrackers!=='undefined'){
+    Object.keys(trnVideoTrackers).forEach(function(tid){
+      var tr=trnVideoTrackers[tid];
+      if(tr.interval){clearInterval(tr.interval);tr.interval=null;}
+    });
+    trnVideoTrackers={};
+  }
   document.getElementById("modalOverlay").classList.remove("open");
   document.body.style.overflow="";
 }
@@ -1327,10 +1328,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",videos:"Video Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,videos:renderVideos,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,settings:renderSettings};
   if(renderers[v])renderers[v]();
   closeSidebar();
 }
@@ -1379,11 +1380,9 @@ function onGlobalSearch(q){
   const eqs=EQUIPMENT_DATA.filter(e=>e.n.toLowerCase().includes(ql)||e.c.toLowerCase().includes(ql));
   const emps=DB.employees.filter(e=>e.name.toLowerCase().includes(ql)||e.id.toLowerCase().includes(ql));
   const trns=DB.trainings.filter(t=>t.name.toLowerCase().includes(ql)||t.cat.toLowerCase().includes(ql));
-  const vids=DB.videos.filter(v=>v.title.toLowerCase().includes(ql)||v.cat.toLowerCase().includes(ql));
   if(eqs.length){equip_filter="All";equip_search=q;gotoView("equipment");}
   else if(emps.length){emp_search=q;gotoView("employees");}
   else if(trns.length){trn_search=q;gotoView("trainings");}
-  else if(vids.length){vid_search=q;gotoView("videos");}
   else toast("No results found for: "+q,"info");
 }
 
@@ -1525,10 +1524,6 @@ function renderEmpDashboard(){
         <div class="qa-ico" style="background:rgba(255,176,32,.1)"><span class="mat-ico" style="color:var(--amber);">build</span></div>
         <div class="qa-title">Equipment Library</div><div class="qa-desc">${EQUIPMENT_DATA.length}+ MEP equipment</div>
       </div>
-      <div class="quick-action" onclick="gotoView('videos')">
-        <div class="qa-ico" style="background:rgba(62,207,142,.1)"><span class="mat-ico" style="color:var(--green);">play_circle</span></div>
-        <div class="qa-title">Video Library</div><div class="qa-desc">Watch training videos</div>
-      </div>
     </div>
     ${assignedTrns.length?`
     <div style="margin-bottom:18px;">
@@ -1546,7 +1541,7 @@ function renderEmpDashboard(){
             </div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${t.duration} · Pass: ${t.passing}%</div>
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
-            ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test Now</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
+            ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
           </div>`;
         }).join("")}
       </div>
@@ -1852,7 +1847,6 @@ async function deleteEmp(id){
     if(t.completed) t.completed=t.completed.filter(eid=>eid!==id);
     if(t.completedDates) delete t.completedDates[id];
   });
-  DB.videos.forEach(v=>{if(v.completedBy) v.completedBy=v.completedBy.filter(eid=>eid!==id);});
   DB.notifications=DB.notifications.filter(n=>!n.msg||!n.msg.includes(id));
   // CRITICAL: Save to localStorage IMMEDIATELY so delete is persistent even if Firebase fails
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
@@ -1942,7 +1936,6 @@ function renderTrainings(){
             <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();assignEmployees('${t.id}')"><span class="mat-ico" style="font-size:11px;">person_add</span> Assign</button>
               <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();openTrainingDetail('${t.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span> View</button>
-              ${(()=>{const vd=t.fromVideo?DB.videos.find(v=>v.id===t.fromVideo):null;const ytid=vd?.youtubeId||"";if(!t.fromVideo)return `<button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz('${t.cat}','${t.name.replace(/'/g,"\\'")}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>`;const vidDone=vd&&(vd.completedBy||[]).length>0;return vidDone?`<button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz('${t.cat}','${t.name.replace(/'/g,"\\'")}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button><button class="btn btn-sm btn-outline" onclick="event.stopPropagation();watchVideo('${t.fromVideo}','${ytid}')"><span class="mat-ico" style="font-size:11px;">play_circle</span> Video</button>`:`<button class="btn btn-sm btn-red" onclick="event.stopPropagation();watchVideo('${t.fromVideo}','${ytid}',true)"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video</button><div style="padding:4px 8px;background:rgba(232,72,58,.08);border-radius:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">lock</span> No one completed video yet</div>`;})()}
               <button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">delete</span></button>
             </div>
           </div>
@@ -1957,25 +1950,29 @@ function renderEmpTrainings(){
   const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
   document.getElementById("view-trainings").innerHTML=`
     <div class="section-header"><div class="section-title">My <span>Trainings</span></div></div>
+    <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
+      <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
+      <div><b>Video Required:</b> Watch 90% of the YouTube video to unlock the test. Forwarding/skipping will NOT be counted. You can only take the test <b>one time</b> after completing the video.</div>
+    </div>
     <div class="training-cards">
       ${myTrns.map(t=>{
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
-        const myPassRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name&&r.pass);
-          const done=myPassRes.length>0||(t.completed||[]).includes(empId);
-          const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
-        const isVideoTraining=!!t.fromVideo;
-        const videoData=isVideoTraining?DB.videos.find(v=>v.id===t.fromVideo):null;
-        const videoDone=videoData&&(videoData.completedBy||[]).includes(empId);
-        const showVideoGate=isVideoTraining&&!videoDone;
-        const ytId=videoData?.youtubeId||"";
-        const hasYTLink=!!t.youtubeLink;
-        const ytLinkEmbedId=hasYTLink?extractYoutubeId(t.youtubeLink):null;
+        const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
+        const myPassRes=myRes.filter(r=>r.pass);
+        const done=myPassRes.length>0;
+        const bestRes=myRes.length?myRes.sort((a,b)=>b.score-a.score)[0]:null;
+        const ytEmbedId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
+        const hasVideo=!!ytEmbedId;
+        const alreadyTested=myRes.length>0;
+        const videoProgress=((t.videoProgress||{})[empId])||0;
+        const videoCompleted=videoProgress>=90;
+        const canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
         return`<div class="training-card">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
-            ${isVideoTraining?`<span class="badge badge-danger" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">play_circle</span> Video Training</span>`:""}
-            ${hasYTLink&&!isVideoTraining?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
+            ${hasVideo?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
+            ${done?`<span class="badge badge-active" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">check_circle</span> ${bestRes.score}%</span>`:hasVideo?`<span class="badge badge-${videoCompleted?"active":"warning"}" style="position:absolute;bottom:8px;right:8px;">${videoCompleted?"✅ Video Done":"⏳ "+videoProgress+"%"}</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
           </div>
           <div class="training-body">
@@ -1985,26 +1982,35 @@ function renderEmpTrainings(){
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
               <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration}</span>
             </div>
-            ${ytLinkEmbedId?`
-            <div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);">
-              <iframe src="https://www.youtube.com/embed/${ytLinkEmbedId}?rel=0&enablejsapi=1" style="width:100%;height:180px;border:none;" allowfullscreen></iframe>
+            ${hasVideo?`
+            <div id="trnVidPlayer_${t.id}" style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);width:100%;height:200px;"></div>
+            <div style="padding:8px 10px;background:var(--sur2);border-radius:0 0 var(--r-sm) var(--r-sm);border:1px solid var(--bdr);border-top:none;margin-top:-4px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-size:11px;font-weight:700;color:var(--amber);">Watch Progress</span>
+                <span style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);">
+                  <span id="trnVidTime_${t.id}">0:00</span>
+                  <span id="trnVidPct_${t.id}" style="font-weight:700;color:${videoCompleted?"var(--green)":"var(--amber)"};">${videoProgress}%</span>
+                </span>
+              </div>
+              <div style="height:6px;background:var(--sur3);border-radius:99px;overflow:hidden;margin-bottom:6px;">
+                <div id="trnVidBar_${t.id}" style="height:100%;width:${videoProgress}%;background:${videoCompleted?"var(--green)":"linear-gradient(90deg,var(--amber),var(--green))"};border-radius:99px;transition:width 0.5s ease;"></div>
+              </div>
+              ${!videoCompleted?`<div id="trnVidLock_${t.id}" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);">
+                <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% — forwarding/skipping not counted
+              </div>`:`<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);">
+                <span class="mat-ico" style="font-size:13px;">check_circle</span> Video completed! You can now take the test.
+              </div>`}
             </div>
-            <a href="${t.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">open_in_new</span> Open in YouTube</a>
             `:""}
-
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:6px;">
+              <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed ("+bestRes.score+"%)":alreadyTested?"❌ Failed ("+bestRes.score+"%)":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
             </div>
-            ${myRes.length?`<div style="font-size:11px;color:var(--muted);">Best score: <b style="color:${myRes[0].pass?"var(--green)":"var(--red)"}">${Math.max(...myRes.map(r=>r.score))}%</b> · ${myRes.length} attempt(s)</div>`:""}
+            ${alreadyTested?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Your score: <b style="color:${bestRes.pass?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}</div>`:""}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-              ${showVideoGate?`
-                <button class="btn btn-sm btn-red" onclick="watchVideo('${t.fromVideo}','${ytId}',true)"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video First</button>
-                <div style="padding:4px 8px;background:rgba(232,72,58,.08);border-radius:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">lock</span> Complete video to unlock test</div>
-              `:`
-                <button class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
-                ${isVideoTraining&&videoData?`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.fromVideo}','${ytId}')"><span class="mat-ico" style="font-size:11px;">replay</span> Rewatch</button>`:""}
-              `}
+              ${canTakeTest?`
+                <button id="trnVidTestBtn_${t.id}" class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')" ${!videoCompleted?"disabled style=\"opacity:0.5;cursor:not-allowed;\"":videoCompleted?"style=\"animation:pulseGlow 1.5s ease-in-out infinite;\"":""}><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
+              `:alreadyTested&&!done?`<div style="padding:4px 10px;background:rgba(232,72,58,.08);border-radius:6px;font-size:11px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">block</span> Test taken (score: ${bestRes.score}%)</div>`:done?`<div style="padding:4px 10px;background:rgba(62,207,142,.08);border-radius:6px;font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">verified</span> Training completed</div>`:""}
               ${done&&myRes.find(r=>r.cert)?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
             </div>
           </div>
@@ -2013,13 +2019,12 @@ function renderEmpTrainings(){
       ${!myTrns.length?`<div class="empty-state"><span class="mat-ico">school</span><h3>No trainings assigned</h3><p>You have no trainings assigned yet</p></div>`:""}
     </div>
   `;
-  // Initialize YouTube trackers for training videos (must be OUTSIDE template literal)
+  // Initialize YouTube trackers for all training videos with progress tracking
   setTimeout(function(){
-    DB.trainings.forEach(function(t){
+    myTrns.forEach(function(t){
       var ytId=extractYoutubeId(t.youtubeLink||'');
-      if(ytId&&t.youtubeLink){
-        var cont=document.getElementById('trnVid_'+t.id);
-        if(cont){initTrnVideoTracker(ytId,'trnVid_'+t.id,'trnVidBar_'+t.id,'trnVidPct_'+t.id,'trnVidTime_'+t.id,'trnTestBtn_'+t.id,'trnVidLock_'+t.id,t.id);}
+      if(ytId){
+        initTrnVideoTracker(ytId,t.id,empId);
       }
     });
   },800);
@@ -2043,10 +2048,12 @@ function openAddTrnModal(){
       <div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="nt_desc" rows="2" placeholder="Training description..."></textarea></div>
       </div>
       <div class="form-section" style="margin-top:14px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);">
-        <div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> YouTube Video Link (Easy - Just Paste URL)</div>
+        <div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> YouTube Video Link *</div>
         <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="nt_yturl" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." oninput="previewTrnVideo(this.value)"></div>
-        <div id="trnVideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div class="video-embed-wrap" style="max-height:180px;"><iframe id="trnVideoFrame" src="" allowfullscreen></iframe></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Employees will see this video directly. They can watch and take the test immediately.</div></div>
-        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--bdr);padding-top:8px;">Or select from existing library (enables 90% watch tracking): <select class="form-control-sm" id="nt_video" style="width:100%;margin-top:4px;"><option value="">-- Use YouTube URL above (simple) --</option>${DB.videos.map(v=>`<option value="${v.id}">${v.title} (${v.duration})</option>`).join("")}</select></div>
+        <div id="trnVideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div class="video-embed-wrap" style="max-height:180px;"><iframe id="trnVideoFrame" src="" allowfullscreen></iframe></div></div>
+        <div style="margin-top:8px;padding:8px 12px;background:rgba(255,176,32,.06);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;font-size:11px;color:var(--amber);">
+          <span class="mat-ico" style="font-size:13px;">info</span> Employees must watch <b>90% of this video</b> before the test button unlocks. Forwarding/skipping is NOT counted. Test can only be taken <b>one time</b> after video completion.
+        </div>
       </div>
     </div></div>
     <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
@@ -2122,17 +2129,13 @@ async function saveTraining(){
       DB.customQuestions.push({cat:cat,trainingName:name,q:cq.q,o:cq.o,a:cq.a,customFor:name,ts:Date.now()});
     });
   }
-  // YouTube URL: save as simple link (no video library auto-create)
+  // YouTube URL: save link on training object
   var ytUrlEl=document.getElementById('nt_yturl');
   var ytUrl=ytUrlEl?ytUrlEl.value.trim():'';
   var ytId=extractYoutubeId(ytUrl);
-  var linkedVideoId=document.getElementById('nt_video').value;
-  var linkedVideo=linkedVideoId?DB.videos.find(function(v){return v.id===linkedVideoId;}):null;
-  if(linkedVideoId&&DB.trainings.find(function(x){return x.fromVideo===linkedVideoId;})){toast('A training already exists for this video.','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
+  if(!ytUrl){toast('YouTube video link is required!','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,_localAddedAt:Date.now()};
-  if(ytUrl){t.youtubeLink=ytUrl;}
-  if(linkedVideoId){t.fromVideo=linkedVideoId;t.videoTitle=linkedVideo?linkedVideo.title||name:name;t.trainer='Video Training';t.duration=linkedVideo?linkedVideo.duration:t.duration;}
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
 
   // 1. Add to local array
   DB.trainings.push(t);
@@ -2282,24 +2285,21 @@ async function deleteTraining(id){
   // Collect IDs before cleaning
   var linkedTestIds=DB.testResults.filter(function(r){return r.training===trn.name;}).map(function(r){return r.id;});
   var linkedCertNums=DB.certificates.filter(function(c){return c.training===trn.name;}).map(function(c){return c.num;});
-  var linkedVideoId=trn.fromVideo||null;
 
   // === STEP 1: Clean ALL local data IMMEDIATELY ===
   DB.trainings=DB.trainings.filter(function(t){return t.id!==id;});
   linkedTestIds.forEach(function(tid){DB.testResults=DB.testResults.filter(function(r){return r.id!==tid;});});
   linkedCertNums.forEach(function(cnum){DB.certificates=DB.certificates.filter(function(c){return c.num!==cnum;});});
-  if(linkedVideoId){DB.videos=DB.videos.filter(function(v){return v.id!==linkedVideoId;});}
   // CRITICAL: Save to localStorage IMMEDIATELY so delete persists even if Firebase fails
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
   // Re-render immediately so UI reflects deletion
   try{closeModal();}catch(e){}
-  renderTrainings();renderVideos();renderCertificates();updateBadges();
+  renderTrainings();renderCertificates();updateBadges();
 
   // === STEP 2: Add tombstones (local + cloud) for cross-device sync ===
   var tombPromises=[addToTombstone('trainings',id)];
   linkedTestIds.forEach(function(tid){tombPromises.push(addToTombstone('testResults',tid));});
   linkedCertNums.forEach(function(cnum){tombPromises.push(addToTombstone('certificates',cnum));});
-  if(linkedVideoId){tombPromises.push(addToTombstone('videos',linkedVideoId));}
   await Promise.all(tombPromises);
 
   // === STEP 3: Delete from Firebase directly (best-effort) ===
@@ -2307,7 +2307,6 @@ async function deleteTraining(id){
     try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
     for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
     for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
-    if(linkedVideoId){try{await fbDB.collection('videos').doc(String(linkedVideoId)).delete();}catch(e){}}
   }
 
   // === STEP 4: Push cleaned data to cloud ===
@@ -2413,52 +2412,73 @@ function openEquipDetail(idx){
 }
 
 
+
 /* ============================================================
-   VIDEO PROGRESS TRACKER (YouTube IFrame API)
+   YOUTUBE VIDEO TRACKING FOR TRAINING CARDS
 ============================================================ */
-let videoTracker={player:null,videoId:"",totalWatched:0,lastTime:0,interval:null,ready:false,percent:0,duration:0};
+let trnVideoTrackers={}; // {trnId: {player, totalWatched, lastTime, interval, ready, duration, empId, trnId, percent}}
 function onYouTubeIframeAPIReady(){console.log("YouTube IFrame API ready");}
-function initVideoTracker(ytVideoId,progressBarId,pctId,timeId,completeBtnId,lockMsgId){
-  destroyVideoTracker();
-  videoTracker.videoId=ytVideoId;videoTracker.totalWatched=0;videoTracker.lastTime=0;videoTracker.percent=0;videoTracker.ready=false;videoTracker.duration=0;
-  const container=document.getElementById(progressBarId);
+
+function initTrnVideoTracker(ytVideoId,trnId,empId){
+  var container=document.getElementById('trnVidPlayer_'+trnId);
   if(!container)return;
-  container.innerHTML="<div id=\"ytPlayerDiv\"></div>";
-  videoTracker.player=new YT.Player("ytPlayerDiv",{
-    width:"100%",height:"100%",videoId:ytVideoId,
-    playerVars:{autoplay:1,rel:0,modestbranding:1},
+  // If already tracking this training, don't reinitialize
+  if(trnVideoTrackers[trnId])return;
+  var tracker={player:null,totalWatched:0,lastTime:0,interval:null,ready:false,duration:0,percent:0,empId:empId,trnId:trnId};
+  trnVideoTrackers[trnId]=tracker;
+  var playerId='ytPlayer_'+trnId;
+  container.innerHTML='<div id="'+playerId+'"></div>';
+  tracker.player=new YT.Player(playerId,{
+    width:'100%',height:'200px',videoId:ytVideoId,
+    playerVars:{autoplay:0,rel:0,modestbranding:1,enablejsapi:1},
     events:{
       onReady:function(e){
-        videoTracker.ready=true;
-        videoTracker.duration=videoTracker.player.getDuration()||0;
-        videoTracker.interval=setInterval(function(){
-          if(!videoTracker.player||!videoTracker.player.getCurrentTime)return;
+        tracker.ready=true;
+        tracker.duration=tracker.player.getDuration()||0;
+        // Restore saved progress
+        var trn=DB.trainings.find(function(t){return t.id===trnId;});
+        var savedPct=((trn&&trn.videoProgress)?trn.videoProgress[empId]:0)||0;
+        if(savedPct>0){
+          tracker.totalWatched=savedPct/100*tracker.duration;
+          tracker.percent=savedPct;
+        }
+        // Start tracking interval
+        tracker.interval=setInterval(function(){
           try{
-            const cur=videoTracker.player.getCurrentTime();
-            const dur=videoTracker.player.getDuration()||videoTracker.duration;
-            if(dur>0&&cur>videoTracker.lastTime){
-              const delta=cur-videoTracker.lastTime;
-              const capped=Math.min(delta,2);
-              videoTracker.totalWatched+=capped;
+            if(!tracker.player||!tracker.player.getCurrentTime)return;
+            var cur=tracker.player.getCurrentTime();
+            var dur=tracker.player.getDuration()||tracker.duration;
+            if(dur>0&&cur>tracker.lastTime){
+              var delta=cur-tracker.lastTime;
+              var capped=Math.min(delta,2); // Cap at 2s per tick to prevent forwarding
+              tracker.totalWatched+=capped;
             }
-            videoTracker.lastTime=cur;
-            videoTracker.percent=Math.min(100,Math.round(videoTracker.totalWatched/dur*100));
-            const pb=document.getElementById(progressBarId+"_bar");
-            const pt=document.getElementById(pctId);
-            const tt=document.getElementById(timeId);
-            const cb=document.getElementById(completeBtnId);
-            const lm=document.getElementById(lockMsgId);
-            if(pb)pb.style.width=videoTracker.percent+"%";
-            if(pt)pt.textContent=videoTracker.percent+"%";
-            if(tt){const cm=Math.floor(cur/60);const cs=Math.floor(cur%60);tt.textContent=cm+":"+String(cs).padStart(2,"0");}
-            if(cb){
-              if(videoTracker.percent>=90){cb.disabled=false;cb.style.opacity="1";cb.style.cursor="pointer";cb.classList.add("pulse-glow");}
+            tracker.lastTime=cur;
+            tracker.percent=Math.min(100,Math.round(tracker.totalWatched/dur*100));
+            // Update UI
+            var pb=document.getElementById('trnVidBar_'+trnId);
+            var pt=document.getElementById('trnVidPct_'+trnId);
+            var tt=document.getElementById('trnVidTime_'+trnId);
+            var cb=document.getElementById('trnVidTestBtn_'+trnId);
+            var lm=document.getElementById('trnVidLock_'+trnId);
+            if(pb){pb.style.width=tracker.percent+'%';if(tracker.percent>=90)pb.style.background='var(--green)';}
+            if(pt){pt.textContent=tracker.percent+'%';pt.style.color=tracker.percent>=90?'var(--green)':'var(--amber)';}
+            if(tt){var cm=Math.floor(cur/60);var cs=Math.floor(cur%60);tt.textContent=cm+':'+String(cs).padStart(2,'0');}
+            // Unlock test button at 90%
+            if(cb&&tracker.percent>=90){cb.disabled=false;cb.style.opacity='1';cb.style.cursor='pointer';cb.style.animation='pulseGlow 1.5s ease-in-out infinite';}
+            // Hide lock message
+            if(lm&&tracker.percent>=90){lm.style.display='none';}
+            // Save progress to training object
+            if(tracker.percent>0){
+              var trn2=DB.trainings.find(function(t){return t.id===trnId;});
+              if(trn2){
+                if(!trn2.videoProgress)trn2.videoProgress={};
+                trn2.videoProgress[empId]=tracker.percent;
+              }
             }
-            if(lm&&videoTracker.percent>=90){lm.style.display="none";}
-            if(videoTracker.percent>=100&&videoTracker.interval){
-              clearInterval(videoTracker.interval);
-              videoTracker.interval=null;
-              if(cb&&!cb._autoClicked){cb._autoClicked=true;cb.click();}
+            // Save periodically (every 10 seconds worth of progress)
+            if(tracker.percent%5===0&&tracker.percent>0){
+              try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
             }
           }catch(ex){}
         },1000);
@@ -2466,277 +2486,91 @@ function initVideoTracker(ytVideoId,progressBarId,pctId,timeId,completeBtnId,loc
       onStateChange:function(e){
         if(e.data===YT.PlayerState.PAUSED||e.data===YT.PlayerState.ENDED){
           try{
-            const cur=videoTracker.player.getCurrentTime();
-            if(cur>videoTracker.lastTime){
-              const dur=videoTracker.player.getDuration()||videoTracker.duration;
+            var cur=tracker.player.getCurrentTime();
+            if(cur>tracker.lastTime){
+              var dur=tracker.player.getDuration()||tracker.duration;
               if(dur>0){
-                const delta=Math.min(cur-videoTracker.lastTime,2);
-                videoTracker.totalWatched+=delta;
-                videoTracker.percent=Math.min(100,Math.round(videoTracker.totalWatched/dur*100));
+                var delta=Math.min(cur-tracker.lastTime,2);
+                tracker.totalWatched+=delta;
+                tracker.percent=Math.min(100,Math.round(tracker.totalWatched/dur*100));
               }
             }
-            videoTracker.lastTime=cur;
+            tracker.lastTime=cur;
+            // Save on pause/end
+            var trn3=DB.trainings.find(function(t){return t.id===trnId;});
+            if(trn3){if(!trn3.videoProgress)trn3.videoProgress={};trn3.videoProgress[empId]=tracker.percent;}
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            if(firebaseReady){try{saveDB();}catch(e){}}
           }catch(ex){}
         }
       },
-      onError:function(e){console.warn("YT Player error:",e.data);}
+      onError:function(e){console.warn('YT Player error:',e.data);}
     }
   });
-}
-
-function completeVideoAndCreateTraining(videoId){
-  const v=DB.videos.find(x=>x.id===videoId);
-  if(!v)return;
-  const empId=currentUser?currentUser.id:null;
-  const today=new Date().toISOString().split("T")[0];
-  // Find or create training linked to this video
-  let trn=DB.trainings.find(t=>t.fromVideo===videoId);
-  if(!trn){
-    const trnName="Video: "+v.title;
-    trn={id:genId("TRN"),name:trnName,cat:v.cat,dept:"All",trainer:"Video Training",date:today,duration:v.duration||"--",passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+v.title,enrolled:[],completed:[],completedDates:{},fromVideo:videoId,videoTitle:v.title};
-    DB.trainings.push(trn);
-    toast("Training auto-created: "+trnName,"success");
-  }
-  // Mark VIDEO as watched — do NOT mark training as completed (that requires passing the test)
-  if(empId){
-    if(!v.completedBy)v.completedBy=[];
-    if(!v.completedBy.includes(empId)){
-      v.completedBy.push(empId);
-    }
-    // Auto-enroll employee into the training if not already
-    if(!trn.enrolled)trn.enrolled=[];
-    if(!trn.enrolled.includes(empId)){
-      trn.enrolled.push(empId);
-    }
-  }
-  destroyVideoTracker();
-  closeModal();
-  saveDB();
-  updateBadges();
-  if(empId){
-    toast("Video watched successfully! Now take the test to complete training.","success",4000);
-    // Auto-navigate to take the test for this training
-    setTimeout(function(){
-      startQuiz(trn.cat, trn.name);
-    }, 1500);
-  }
-  renderVideos();
-  if(!isAdmin)renderEmpTrainings();
-}
-
-function destroyVideoTracker(){
-  if(videoTracker.interval){clearInterval(videoTracker.interval);videoTracker.interval=null;}
-  if(videoTracker.player&&videoTracker.player.destroy){try{videoTracker.player.destroy();}catch(e){}}
-  videoTracker.player=null;videoTracker.ready=false;
 }
 
 /* ============================================================
-   VIDEO LIBRARY
+   START QUIZ FOR A SPECIFIC TRAINING (Employee)
 ============================================================ */
-function renderVideos(){
-  const filtered=DB.videos.filter(v=>{
-    const q=vid_search.toLowerCase();
-    const catMatch=vid_cat_filter==="All"||v.cat===vid_cat_filter;
-    return catMatch&&(!q||v.title.toLowerCase().includes(q)||v.cat.toLowerCase().includes(q));
-  });
-  const allCats=["All",...[...new Set(DB.videos.map(v=>v.cat))]];
-  document.getElementById("view-videos").innerHTML=`
-    <div class="section-header">
-      <div class="section-title">Video <span>Library</span></div>
-      <div style="display:flex;gap:8px;">${isAdmin?`<button class="btn btn-amber" onclick="openAddVideoModal()"><span class="mat-ico">add</span> Add Video</button>`:""}</div>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-      <div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search videos..." oninput="vid_search=this.value;renderVideos()" value="${vid_search}"></div>
-      <span style="font-size:12px;color:var(--muted);">${filtered.length} videos</span>
-    </div>
-    <div class="chips-row" style="overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px;">
-      ${allCats.map(c=>`<button class="chip${vid_cat_filter===c?" active":""}" onclick="vid_cat_filter='${c.replace(/'/g,"\\'")}';renderVideos()" style="white-space:nowrap;">${c}</button>`).join("")}
-    </div>
-    <div class="video-grid">
-      ${filtered.map(v=>{
-        const liked=currentUser&&(v.likes||[]).includes(currentUser.id);
-        const likeCount=(v.likes||[]).length;
-        const ytId=v.youtubeId||extractYoutubeId(v.url);
-        const thumbUrl=ytId?`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`:"";
-        return`<div class="video-card">
-          <div class="video-thumb" style="cursor:pointer;${thumbUrl?`background:url('${thumbUrl}') center/cover;`:"background:linear-gradient(135deg,#e8483a33,#e8483a11);"}" onclick="watchVideo('${v.id}','${ytId||""}')">
-            <div style="position:absolute;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;">
-              <div class="video-play"><span class="mat-ico">play_arrow</span></div>
-            </div>
-            <div style="position:absolute;top:8px;left:8px;"><span class="badge badge-danger">${v.cat}</span></div>
-            <div style="position:absolute;bottom:8px;right:8px;font-size:10px;background:rgba(0,0,0,.7);color:#fff;padding:2px 7px;border-radius:99px;">${v.duration}</div>
-          </div>
-          <div class="video-body">
-            <div class="video-title" style="cursor:pointer;" onclick="watchVideo('${v.id}','${ytId||""}')">${v.title}</div>
-            <div class="video-meta" style="align-items:center;margin-top:5px;">
-              <span><span class="mat-ico" style="font-size:12px;">visibility</span>${v.views} views</span>
-              <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(v.added)}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-              <button onclick="event.stopPropagation();likeVideo('${v.id}')" style="display:flex;align-items:center;gap:4px;padding:5px 12px;border-radius:99px;border:1px solid ${liked?"var(--red)":"var(--bdr)"};background:${liked?"rgba(232,72,58,.12)":"var(--sur2)"};color:${liked?"var(--red)":"var(--muted)"};font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;"><span class="mat-ico" style="font-size:14px;">${liked?"favorite":"favorite_border"}</span>${likeCount}</button>
-              <button onclick="event.stopPropagation();watchVideo('${v.id}','${ytId||""}')" style="display:flex;align-items:center;gap:4px;padding:5px 12px;border-radius:99px;border:1px solid var(--amber);background:rgba(255,176,32,.1);color:var(--amber);font-size:12px;font-weight:600;cursor:pointer;"><span class="mat-ico" style="font-size:14px;">play_circle</span>Watch</button>
-              ${isAdmin?`<button style="margin-left:auto;display:flex;align-items:center;padding:5px 8px;border-radius:99px;border:1px solid var(--red);background:rgba(232,72,58,.1);color:var(--red);font-size:11px;cursor:pointer;" onclick="event.stopPropagation();deleteVideo('${v.id}')"><span class="mat-ico" style="font-size:13px;">delete</span></button>`:""}
-            </div>
-          </div>
-        </div>`;
-      }).join("")}
-      ${!filtered.length?`<div class="empty-state" style="grid-column:1/-1"><span class="mat-ico">videocam_off</span><h3>No videos found</h3></div>`:""}
-    </div>
-  `;
-}
-function watchVideo(id,ytId,fromTraining){
-  const v=DB.videos.find(x=>x.id===id);
-  if(v)v.views++;
-  const videoId=ytId||extractYoutubeId(v?.url||"");
-  if(!videoId){if(v?.url)window.open(v.url,"_blank");else toast("No video URL available","error");renderVideos();return;}
-  const canComplete=fromTraining||false;
-  const trackerId="vt_"+id;
-  openModal(`
-    <div class="modal-accent"></div>
-    <div class="modal-head">
-      <div class="modal-ico" style="background:rgba(232,72,58,.15)"><span class="mat-ico" style="color:var(--red);font-size:22px;">play_circle</span></div>
-      <div><h2 style="font-size:15px;">${v?.title||"Training Video"}</h2><span class="badge badge-danger">${v?.cat||""}</span></div>
-      <button class="close-btn" onclick="destroyVideoTracker();closeModal();renderVideos();"><span class="mat-ico">close</span></button>
-    </div>
-    <div class="modal-body">
-      <div id="${trackerId}" class="video-embed-wrap" style="position:relative;min-height:360px;"></div>
-      <div style="margin-top:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <span style="font-size:12px;font-weight:700;color:var(--amber);">Watch Progress</span>
-          <span style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);">
-            <span id="${trackerId}_time">0:00</span>
-            <span id="${trackerId}_pct" style="font-weight:700;color:var(--amber);">0%</span>
-          </span>
-        </div>
-        <div style="height:6px;background:var(--sur2);border-radius:99px;overflow:hidden;margin-bottom:8px;">
-          <div id="${trackerId}_bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--amber),var(--green));border-radius:99px;transition:width 0.5s ease;"></div>
-        </div>
-        <div id="${trackerId}_lock" style="padding:6px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);margin-bottom:8px;">
-          <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% of the video to unlock the test
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          ${v?`<div style="flex:1;"><div style="font-weight:600;font-size:13px;">${v.title}</div><div style="font-size:11px;color:var(--muted);">${v.cat} · ${v.duration} · ${v.views} views</div></div>`:""}
-          <button id="${trackerId}_complete" class="btn btn-green" disabled style="opacity:0.5;cursor:not-allowed;" onclick="completeVideoAndCreateTraining('${id}')"><span class="mat-ico">check_circle</span> Mark as Watched & Take Test</button>
-          ${v?`<a href="${v.url}" target="_blank" class="btn btn-sm btn-outline"><span class="mat-ico" style="font-size:12px;">open_in_new</span></a>`:""}
-        </div>
-      </div>
-    </div>
-  `,"860px");
-  setTimeout(function(){initVideoTracker(videoId,trackerId,trackerId+"_pct",trackerId+"_time",trackerId+"_complete",trackerId+"_lock");},500);
-  saveDB();
-}
-function likeVideo(id){
-  if(!currentUser){toast("Login required","error");return;}
-  const v=DB.videos.find(x=>x.id===id);if(!v)return;
-  if(!v.likes)v.likes=[];
-  const idx=v.likes.indexOf(currentUser.id);
-  if(idx>=0){v.likes.splice(idx,1);toast("Removed like","info",1500);}
-  else{v.likes.push(currentUser.id);toast("❤ Liked!","success",1500);}
-  saveDB();
-  renderVideos();
-}
-function openAddVideoModal(){
-  openModal(`
-    <div class="modal-accent"></div>
-    <div class="modal-head">
-      <div class="modal-ico" style="background:rgba(232,72,58,.15)"><span class="mat-ico" style="color:var(--red);font-size:22px;">video_library</span></div>
-      <h2>Add Training Video</h2>
-      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
-    </div>
-    <div class="modal-body">
-      <div class="form-section"><div class="form-grid">
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Video Title *</label><input class="form-control-sm" id="nv_title" placeholder="e.g. Fire Extinguisher — PASS Technique"></div>
-        <div class="form-group"><label class="form-label-sm">Category</label><select class="form-control-sm" id="nv_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="nv_dur" placeholder="5:30"></div>
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">YouTube URL *</label><input class="form-control-sm" id="nv_url" placeholder="https://youtube.com/watch?v=..." oninput="previewVideoId(this.value)"></div>
-      </div>
-      <div id="videoPreviewWrap" style="display:none;margin-top:12px;"><div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:6px;">Preview</div>
-        <div class="video-embed-wrap" style="max-height:200px;"><iframe id="videoPreviewFrame" src="" allowfullscreen></iframe></div>
-      </div></div>
-    </div>
-    <div class="modal-foot"><button class="btn btn-amber" onclick="saveVideo()"><span class="mat-ico">save</span> Add Video</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
-  `,"640px");
-}
-function previewVideoId(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById("videoPreviewWrap");const frame=document.getElementById("videoPreviewFrame");if(ytId&&wrap&&frame){wrap.style.display="block";frame.src=`https://www.youtube.com/embed/${ytId}?rel=0`;}else if(wrap){wrap.style.display="none";}}
-let _videoSaving=false;
-function saveVideo(){
-  if(_videoSaving)return;
-  _videoSaving=true;
-  const title=document.getElementById("nv_title").value.trim();
-  const urlVal=document.getElementById("nv_url").value.trim();
-  if(!title||!urlVal){toast("Title and URL required","error");return;}
-  const ytId=extractYoutubeId(urlVal);
-  // Duplicate check: same YouTube ID or same title
-  if(ytId&&DB.videos.find(v=>v.youtubeId===ytId)){toast("This video already exists!","error");return;}
-  if(DB.videos.find(v=>v.title.toLowerCase()===title.toLowerCase())){toast("A video with this title already exists!","error");return;}
-  const fullUrl=ytId?`https://www.youtube.com/watch?v=${ytId}`:urlVal;
-  const vidId=genId("VID");
-  const cat=document.getElementById("nv_cat").value;
-  const dur=document.getElementById("nv_dur").value||"--";
-  const today=new Date().toISOString().split("T")[0];
-  DB.videos.push({id:vidId,title,cat,type:"youtube",url:fullUrl,youtubeId:ytId||"",duration:dur,views:0,likes:[],added:today,completedBy:[],_localAddedAt:Date.now()});
-  // Auto-create a training linked to this video (only if not already exists)
-  const trnName="Video: "+title;
-  if(!DB.trainings.find(t=>t.fromVideo===vidId)){
-    const trn={id:genId("TRN"),name:trnName,cat,dept:"All",trainer:"Video Training",date:today,duration:dur,passing:75,validity:"1 Year",cert:true,desc:"Auto-created from video library: "+title,enrolled:[],completed:[],completedDates:{},fromVideo:vidId,videoTitle:title,_localAddedAt:Date.now()};
-    DB.trainings.push(trn);
+function startQuizForTrn(trnId){
+  var t=DB.trainings.find(function(x){return x.id===trnId;});
+  if(!t){toast('Training not found','error');return;}
+  // Check if already tested
+  var empId=currentUser.id;
+  var existingResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+  if(existingResults.length>0){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only.','error');return;}
+  // Check video progress if YouTube link exists
+  var ytId=extractYoutubeId(t.youtubeLink||'');
+  if(ytId){
+    var vp=((t.videoProgress||{})[empId])||0;
+    if(vp<90){toast('Watch at least 90% of the video first! Current: '+vp+'%','error');return;}
   }
-  _videoSaving=false;
-  closeModal();renderVideos();renderTrainings();updateBadges();saveDB();toast("Video added & Training auto-created: "+trnName,"success");
-}
-async function deleteVideo(id){
-  if(!confirm("Delete this video PERMANENTLY? Linked training, test results, and certificates will also be removed from everywhere."))return;
-
-  // STEP 1: Collect IDs to delete from Firebase BEFORE touching local arrays
-  const linkedTrnIds=DB.trainings.filter(t=>t.fromVideo===id).map(t=>t.id);
-  const linkedTestIds=[];
-  const linkedCertNums=[];
-  linkedTrnIds.forEach(trnId=>{
-    const trn=DB.trainings.find(t=>t.id===trnId);
-    if(!trn)return;
-    (trn.enrolled||[]).forEach(eid=>{
-      DB.testResults.filter(r=>r.empId===eid&&r.training===trn.name).forEach(r=>{
-        if(!linkedTestIds.includes(r.id))linkedTestIds.push(r.id);
-      });
-      DB.certificates.filter(c=>c.empId===eid&&c.training===trn.name).forEach(c=>{
-        if(!linkedCertNums.includes(c.num))linkedCertNums.push(c.num);
-      });
-    });
-  });
-
-  // STEP 2: Clean all local data + AWAIT tombstone cloud writes
-  DB.videos=DB.videos.filter(v=>v.id!==id);
-  const tombPromises=[addToTombstone('videos',id)];
-  linkedTrnIds.forEach(tid=>{tombPromises.push(addToTombstone('trainings',tid));});
-  DB.trainings=DB.trainings.filter(t=>t.fromVideo!==id);
-  // Also remove test results and certs linked to the deleted training
-  linkedTestIds.forEach(tid=>{DB.testResults=DB.testResults.filter(r=>r.id!==tid);tombPromises.push(addToTombstone('testResults',tid));});
-  linkedCertNums.forEach(cnum=>{DB.certificates=DB.certificates.filter(c=>c.num!==cnum);tombPromises.push(addToTombstone('certificates',cnum));});
-  // AWAIT all tombstone cloud writes so other devices know immediately
-  await Promise.all(tombPromises);
-
-  // STEP 3: Delete from Firebase FIRST (before saveDB pushes)
-  if(firebaseReady){
-    try{await fbDB.collection('videos').doc(String(id)).delete();}catch(e){console.warn('FB del video:',e);}
-    for(const tid of linkedTrnIds){
-      try{await fbDB.collection('trainings').doc(String(tid)).delete();}catch(e){console.warn('FB del training:',e);}
-    }
-    for(const tid of linkedTestIds){
-      try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){console.warn('FB del testResult:',e);}
-    }
-    for(const cnum of linkedCertNums){
-      try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){console.warn('FB del cert:',e);}
-    }
+  // Build question pool: custom questions first, then from bank
+  var allQs=[];
+  // Add custom questions stored in the training object
+  if(t.questions&&t.questions.length){
+    t.questions.forEach(function(q){allQs.push({q:q.q,o:[...q.o],a:q.a});});
   }
-
-  // STEP 4: Save cleaned local data now (cloud docs already deleted)
-  await new Promise(r=>{saveDB();setTimeout(r,1500);});
-
-  // STEP 5: Mark deletion time and re-render
-  _lastDeleteTime=Date.now();
-  renderVideos();renderTrainings();renderCertificates();updateBadges();
-  toast("Video PERMANENTLY deleted from all records and cloud","warning");
+  // Add from QUESTION_BANK for this category
+  var cat=resolveQuizCategory(t.cat);
+  var bankQs=QUESTION_BANK[cat]||[];
+  // Filter out duplicates already in custom questions
+  var customTexts=new Set((t.questions||[]).map(function(q){return q.q;}));
+  bankQs.forEach(function(q){if(!customTexts.has(q.q))allQs.push({q:q.q,o:[...q.o],a:q.a});});
+  // If still no questions, auto-generate
+  if(!allQs.length){allQs=generateCategoryQuestions(t.cat);}
+  if(!allQs.length){toast('No questions available for this training','error');return;}
+  // Shuffle and pick up to 10
+  var shuffled=shuffle(allQs);
+  var questions=shuffled.slice(0,Math.min(10,shuffled.length));
+  // Randomize options for each question
+  var processedQs=questions.map(function(q){
+    var opts=[...q.o];
+    var correctText=opts[q.a];
+    for(var i=opts.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=opts[i];opts[i]=opts[j];opts[j]=tmp;}
+    var newA=opts.indexOf(correctText);
+    return{q:q.q,o:opts,a:newA};
+  });
+  // Start the quiz
+  closeModal();
+  document.querySelectorAll('.view').forEach(function(el){el.classList.remove('active');});
+  document.getElementById('view-quiz').classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(function(n){n.classList.toggle('active',n.dataset.view==='quiz');});
+  currentView='quiz';
+  document.getElementById('pageTitle').textContent='Online Tests';
+  document.getElementById('mainContent').scrollTop=0;
+  var timeLimit=processedQs.length*90;
+  quizState={active:true,training:t.name,category:t.cat,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch:t};
+  renderQuizActive();
+  quizState.timer=setInterval(function(){
+    quizState.timeLeft--;
+    var td=document.getElementById('timerDisp');
+    if(td){var m=Math.floor(quizState.timeLeft/60);var s=quizState.timeLeft%60;td.textContent=m+':'+String(s).padStart(2,'0');if(quizState.timeLeft<=30)td.classList.add('urgent');}
+    if(quizState.timeLeft<=0){clearInterval(quizState.timer);submitQuiz();}
+  },1000);
+  toast('Test started! '+processedQs.length+' questions — '+Math.round(timeLimit/60)+' minutes','info');
 }
+
 
 /* ============================================================
    SOP LIBRARY
@@ -3505,7 +3339,7 @@ function renderSettings(){
           <div>Trainings: <b style="color:var(--txt);">${DB.trainings.length}</b></div>
           <div>Test Results: <b style="color:var(--txt);">${DB.testResults.length}</b></div>
           <div>Certificates: <b style="color:var(--txt);">${DB.certificates.length}</b></div>
-          <div>Videos: <b style="color:var(--txt);">${DB.videos.length}</b></div>
+
           <div>SOPs: <b style="color:var(--txt);">${DB.sops.length}</b></div>
           <div>Equipment: <b style="color:var(--txt);">${EQUIPMENT_DATA.length}</b></div>
           <div>Min Cert Score: <b style="color:var(--amber);">${DB.settings.minCertScore||70}%</b></div>
@@ -3555,8 +3389,8 @@ function backupData(){
 function restoreData(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
-  reader.onload=(e)=>{try{const restored=JSON.parse(e.target.result);if(restored.employees)DB.employees=restored.employees;if(restored.admins)DB.admins=restored.admins;if(restored.trainings)DB.trainings=restored.trainings;if(restored.testResults)DB.testResults=restored.testResults;if(restored.certificates)DB.certificates=restored.certificates;if(restored.videos)DB.videos=restored.videos;if(restored.sops)DB.sops=restored.sops;if(restored.notifications)DB.notifications=restored.notifications;if(restored.settings)Object.assign(DB.settings,restored.settings);saveDB();renderSettings();updateBadges();toast("Data restored successfully","success");}catch{toast("Invalid backup file","error");}};
   reader.readAsText(file);
+  reader.onload=(e)=>{try{const restored=JSON.parse(e.target.result);if(restored.employees)DB.employees=restored.employees;if(restored.admins)DB.admins=restored.admins;if(restored.trainings)DB.trainings=restored.trainings;if(restored.testResults)DB.testResults=restored.testResults;if(restored.certificates)DB.certificates=restored.certificates;if(restored.sops)DB.sops=restored.sops;if(restored.notifications)DB.notifications=restored.notifications;if(restored.settings)Object.assign(DB.settings,restored.settings);saveDB();renderSettings();updateBadges();toast('Data restored successfully','success');}catch{toast('Invalid backup file','error');}};
 }
 
 /* ============================================================
@@ -3780,7 +3614,7 @@ function exportFullStatusReport(){
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
-let _deletedIds={trainings:[],videos:[],employees:[],sops:[],testResults:[],certificates:[]};
+let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
 let _lastDeleteTime=0; // Timestamp of last deletion — prevents visibilitychange pull-back
 let _lastSyncTime=null;
@@ -3821,7 +3655,6 @@ async function loadTombstonesFromCloud(){
     // do NOT apply its old tombstone (it was intentionally re-added)
     const existingEmpIds=new Set(DB.employees.map(e=>e.id));
     const existingTrnIds=new Set(DB.trainings.map(t=>t.id));
-    const existingVidIds=new Set(DB.videos.map(v=>v.id));
     const existingSopIds=new Set(DB.sops.map(s=>s.id));
     const existingTestIds=new Set(DB.testResults.map(r=>r.id));
     const existingCertNums=new Set(DB.certificates.map(c=>c.num));
@@ -3831,7 +3664,6 @@ async function loadTombstonesFromCloud(){
         // Skip tombstones for items that currently exist in DB (re-added items)
         if(data.collection==='employees'&&existingEmpIds.has(data.id))return;
         if(data.collection==='trainings'&&existingTrnIds.has(data.id))return;
-        if(data.collection==='videos'&&existingVidIds.has(data.id))return;
         if(data.collection==='sops'&&existingSopIds.has(data.id))return;
         if(data.collection==='testResults'&&existingTestIds.has(data.id))return;
         if(data.collection==='certificates'&&existingCertNums.has(data.id))return;
@@ -3851,7 +3683,6 @@ async function loadTombstonesFromCloud(){
 function applyTombstones(){
   let removed=0;
   if(_deletedIds.trainings?.length){const before=DB.trainings.length;DB.trainings=DB.trainings.filter(t=>!_deletedIds.trainings.includes(t.id));removed+=before-DB.trainings.length;}
-  if(_deletedIds.videos?.length){const before=DB.videos.length;DB.videos=DB.videos.filter(v=>!_deletedIds.videos.includes(v.id));removed+=before-DB.videos.length;}
   if(_deletedIds.employees?.length){const before=DB.employees.length;DB.employees=DB.employees.filter(e=>!_deletedIds.employees.includes(e.id));removed+=before-DB.employees.length;}
   if(_deletedIds.sops?.length){const before=DB.sops.length;DB.sops=DB.sops.filter(s=>!_deletedIds.sops.includes(s.id));removed+=before-DB.sops.length;}
   if(_deletedIds.testResults?.length){const before=DB.testResults.length;DB.testResults=DB.testResults.filter(r=>!_deletedIds.testResults.includes(r.id));removed+=before-DB.testResults.length;}
@@ -3894,7 +3725,6 @@ function saveDB(){
     // WITHOUT touching the in-memory DB (which is the source of truth for localStorage)
     var cleanEmployees=_deletedIds.employees?.length?DB.employees.filter(function(e){return !_deletedIds.employees.includes(e.id);}):DB.employees;
     var cleanTrainings=_deletedIds.trainings?.length?DB.trainings.filter(function(t){return !_deletedIds.trainings.includes(t.id);}):DB.trainings;
-    var cleanVideos=_deletedIds.videos?.length?DB.videos.filter(function(v){return !_deletedIds.videos.includes(v.id);}):DB.videos;
     var cleanSops=_deletedIds.sops?.length?DB.sops.filter(function(s){return !_deletedIds.sops.includes(s.id);}):DB.sops;
     var cleanTestResults=_deletedIds.testResults?.length?DB.testResults.filter(function(r){return !_deletedIds.testResults.includes(r.id);}):DB.testResults;
     var cleanCerts=_deletedIds.certificates?.length?DB.certificates.filter(function(c){return !_deletedIds.certificates.includes(c.num);}):DB.certificates;
@@ -3912,7 +3742,6 @@ function saveDB(){
       fbSaveCollection('testResults',cleanTestResults,'id'),
       fbSaveCollection('certificates',cleanCerts,'num'),
       fbSaveCollection('notifications',DB.notifications,'id'),
-      fbSaveCollection('videos',cleanVideos,'id'),
       fbSaveCollection('sops',cleanSops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
@@ -3960,7 +3789,6 @@ function loadDBFromLocal(){
     if(saved.trainings&&Array.isArray(saved.trainings))DB.trainings=saved.trainings;
     if(saved.testResults&&Array.isArray(saved.testResults))DB.testResults=saved.testResults;
     if(saved.certificates&&Array.isArray(saved.certificates))DB.certificates=saved.certificates;
-    if(saved.videos&&Array.isArray(saved.videos))DB.videos=saved.videos;
     if(saved.sops&&Array.isArray(saved.sops))DB.sops=saved.sops;
     if(saved.notifications&&Array.isArray(saved.notifications))DB.notifications=saved.notifications;
     if(saved.settings&&typeof saved.settings==="object")Object.assign(DB.settings,saved.settings);
@@ -4016,7 +3844,6 @@ async function loadDBFromFirestore(){
     var localSnapshot={
       employees:JSON.parse(JSON.stringify(DB.employees)),
       trainings:JSON.parse(JSON.stringify(DB.trainings)),
-      videos:JSON.parse(JSON.stringify(DB.videos)),
       sops:JSON.parse(JSON.stringify(DB.sops)),
       testResults:JSON.parse(JSON.stringify(DB.testResults)),
       certificates:JSON.parse(JSON.stringify(DB.certificates)),
@@ -4024,7 +3851,6 @@ async function loadDBFromFirestore(){
     };
     var localEmpMap=Object.fromEntries(DB.employees.map(e=>[e.id,e]));
     var localTrnMap=Object.fromEntries(DB.trainings.map(t=>[t.id,t]));
-    var localVidMap=Object.fromEntries(DB.videos.map(v=>[v.id,v]));
     var localSopMap=Object.fromEntries(DB.sops.map(s=>[s.id,s]));
 
     // Load each collection individually — one failure won't break the rest
@@ -4044,10 +3870,6 @@ async function loadDBFromFirestore(){
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
       ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
       ['videos','id',d=>{
-        const cloudVids=d.docs.map(x=>x.data());
-        const cloudIds=new Set(cloudVids.map(v=>v.id));
-        const localOnly=Object.values(localVidMap).filter(v=>!cloudIds.has(v.id));
-        DB.videos=[...cloudVids,...localOnly];
       }],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
