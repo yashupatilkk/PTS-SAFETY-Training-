@@ -1904,6 +1904,7 @@ function renderTrainings(){
     <div class="section-header">
       <div class="section-title">Training <span>Management</span></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-outline" style="border-color:var(--green);color:var(--green);" onclick="showTrainingAnalytics()"><span class="mat-ico">analytics</span> Training Analytics</button>
         <button class="btn btn-outline" onclick="exportTrnReport()"><span class="mat-ico">download</span> Export</button>
         <button class="btn btn-amber" onclick="openAddTrnModal()"><span class="mat-ico">add</span> Create Training</button>
       </div>
@@ -1986,10 +1987,11 @@ function renderEmpTrainings(){
             </div>
             ${ytLinkEmbedId?`
             <div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);">
-              <iframe src="https://www.youtube.com/embed/${ytLinkEmbedId}?rel=0" style="width:100%;height:160px;border:none;" allowfullscreen></iframe>
+              <iframe src="https://www.youtube.com/embed/${ytLinkEmbedId}?rel=0&enablejsapi=1" style="width:100%;height:180px;border:none;" allowfullscreen></iframe>
             </div>
-            <a href="${t.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">open_in_new</span> Watch on YouTube</a>
+            <a href="${t.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">open_in_new</span> Open in YouTube</a>
             `:""}
+
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
@@ -2000,7 +2002,7 @@ function renderEmpTrainings(){
                 <button class="btn btn-sm btn-red" onclick="watchVideo('${t.fromVideo}','${ytId}',true)"><span class="mat-ico" style="font-size:11px;">play_circle</span> Watch Video First</button>
                 <div style="padding:4px 8px;background:rgba(232,72,58,.08);border-radius:6px;font-size:10px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">lock</span> Complete video to unlock test</div>
               `:`
-                <button class="btn btn-sm btn-amber" onclick="startQuiz('${t.cat}','${t.name.replace(/'/g,"\\\\'")}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
+                <button class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
                 ${isVideoTraining&&videoData?`<button class="btn btn-sm btn-outline" onclick="watchVideo('${t.fromVideo}','${ytId}')"><span class="mat-ico" style="font-size:11px;">replay</span> Rewatch</button>`:""}
               `}
               ${done&&myRes.find(r=>r.cert)?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
@@ -2011,6 +2013,16 @@ function renderEmpTrainings(){
       ${!myTrns.length?`<div class="empty-state"><span class="mat-ico">school</span><h3>No trainings assigned</h3><p>You have no trainings assigned yet</p></div>`:""}
     </div>
   `;
+  // Initialize YouTube trackers for training videos (must be OUTSIDE template literal)
+  setTimeout(function(){
+    DB.trainings.forEach(function(t){
+      var ytId=extractYoutubeId(t.youtubeLink||'');
+      if(ytId&&t.youtubeLink){
+        var cont=document.getElementById('trnVid_'+t.id);
+        if(cont){initTrnVideoTracker(ytId,'trnVid_'+t.id,'trnVidBar_'+t.id,'trnVidPct_'+t.id,'trnVidTime_'+t.id,'trnTestBtn_'+t.id,'trnVidLock_'+t.id,t.id);}
+      }
+    });
+  },800);
 }
 function openAddTrnModal(){
   const today=new Date().toISOString().split('T')[0];
@@ -3199,6 +3211,110 @@ function reportCard(icon,title,desc,color,action){
     <div style="width:40px;height:40px;border-radius:9px;background:${color}22;display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="color:${color};font-size:18px;">${icon}</span></div>
     <div><div style="font-size:13px;font-weight:700;">${title}</div><div style="font-size:11px;color:var(--muted);">${desc}</div></div>
   </div>`;
+}
+function showTrainingAnalytics(){
+  openModal(
+    '<div class="modal-accent"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(62,207,142,.15)"><span class="mat-ico" style="color:var(--green);font-size:22px;">analytics</span></div><h2>Training Analytics</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body" style="max-height:70vh;overflow-y:auto;">'+getTrainingAnalyticsHTML()+'</div>'+
+    '<div class="modal-foot"><button class="btn btn-amber" onclick="exportAnalyticsExcel()"><span class="mat-ico">download</span> Export Full Report</button><button class="btn btn-outline" onclick="closeModal()">Close</button></div>'
+    ,'900px');
+}
+function getTrainingAnalyticsHTML(){
+  var emps=DB.employees;
+  var trns=DB.trainings;
+  var results=DB.testResults;
+  var certs=DB.certificates;
+  // Summary stats
+  var totalAttempts=results.length;
+  var totalPass=results.filter(function(r){return r.pass;}).length;
+  var avgScore=totalAttempts?Math.round(results.reduce(function(s,r){return s+r.score;},0)/totalAttempts):0;
+  var totalCerts=certs.length;
+  var html='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">';
+  html+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+emps.length+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Employees</div></div>';
+  html+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--green);">'+totalPass+'/'+totalAttempts+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Pass/Total Tests</div></div>';
+  html+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--blue);">'+avgScore+'%</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Avg Score</div></div>';
+  html+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--purple);">'+totalCerts+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;">Certificates</div></div>';
+  html+='</div>';
+  // Per-employee detailed table
+  html+='<div style="font-size:13px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:10px;">Employee Training Details (for Salary & Promotion Decisions)</div>';
+  html+='<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Dept</th><th>Trainings Assigned</th><th>Completed</th><th>Pass Rate</th><th>Avg Score</th><th>Best Score</th><th>Certificates</th><th>Last Activity</th></tr></thead><tbody>';
+  emps.forEach(function(e){
+    var empResults=results.filter(function(r){return r.empId===e.id;});
+    var empPass=empResults.filter(function(r){return r.pass;}).length;
+    var empCerts=certs.filter(function(c){return c.empId===e.id;}).length;
+    var empScore=empResults.length?Math.round(empResults.reduce(function(s,r){return s+r.score;},0)/empResults.length):0;
+    var bestScore=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
+    var assigned=trns.filter(function(t){return(t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));}).length;
+    var completed=new Set(empPass?empResults.filter(function(r){return r.pass;}).map(function(r){return r.training;}):[]).size;
+    var passRate=empResults.length?Math.round(empPass/empResults.length*100):0;
+    var lastDate=empResults.length?empResults.sort(function(a,b){return b.date.localeCompare(a.date);})[0].date:'—';
+    var scoreColor=empScore>=75?'var(--green)':empScore>=50?'var(--amber)':'var(--red)';
+    var passColor=passRate>=75?'var(--green)':passRate>=50?'var(--amber)':'var(--red)';
+    html+='<tr><td><div style="font-weight:600;font-size:12px;">'+e.name+'</div><div style="font-size:10px;color:var(--muted);">'+e.id+'</div></td>';
+    html+='<td><span class="badge badge-info" style="font-size:10px;">'+e.dept+'</span></td>';
+    html+='<td style="text-align:center;font-weight:700;">'+assigned+'</td>';
+    html+='<td style="text-align:center;font-weight:700;">'+completed+'/'+assigned+'</td>';
+    html+='<td style="text-align:center;font-weight:700;color:'+passColor+';">'+passRate+'%</td>';
+    html+='<td style="text-align:center;font-weight:700;color:'+scoreColor+';">'+empScore+'%</td>';
+    html+='<td style="text-align:center;font-weight:700;color:'+scoreColor+';">'+bestScore+'%</td>';
+    html+='<td style="text-align:center;"><span class="badge badge-purple" style="font-size:10px;">'+empCerts+'</span></td>';
+    html+='<td style="font-size:11px;color:var(--muted);">'+lastDate+'</td></tr>';
+  });
+  html+='</tbody></table></div>';
+  // Per-training breakdown
+  html+='<div style="font-size:13px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:16px 0 10px;">Per-Training Breakdown</div>';
+  html+='<div class="table-wrap"><table><thead><tr><th>Training</th><th>Category</th><th>Enrolled</th><th>Tested</th><th>Passed</th><th>Pass Rate</th><th>Avg Score</th><th>Certs Issued</th></tr></thead><tbody>';
+  trns.forEach(function(t){
+    var tResults=results.filter(function(r){return r.training===t.name;});
+    var tPass=tResults.filter(function(r){return r.pass;}).length;
+    var tCerts=certs.filter(function(c){return c.training===t.name;}).length;
+    var tAvg=tResults.length?Math.round(tResults.reduce(function(s,r){return s+r.score;},0)/tResults.length):0;
+    var tPassRate=tResults.length?Math.round(tPass/tResults.length*100):0;
+    var enrolled=(t.enrolled||[]).length;
+    var uniqueTested=new Set(tResults.map(function(r){return r.empId;})).size;
+    var rateColor=tPassRate>=75?'var(--green)':tPassRate>=50?'var(--amber)':'var(--red)';
+    html+='<tr><td style="font-weight:600;font-size:12px;">'+t.name+'</td>';
+    html+='<td><span class="badge badge-info" style="font-size:10px;">'+t.cat+'</span></td>';
+    html+='<td style="text-align:center;">'+enrolled+'</td>';
+    html+='<td style="text-align:center;">'+uniqueTested+'</td>';
+    html+='<td style="text-align:center;font-weight:700;color:var(--green);">'+tPass+'</td>';
+    html+='<td style="text-align:center;font-weight:700;color:'+rateColor+';">'+tPassRate+'%</td>';
+    html+='<td style="text-align:center;font-weight:700;">'+tAvg+'%</td>';
+    html+='<td style="text-align:center;"><span class="badge badge-amber" style="font-size:10px;">'+tCerts+'</span></td></tr>';
+  });
+  html+='</tbody></table></div>';
+  return html;
+}
+function exportAnalyticsExcel(){
+  var rows=[];
+  DB.employees.forEach(function(e){
+    var empResults=DB.testResults.filter(function(r){return r.empId===e.id;});
+    var empPass=empResults.filter(function(r){return r.pass;}).length;
+    var empCerts=DB.certificates.filter(function(c){return c.empId===e.id;}).length;
+    var empScore=empResults.length?Math.round(empResults.reduce(function(s,r){return s+r.score;},0)/empResults.length):0;
+    var bestScore=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
+    var assigned=DB.trainings.filter(function(t){return(t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));}).length;
+    var completed=new Set(empPass?empResults.filter(function(r){return r.pass;}).map(function(r){return r.training;}):[]).size;
+    var passRate=empResults.length?Math.round(empPass/empResults.length*100):0;
+    var lastDate=empResults.length?empResults.sort(function(a,b){return b.date.localeCompare(a.date);})[0].date:'—';
+    rows.push({'Employee ID':e.id,'Name':e.name,'Department':e.dept,'Designation':e.desig,'Shift':e.shift,'Trainings Assigned':assigned,'Completed':completed,'Total Tests':empResults.length,'Passed':empPass,'Pass Rate':passRate+'%','Avg Score':empScore+'%','Best Score':bestScore+'%','Certificates':empCerts,'Last Test Date':lastDate});
+  });
+  // Per-employee per-training detail rows
+  DB.employees.forEach(function(e){
+    DB.trainings.forEach(function(t){
+      var empTrnRes=DB.testResults.filter(function(r){return r.empId===e.id&&r.training===t.name;});
+      if(empTrnRes.length>0){
+        var best=empTrnRes.reduce(function(a,b){return a.score>b.score?a:b;});
+        rows.push({'Employee ID':e.id,'Name':e.name,'Training':t.name,'Category':t.cat,'Attempts':empTrnRes.length,'Best Score':best.score+'%','Passed':best.pass?'Yes':'No','Pass Mark':t.passing+'%','Certificate':best.cert||'N/A','Test Date':best.date});
+      }
+    });
+  });
+  var ws=XLSX.utils.json_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Training Analytics');
+  XLSX.writeFile(wb,'training_analytics_'+new Date().toISOString().split('T')[0]+'.xlsx');
+  toast('Analytics exported to Excel','success');
 }
 function exportTrnReport(){
   const ws=XLSX.utils.json_to_sheet(DB.trainings.map(t=>({
