@@ -87,6 +87,71 @@ select option{background:var(--sur);}
 
 @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(62,207,142,.4);}50%{box-shadow:0 0 0 8px rgba(62,207,142,0);}}
 .pulse-glow{animation:pulseGlow 1.5s ease-in-out infinite;}
+
+/* ===== SAFETY VEHICLE ANIMATION ===== */
+.login-road{position:absolute;bottom:0;left:0;right:0;height:80px;pointer-events:none;overflow:hidden;z-index:0;}
+.login-road-surface{position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(180deg,#1a1d23 0%,#12141a 100%);border-top:3px solid #2d333b;}
+.login-road-line{position:absolute;bottom:28px;left:0;width:200%;height:3px;background:repeating-linear-gradient(90deg,#ffb020 0 30px,transparent 30px 60px);animation:roadLineMove 1.5s linear infinite;}
+@keyframes roadLineMove{to{transform:translateX(-60px);}}
+.login-road-edge-top{position:absolute;top:-2px;left:0;right:0;height:2px;background:repeating-linear-gradient(90deg,#e8483a 0 20px,transparent 20px 40px);animation:roadLineMove 2s linear infinite;}
+
+/* Safety Vehicle Container */
+.login-vehicle-scene{position:absolute;bottom:18px;left:0;width:100%;height:80px;pointer-events:none;z-index:1;}
+.login-vehicle{position:absolute;bottom:8px;animation:vehicleDrive 12s linear infinite;}
+@keyframes vehicleDrive{0%{left:-220px;}100%{left:calc(100% + 40px);}}
+
+/* Vehicle Body */
+.veh-body{position:relative;width:180px;height:52px;}
+.veh-cabin{position:absolute;left:0;top:0;width:60px;height:52px;background:linear-gradient(180deg,#e8483a 0%,#c73a2e 100%);border-radius:8px 4px 4px 4px;box-shadow:0 2px 12px rgba(232,72,58,.3);}
+.veh-cabin::before{content:'';position:absolute;top:6px;left:5px;width:22px;height:18px;background:rgba(135,206,250,.25);border-radius:4px 2px 2px 4px;border:1px solid rgba(135,206,250,.15);}
+.veh-cabin::after{content:'';position:absolute;top:6px;left:32px;width:22px;height:18px;background:rgba(135,206,250,.25);border-radius:2px 4px 4px 2px;border:1px solid rgba(135,206,250,.15);}
+.veh-cargo{position:absolute;left:58px;top:6px;width:122px;height:46px;background:linear-gradient(180deg,#d43a2e 0%,#b33028 100%);border-radius:2px 6px 6px 2px;box-shadow:0 2px 12px rgba(232,72,58,.2);}
+.veh-cargo::before{content:'SAFETY';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;letter-spacing:4px;color:rgba(255,255,255,.7);text-transform:uppercase;}
+.veh-cargo::after{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:repeating-linear-gradient(90deg,transparent 0 14px,rgba(0,0,0,.08) 14px 16px);border-radius:2px 6px 6px 2px;}
+.veh-stripe{position:absolute;left:58px;top:2px;width:122px;height:6px;background:repeating-linear-gradient(90deg,#ffb020 0 12px,#e8483a 12px 24px);border-radius:0 4px 0 0;}
+.veh-bumper-f{position:absolute;left:-4px;bottom:12px;width:8px;height:14px;background:#555;border-radius:2px 0 0 2px;}
+.veh-bumper-r{position:absolute;right:-2px;bottom:12px;width:6px;height:14px;background:#444;border-radius:0 2px 2px 0;}
+
+/* Headlights */
+.veh-headlight{position:absolute;left:-6px;bottom:20px;width:8px;height:8px;background:radial-gradient(circle,#fff 20%,#ffb020 60%,transparent 100%);border-radius:50%;box-shadow:0 0 12px 4px rgba(255,176,32,.5),-20px 0 30px 10px rgba(255,176,32,.15);animation:headlightPulse 2s ease-in-out infinite;}
+@keyframes headlightPulse{0%,100%{box-shadow:0 0 12px 4px rgba(255,176,32,.5),-20px 0 30px 10px rgba(255,176,32,.15);}50%{box-shadow:0 0 18px 6px rgba(255,176,32,.7),-30px 0 40px 15px rgba(255,176,32,.25);}}
+.veh-taillight{position:absolute;right:-2px;bottom:20px;width:6px;height:8px;background:radial-gradient(circle,#ff3333 30%,#cc0000 100%);border-radius:50%;box-shadow:4px 0 12px 2px rgba(255,0,0,.4);}
+
+/* Beacon Light */
+.veh-beacon{position:absolute;left:15px;top:-18px;width:30px;height:18px;z-index:2;}
+.veh-beacon-base{width:30px;height:6px;background:#444;border-radius:3px;margin-top:12px;}
+.veh-beacon-light{width:18px;height:14px;margin:0 auto;border-radius:8px 8px 2px 2px;animation:beaconFlash .6s ease-in-out infinite alternate;}
+@keyframes beaconFlash{0%{background:radial-gradient(ellipse at 50% 100%,#ff3333,#e8483a);box-shadow:0 0 12px 4px rgba(232,72,58,.7),0 -8px 20px 6px rgba(232,72,58,.3);}100%{background:radial-gradient(ellipse at 50% 100%,#ffb020,#e8483a);box-shadow:0 0 12px 4px rgba(255,176,32,.7),0 -8px 20px 6px rgba(255,176,32,.3);}}
+.veh-beacon-glow{position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:60px;height:40px;background:radial-gradient(ellipse,rgba(232,72,58,.2) 0%,transparent 70%);animation:beaconGlow .6s ease-in-out infinite alternate;pointer-events:none;}
+@keyframes beaconGlow{0%{opacity:.6;}100%{opacity:1;}}
+
+/* Wheels */
+.veh-wheel{position:absolute;bottom:-6px;width:18px;height:18px;background:radial-gradient(circle at 50% 50%,#666 30%,#333 60%,#222 100%);border-radius:50%;border:2px solid #555;animation:wheelSpin .4s linear infinite;box-shadow:0 2px 4px rgba(0,0,0,.5);}
+.veh-wheel::before{content:'';position:absolute;top:50%;left:50%;width:4px;height:4px;background:#888;border-radius:50%;transform:translate(-50%,-50%);}
+.veh-wheel::after{content:'';position:absolute;top:50%;left:50%;width:14px;height:2px;background:rgba(255,255,255,.15);transform:translate(-50%,-50%);}
+.veh-wheel-f{left:8px;}
+.veh-wheel-r{right:10px;}
+.veh-wheel-m{left:90px;}
+@keyframes wheelSpin{to{transform:rotate(360deg);}}
+
+/* Exhaust particles */
+.veh-exhaust{position:absolute;left:-10px;bottom:10px;width:6px;height:6px;border-radius:50%;background:rgba(150,150,150,.3);animation:exhaustPuff 1.2s ease-out infinite;}
+.veh-exhaust:nth-child(2){animation-delay:.4s;left:-16px;bottom:14px;width:8px;height:8px;}
+.veh-exhaust:nth-child(3){animation-delay:.8s;left:-22px;bottom:8px;width:5px;height:5px;}
+@keyframes exhaustPuff{0%{opacity:.4;transform:translate(0,0) scale(1);}100%{opacity:0;transform:translate(-30px,-10px) scale(2.5);}}
+
+/* Safety Cones on road */
+.login-cone{position:absolute;bottom:60px;z-index:0;pointer-events:none;}
+.login-cone-body{width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:20px solid #ffb020;position:relative;}
+.login-cone-base{width:20px;height:4px;background:#e8483a;border-radius:2px;margin:-1px auto 0;}
+.login-cone-stripe{position:absolute;top:6px;left:-6px;width:12px;height:3px;background:#fff;opacity:.7;}
+.login-cone:nth-child(1){left:15%;animation:conePass 12s linear infinite;}
+.login-cone:nth-child(2){left:55%;animation:conePass 12s linear infinite;animation-delay:-6s;}
+.login-cone:nth-child(3){left:80%;animation:conePass 12s linear infinite;animation-delay:-9s;}
+@keyframes conePass{0%,10%{opacity:1;transform:translateY(0);}15%,25%{opacity:0;transform:translateY(8px);}30%,100%{opacity:1;transform:translateY(0);}}
+
+/* ===== END SAFETY VEHICLE ===== */
+
 /* SIDEBAR */
 .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:59;}
 .sidebar-backdrop.show{display:block;}
@@ -364,6 +429,45 @@ select.form-control-sm{background:var(--sur2);}
   <div class="login-dots"></div>
   <div class="login-safety-bar"></div>
   <div class="login-safety-icons"></div>
+
+  <!-- Safety Cones -->
+  <div class="login-cone"><div class="login-cone-body"><div class="login-cone-stripe"></div></div><div class="login-cone-base"></div></div>
+  <div class="login-cone"><div class="login-cone-body"><div class="login-cone-stripe"></div></div><div class="login-cone-base"></div></div>
+  <div class="login-cone"><div class="login-cone-body"><div class="login-cone-stripe"></div></div><div class="login-cone-base"></div></div>
+
+  <!-- Road -->
+  <div class="login-road">
+    <div class="login-road-surface"></div>
+    <div class="login-road-edge-top"></div>
+    <div class="login-road-line"></div>
+  </div>
+
+  <!-- Animated Safety Vehicle -->
+  <div class="login-vehicle-scene">
+    <div class="login-vehicle">
+      <div class="veh-beacon">
+        <div class="veh-beacon-glow"></div>
+        <div class="veh-beacon-light"></div>
+        <div class="veh-beacon-base"></div>
+      </div>
+      <div class="veh-body">
+        <div class="veh-cabin"></div>
+        <div class="veh-stripe"></div>
+        <div class="veh-cargo"></div>
+        <div class="veh-bumper-f"></div>
+        <div class="veh-bumper-r"></div>
+        <div class="veh-headlight"></div>
+        <div class="veh-taillight"></div>
+        <div class="veh-wheel veh-wheel-f"></div>
+        <div class="veh-wheel veh-wheel-m"></div>
+        <div class="veh-wheel veh-wheel-r"></div>
+      </div>
+      <div class="veh-exhaust"></div>
+      <div class="veh-exhaust"></div>
+      <div class="veh-exhaust"></div>
+    </div>
+  </div>
+
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-logo">
@@ -2030,6 +2134,7 @@ function renderEmpTrainings(){
   },800);
 }
 function openAddTrnModal(){
+  customQCount=0;
   const today=new Date().toISOString().split('T')[0];
   openModal(`
     <div class="modal-accent"></div>
@@ -2055,16 +2160,15 @@ function openAddTrnModal(){
           <span class="mat-ico" style="font-size:13px;">info</span> Employees must watch <b>90% of this video</b> before the test button unlocks. Forwarding/skipping is NOT counted. Test can only be taken <b>one time</b> after video completion.
         </div>
       </div>
-    </div></div>
-    <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);">Custom Quiz Questions (Optional)</div>
-        <button class="btn btn-sm btn-outline" onclick="addCustomQuestion()"><span class="mat-ico" style="font-size:11px;">add</span> Add Question</button>
+      <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);">Custom Quiz Questions (Optional)</div>
+          <button class="btn btn-sm btn-outline" onclick="addCustomQuestion()"><span class="mat-ico" style="font-size:11px;">add</span> Add Question</button>
+        </div>
+        <div id="customQuestionsList"></div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:6px;">If no custom questions are added, questions will be auto-generated from the question bank for this category.</div>
       </div>
-      <div id="customQuestionsList"></div>
-      <div style="font-size:10.5px;color:var(--muted);margin-top:6px;">If no custom questions are added, questions will be auto-generated from the question bank for this category.</div>
     </div>
-    </div></div>
     <div class="modal-foot">
       <button class="btn btn-amber" id="saveTrnBtn" onclick="saveTraining()"><span class="mat-ico">save</span> Create Training</button>
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -2198,6 +2302,7 @@ function openTrainingDetail(id){
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn btn-amber" onclick="assignEmployees('${t.id}')"><span class="mat-ico">person_add</span> Assign Employees</button>
         <button class="btn btn-outline" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico">quiz</span> Take Test</button>
+        ${t.youtubeLink?`<button class="btn btn-outline" style="border-color:var(--red);color:var(--red);" onclick="removeVideoFromTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">smart_display</span> Remove Video</button>`:""}
         <button class="btn btn-red" onclick="deleteTraining('${t.id}')"><span class="mat-ico">delete</span> Delete</button>
       </div>
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status</div>
@@ -2315,6 +2420,26 @@ async function deleteTraining(id){
   // === STEP 5: Mark deletion time ===
   _lastDeleteTime=Date.now();
   toast('Training "'+trnName+'" deleted permanently','warning');
+}
+async function removeVideoFromTraining(trnId){
+  var trn=DB.trainings.find(function(t){return t.id===trnId;});
+  if(!trn||!trn.youtubeLink)return;
+  if(!confirm('Remove the YouTube video link from "'+trn.name+'"? This will also reset all employee video progress for this training.'))return;
+  var oldLink=trn.youtubeLink;
+  delete trn.youtubeLink;
+  delete trn.videoProgress;
+  // Save to localStorage immediately
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  // Sync to Firebase
+  if(firebaseReady){
+    try{
+      var clean={...trn};
+      await fbDB.collection('trainings').doc(String(trnId)).set(clean,{merge:true});
+    }catch(e){console.warn('FB remove video error:',e);}
+  }
+  closeModal();
+  renderTrainings();
+  toast('Video link removed from "'+trn.name+'"','success');
 }
 
 /* ============================================================
@@ -2866,7 +2991,7 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        <button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${(quizState.training||"").replace(/'/g,"\\'")}')"><span class="mat-ico">refresh</span> Retake Test</button>
+        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">block</span> One-time test completed — no retakes allowed</div>`}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
     </div>
