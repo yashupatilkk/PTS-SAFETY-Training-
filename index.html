@@ -2076,9 +2076,11 @@ function exportEmpExcel(){
 ============================================================ */
 function renderTrainings(){
   if(!isAdmin){renderEmpTrainings();return;}
-  const filtered=DB.trainings.filter(t=>{
+  // Filter out any corrupted entries that slipped through
+  const cleanTrainings=DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined'&&t.cat;});
+  const filtered=cleanTrainings.filter(t=>{
     const q=trn_search.toLowerCase();
-    return!q||t.name.toLowerCase().includes(q)||t.cat.toLowerCase().includes(q)||t.trainer.toLowerCase().includes(q);
+    return!q||t.name.toLowerCase().includes(q)||(t.cat&&t.cat.toLowerCase().includes(q))||(t.trainer&&t.trainer.toLowerCase().includes(q));
   });
   document.getElementById("view-trainings").innerHTML=`
     <div class="section-header">
@@ -2091,7 +2093,7 @@ function renderTrainings(){
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
       <div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search trainings..." oninput="trn_search=this.value;renderTrainings()" value="${trn_search}"></div>
-      <span style="font-size:12px;color:var(--muted);">${filtered.length} of ${DB.trainings.length} trainings</span>
+      <span style="font-size:12px;color:var(--muted);">${filtered.length} of ${cleanTrainings.length} trainings</span>
     </div>
     <div class="training-cards">
       ${filtered.map(t=>{
@@ -4329,6 +4331,26 @@ function loadDB(){
   loadDBFromLocal();
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
+  // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
+  var badTrnIds=[];
+  DB.trainings=DB.trainings.filter(function(t){
+    if(!t.name||!t.id||typeof t.name==='undefined'||t.name==='undefined'||typeof t.cat==='undefined'){
+      badTrnIds.push(t.id);
+      return false;
+    }
+    return true;
+  });
+  if(badTrnIds.length>0){
+    console.warn('[loadDB] Removed '+badTrnIds.length+' corrupted training(s):',badTrnIds);
+    // Also delete from Firebase
+    if(firebaseReady){
+      badTrnIds.forEach(function(tid){
+        fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});
+      });
+    }
+    // Save cleaned data immediately
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  }
   // Rebuild completed arrays from testResults (source of truth)
   reconcileTrainingsFromResults();
   // Always ensure defaults exist
