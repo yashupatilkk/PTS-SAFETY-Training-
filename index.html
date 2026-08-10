@@ -536,6 +536,12 @@ select.form-control-sm{background:var(--sur2);}
     <div id="adminNav">
       <div class="nav-section-title">Admin</div>
       <button class="nav-item" data-view="settings" onclick="gotoView('settings')"><span class="mat-ico">settings</span><span>Settings</span></button>
+      <button class="nav-item" data-view="adminaccess" onclick="gotoView('adminaccess')"><span class="mat-ico">admin_panel_settings</span><span>Admin Access</span></button>
+      <div class="nav-section-title">Statistics</div>
+      <button class="nav-item" data-view="dashboard" onclick="gotoView('dashboard')"><span class="mat-ico">monitoring</span><span>Dashboard Stats</span></button>
+      <button class="nav-item" data-view="reports" onclick="gotoView('reports')"><span class="mat-ico">query_stats</span><span>Training Analytics</span></button>
+      <button class="nav-item" data-view="trainstatus" onclick="gotoView('trainstatus')"><span class="mat-ico">leaderboard</span><span>Dept. Completion</span></button>
+      <button class="nav-item" data-view="certificates" onclick="gotoView('certificates')"><span class="mat-ico">workspace_premium</span><span>Certificates Issued</span></button>
     </div>
   </nav>
   <div class="sidebar-foot">
@@ -587,6 +593,7 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-reports"></div>
     <div class="view" id="view-trainstatus"></div>
     <div class="view" id="view-notifications"></div>
+    <div class="view" id="view-adminaccess"></div>
     <div class="view" id="view-settings"></div>
   </div>
 </div>
@@ -1432,10 +1439,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   closeSidebar();
 }
@@ -1532,19 +1539,24 @@ function renderDashboard(){
       </div>
       <div class="quick-action" onclick="gotoView('quiz')">
         <div class="qa-ico" style="background:rgba(240,136,62,.1)"><span class="mat-ico" style="color:var(--orange);">quiz</span></div>
-        <div class="qa-title">Take Test</div><div class="qa-desc">Online assessment</div>
+        <div class="qa-title">Online Tests</div><div class="qa-desc">Take assessment</div>
       </div>
       <div class="quick-action" onclick="gotoView('reports')">
         <div class="qa-ico" style="background:rgba(139,109,232,.1)"><span class="mat-ico" style="color:var(--purple);">download</span></div>
         <div class="qa-title">Export Reports</div><div class="qa-desc">Download data</div>
       </div>
     </div>
+    <!-- GROUPED BAR CHARTS -->
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Monthly Training Activity</div><canvas id="chartMonthly" height="200"></canvas></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Monthly Training Activity (Real Data)</div><canvas id="chartMonthly" height="200"></canvas></div>
       <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><canvas id="chartDept" height="200"></canvas></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
       <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Pass / Fail Distribution</div><canvas id="chartPassFail" height="200"></canvas></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Training-wise Completion (Grouped)</div><canvas id="chartTrnCompletion" height="200"></canvas></div>
+    </div>
+    <div class="chart-grid" style="margin-bottom:18px;">
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><canvas id="chartScoreDist" height="200"></canvas></div>
       <div class="chart-card">
         <div class="chart-card-title"><span class="dot"></span>Recent Test Activities</div>
         <div class="activity-list">
@@ -1574,9 +1586,9 @@ function renderDashboard(){
             <td><span class="badge badge-info">${r.dept}</span></td>
             <td>${r.training}</td>
             <td style="color:var(--green);font-weight:700;">${r.score}%</td>
-            <td><span class="badge badge-active">✅ PASS</span></td>
+            <td><span class="badge badge-active">PASS</span></td>
             <td style="font-weight:600;">${formatDate(r.date)}</td>
-            <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> PDF</button>`:"—"}</td>
+            <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> PDF</button>`:""}</td>
           </tr>`).join("")}
           ${!DB.testResults.filter(r=>r.pass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
         </tbody></table>
@@ -1683,16 +1695,64 @@ function drawCharts(){
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
   const textColor=isDark?"#7d8590":"#656d76";
-  const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug"];
+  // === MONTHLY CHART — REAL DATA from testResults ===
+  var monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var now=new Date();
+  var monthLabels=[];
+  var monthTestData=[];
+  var monthPassedData=[];
+  var monthFailedData=[];
+  for(var mi=5;mi>=0;mi--){
+    var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
+    var mKey=md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0');
+    monthLabels.push(monthNames[md.getMonth()]+' '+String(md.getFullYear()).slice(2));
+    var monthResults=DB.testResults.filter(function(r){return r.date&&r.date.startsWith(mKey);});
+    monthTestData.push(monthResults.length);
+    monthPassedData.push(monthResults.filter(function(r){return r.pass;}).length);
+    monthFailedData.push(monthResults.filter(function(r){return !r.pass;}).length);
+  }
   destroyChart("chartMonthly");
-  const mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:months,datasets:[{label:"Trainings",data:[4,6,5,8,7,9,6,DB.trainings.length],backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Completed",data:[3,5,4,7,6,8,5,DB.testResults.filter(r=>r.pass).length],backgroundColor:"rgba(62,207,142,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor}}}}});}
+  var mCtx=document.getElementById("chartMonthly");
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
+  // === DEPARTMENT CHART — REAL DATA ===
   destroyChart("chartDept");
-  const dCtx=document.getElementById("chartDept");
-  if(dCtx){const dDepts=DEPARTMENTS.slice(0,6);charts.dept=new Chart(dCtx,{type:"bar",data:{labels:dDepts,datasets:[{label:"Completion %",data:dDepts.map(d=>{const empInDept=DB.employees.filter(e=>e.dept===d).length;if(!empInDept)return 0;const passed=DB.testResults.filter(r=>r.pass&&r.dept===d).length;return Math.min(100,Math.round(passed/empInDept*100));}),backgroundColor:["#ffb020","#3ecf8e","#e8483a","#3ea0e8","#8b6de8","#f0883e"],borderRadius:6}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{display:false}},scales:{x:{max:100,grid:{color:gridColor},ticks:{color:textColor,callback:v=>v+"%"}},y:{grid:{color:gridColor},ticks:{color:textColor}}}}});}
+  var dCtx=document.getElementById("chartDept");
+  if(dCtx){
+    var activeDepts=DEPARTMENTS.filter(function(d){return DB.employees.some(function(e){return e.dept===d;});});
+    var deptTotal=activeDepts.map(function(d){return DB.employees.filter(function(e){return e.dept===d;}).length;});
+    var deptPassed=activeDepts.map(function(d){return DB.testResults.filter(function(r){return r.pass&&r.dept===d;}).length;});
+    var deptFailed=activeDepts.map(function(d){return DB.testResults.filter(function(r){return !r.pass&&r.dept===d;}).length;});
+    charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
+  }
+  // === PASS/FAIL DOUGHNUT ===
   destroyChart("chartPassFail");
-  const pfCtx=document.getElementById("chartPassFail");
-  if(pfCtx){const pass=DB.testResults.filter(r=>r.pass).length,fail=DB.testResults.filter(r=>!r.pass).length;charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[pass||1,fail],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
+  var pfCtx=document.getElementById("chartPassFail");
+  if(pfCtx){var pass=DB.testResults.filter(r=>r.pass).length,fail=DB.testResults.filter(r=>!r.pass).length;charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[pass||0,fail||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
+  // === TRAINING-WISE COMPLETION GROUPED BAR ===
+  destroyChart("chartTrnCompletion");
+  var tcCtx=document.getElementById("chartTrnCompletion");
+  if(tcCtx&&DB.trainings.length){
+    var trnNames=DB.trainings.map(function(t){return t.name.length>20?t.name.slice(0,20)+'...':t.name;});
+    var trnEnrolled=DB.trainings.map(function(t){return (t.enrolled||[]).length;});
+    var trnCompleted=DB.trainings.map(function(t){return DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).length;});
+    var trnPending=DB.trainings.map(function(t){
+      var passedIds=new Set(DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).map(function(r){return r.empId;}));
+      return (t.enrolled||[]).filter(function(eid){return !passedIds.has(eid);}).length;
+    });
+    charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});
+  }
+  // === SCORE DISTRIBUTION BAR CHART ===
+  destroyChart("chartScoreDist");
+  var sdCtx=document.getElementById("chartScoreDist");
+  if(sdCtx){
+    var ranges=["0-39%","40-59%","60-69%","70-79%","80-89%","90-100%"];
+    var rangeColors=["#e8483a","#f0883e","#ffb020","#3ea0e8","#3ecf8e","#8b6de8"];
+    var rangeCounts=ranges.map(function(rng){
+      var parts=rng.replace('%','').split('-').map(Number);
+      return DB.testResults.filter(function(r){return r.score>=parts[0]&&r.score<=parts[1];}).length;
+    });
+    charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,stepSize:1},beginAtZero:true}}}});
+  }
 }
 function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
 
@@ -1742,6 +1802,7 @@ function renderEmployees(){
               <button class="btn btn-sm btn-outline" onclick="editEmp('${e.id}')"><span class="mat-ico" style="font-size:13px;">edit</span></button>
               <button class="btn btn-sm btn-outline" onclick="viewEmpHistory('${e.id}')"><span class="mat-ico" style="font-size:13px;">history</span></button>
               <button class="btn btn-sm btn-outline" onclick="resetPassword('${e.id}')"><span class="mat-ico" style="font-size:13px;">lock_reset</span></button>
+              <button class="btn btn-sm btn-outline" style="border-color:var(--purple);color:var(--purple);" onclick="giveAdminAccess('${e.id}')" title="Promote to Admin"><span class="mat-ico" style="font-size:13px;">admin_panel_settings</span></button>
               <button class="btn btn-sm btn-red" onclick="deleteEmp('${e.id}')"><span class="mat-ico" style="font-size:13px;">delete</span></button>
             </div></td>
           </tr>`;
@@ -1933,6 +1994,27 @@ function viewEmpHistory(id){
   `,"700px");
 }
 function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
+function giveAdminAccess(empId){
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  if(!emp){toast('Employee not found','error');return;}
+  // Check if already an admin
+  var existingAdmin=DB.admins.find(function(a){return a.username===empId||a.username===(empId+'@pts.com');});
+  if(existingAdmin){toast(emp.name+' already has admin access (username: '+existingAdmin.username+')','warning');return;}
+  if(!confirm('Give admin access to '+emp.name+' ('+empId+')?\n\nThey will be able to login as admin with:\n  Username: '+empId+'\n  Password: (same as their employee password)'))return;
+  var adminPw=emp.password||'admin123';
+  DB.admins.push({username:empId,name:emp.name,password:adminPw,role:'admin'});
+  saveDB();
+  // Also create Firebase Auth account if available
+  if(firebaseReady){
+    var aEmail=empId.toLowerCase().replace(/[^a-z0-9]/g,'')+'@pts.com';
+    fbAuth.createUserWithEmailAndPassword(aEmail,adminPw).catch(function(){
+      // Account may already exist, try signing in to verify
+      fbAuth.signInWithEmailAndPassword(aEmail,adminPw).catch(function(){});
+    });
+  }
+  toast(emp.name+' promoted to Admin! They can now login with username: '+empId,'success',4000);
+  renderSettings();
+}
 async function deleteEmp(id){
   const emp=DB.employees.find(e=>e.id===id);
   const empName=emp?emp.name:id;
@@ -2841,14 +2923,15 @@ async function deleteSOP(id){
    QUIZ / TESTS
 ============================================================ */
 function renderQuizMenu(){
-  // For employees: show their test history + link to trainings page
+  // For employees: show category grid + their test history
   if(!isAdmin){
     var myResults=DB.testResults.filter(function(r){return r.empId===currentUser.id;}).sort(function(a,b){return b.date.localeCompare(a.date);});
     var passed=myResults.filter(function(r){return r.pass;}).length;
     var failed=myResults.length-passed;
     var avgScore=myResults.length?Math.round(myResults.reduce(function(s,r){return s+r.score;},0)/myResults.length):0;
+    var quizCats=TRAINING_CATS;
     document.getElementById("view-quiz").innerHTML=`
-      <div class="section-header"><div class="section-title">My <span>Test Results</span></div></div>
+      <div class="section-header"><div class="section-title">Online <span>Tests</span></div></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;">
         <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;">
           <div style="font-size:28px;font-weight:700;color:var(--amber);">${myResults.length}</div>
@@ -2869,17 +2952,26 @@ function renderQuizMenu(){
       </div>
       <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
         <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-        <div>Go to <b>Trainings</b> page to watch videos and take tests. Each training test can be taken <b>only once</b> after watching 90% of the video.</div>
+        <div>Click a category below to take an online test. For training-specific tests (with video), go to the <b>Trainings</b> page. Each training test is <b>one-time only</b> after 90% video watch.</div>
       </div>
-      ${myResults.length?`<div class="table-wrap"><table>
-        <thead><tr><th>Date</th><th>Training</th><th>Score</th><th>Result</th><th>Attempt</th></tr></thead>
-        <tbody>${myResults.map(function(r){return`<tr>
-          <td style="font-weight:600;">${formatDate(r.date)}</td>
-          <td>${r.training}</td>
-          <td><b style="color:${r.pass?"var(--green)":"var(--red)"};">${r.score}%</b></td>
-          <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASSED":"FAILED"}</span></td>
-          <td>#${r.attempt}</td>
-        </tr>`;}).join("")}</tbody></table></div>`:`<div class="empty-state"><span class="mat-ico">quiz</span><h3>No tests taken yet</h3><p>Go to Trainings page to get started</p></div>`}
+      <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>Take a Test by Category</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:20px;">
+        ${quizCats.map(cat=>{
+          var catInfo=CATEGORIES[cat]||null;
+          var resolvedCat=resolveQuizCategory(cat);
+          var qCount=(QUESTION_BANK[resolvedCat]||[]).length;
+          var myPassedForCat=DB.testResults.filter(r=>r.empId===currentUser.id&&r.cat===cat&&r.pass).length;
+          return'<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;cursor:pointer;transition:all var(--trans);position:relative;" onclick="startQuiz(\''+cat+'\',null)" onmouseover="this.style.borderColor=\''+(catInfo?.color||"var(--amber)")+'\'" onmouseout="this.style.borderColor=\'var(--bdr)\'">'+
+            '<div style="font-size:28px;margin-bottom:8px;">'+(catInfo?.icon||"📋")+'</div>'+
+            '<div style="font-size:12px;font-weight:700;text-transform:uppercase;">'+cat+'</div>'+
+            '<div style="font-size:10.5px;color:var(--muted);margin-top:3px;">'+qCount+' questions available</div>'+
+            (myPassedForCat?'<span class="badge badge-active" style="position:absolute;top:8px;right:8px;">✓ Passed</span>':'')+
+            '<div style="height:2px;border-radius:2px;background:'+(catInfo?.color||"var(--amber)")+';margin-top:10px;"></div>'+
+          '</div>';
+        }).join("")}
+      </div>
+      <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue);margin-right:6px;"></span>My Test History</div>
+      ${myResults.length?'<div class="table-wrap"><table><thead><tr><th>Date</th><th>Training</th><th>Score</th><th>Result</th><th>Attempt</th></tr></thead><tbody>'+myResults.map(function(r){return'<tr><td style="font-weight:600;">'+formatDate(r.date)+'</td><td>'+r.training+'</td><td><b style="color:'+(r.pass?'var(--green)':'var(--red)')+';">'+r.score+'%</b></td><td><span class="badge badge-'+(r.pass?'active':'danger')+'">'+(r.pass?'PASSED':'FAILED')+'</span></td><td>#'+r.attempt+'</td></tr>';}).join('')+'</tbody></table></div>':'<div class="empty-state"><span class="mat-ico">quiz</span><h3>No tests taken yet</h3><p>Select a category above to get started</p></div>'}
     `;
     return;
   }
@@ -3458,6 +3550,50 @@ function renderNotifications(){
 /* ============================================================
    SETTINGS
 ============================================================ */
+/* ============================================================
+   ADMIN ACCESS MANAGEMENT PAGE
+============================================================ */
+function renderAdminAccess(){
+  if(!isAdmin){document.getElementById('view-adminaccess').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var promoteCount=0, directCount=0;
+  DB.admins.forEach(function(a){ if(DB.employees.find(function(e){return e.id===a.username;})){promoteCount++;}else{directCount++;} });
+  var adminRows='';
+  DB.admins.forEach(function(a){
+    var isPromoted=DB.employees.find(function(e){return e.id===a.username;});
+    var empData=isPromoted?'<span style=\'font-size:10px;color:var(--muted);\'>Dept: '+isPromoted.dept+'</span>':'';
+    var srcBadge=isPromoted?'<span class="badge badge-purple">Promoted</span>':'<span class="badge badge-info">Direct</span>';
+    var delBtn=isPromoted?'<button class="btn btn-sm btn-red" onclick="removeAdminAccess(\''+a.username+'\')" title="Remove Admin Access"><span class="mat-ico" style="font-size:12px;">person_remove</span></button>':'<button class="btn btn-sm btn-red" onclick="deleteAdminAccount(\''+a.username+'\')" title="Delete Admin"><span class="mat-ico" style="font-size:12px;">delete</span></button>';
+    adminRows+='<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+a.username+'</td><td><b>'+a.name+'</b><br>'+empData+'</td><td><span class="badge badge-amber">'+a.role+'</span></td><td>'+srcBadge+'</td><td><div style="display:flex;gap:4px;"><button class="btn btn-sm btn-outline" onclick="changeAdminPw(\''+a.username+'\')" title="Change Password"><span class="mat-ico" style="font-size:12px;">lock_reset</span></button>'+delBtn+'</div></td></tr>';
+  });
+  var empCards='';
+  DB.employees.forEach(function(e){
+    if(DB.admins.find(function(a){return a.username===e.id;}))return;
+    empCards+='<div style="display:flex;align-items:center;gap:8px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px 12px;"><div class="avatar" style="width:32px;height:32px;font-size:12px;background:'+avatarColor(e.name)+';">'+avatarInitials(e.name)+'</div><div><div style="font-size:12px;font-weight:600;">'+e.name+'</div><div style="font-size:10px;color:var(--muted);">'+e.id+' · '+e.dept+'</div></div><button class="btn btn-sm btn-amber" onclick="giveAdminAccess(\''+e.id+'\')" style="margin-left:8px;"><span class="mat-ico" style="font-size:11px;">admin_panel_settings</span> Give Access</button></div>';
+  });
+  if(!empCards)empCards='<div style="font-size:12px;color:var(--muted);padding:10px;text-align:center;">All employees already have admin access or no employees found.</div>';
+  document.getElementById('view-adminaccess').innerHTML=
+    '<div class="section-header"><div class="section-title">Admin Access <span>Management</span></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+    '<button class="btn btn-amber" onclick="addAdminModal()"><span class="mat-ico">person_add</span> Add Admin</button>'+
+    '<button class="btn btn-outline" style="border-color:var(--purple);color:var(--purple);" onclick="promoteEmployeeModal()"><span class="mat-ico">admin_panel_settings</span> Promote Employee</button>'+
+    '</div></div>'+
+    '<div style="background:rgba(139,109,232,.08);border:1px solid rgba(139,109,232,.25);border-radius:var(--r);padding:16px;margin-bottom:16px;">'+
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><div style="width:44px;height:44px;border-radius:12px;background:rgba(139,109,232,.15);display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="color:var(--purple);font-size:22px;">admin_panel_settings</span></div><div><div style="font-size:15px;font-weight:700;">Admin Privileges</div><div style="font-size:11px;color:var(--muted);">'+DB.admins.length+' admin account(s) registered</div></div></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--purple);">'+DB.admins.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Admins</div></div>'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--green);">'+promoteCount+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Promoted from Employees</div></div>'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--blue);">'+directCount+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Direct Admins</div></div>'+
+    '</div></div>'+
+    '<div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12.5px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span><div>Admins can manage all trainings, employees, reports, and settings. Promoted employees keep their employee profile and can login as both employee and admin.</div></div>'+
+    '<div class="section-title" style="margin-bottom:10px;"><span>All Admin Accounts</span></div>'+
+    '<div class="table-wrap"><table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Source</th><th>Actions</th></tr></thead><tbody>'+adminRows+'</tbody></table></div>'+
+    '<div style="margin-top:16px;"><div class="section-title" style="margin-bottom:10px;"><span>Quick Promote Employee</span></div>'+
+    '<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;">'+
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Select an employee below to give them admin access. They will be able to login as admin with their employee ID and password.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;max-height:200px;overflow-y:auto;">'+empCards+'</div>'+
+    '</div></div>';
+}
+
 function renderSettings(){
   const s=DB.settings;
   document.getElementById("view-settings").innerHTML=`
@@ -3514,12 +3650,22 @@ function renderSettings(){
       ${isAdmin?`
       <div class="form-section" style="grid-column:1/-1;">
         <div class="form-section-title"><span class="mat-ico">manage_accounts</span> Admin Accounts</div>
-        <div class="table-wrap">
-          <table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Actions</th></tr></thead>
-          <tbody>${DB.admins.map(a=>`<tr><td class="mono">${a.username}</td><td>${a.name}</td><td><span class="badge badge-amber">${a.role}</span></td>
-            <td><button class="btn btn-sm btn-outline" onclick="changeAdminPw('${a.username}')"><span class="mat-ico" style="font-size:12px;">lock_reset</span> Change PW</button></td></tr>`).join("")}</tbody></table>
+        <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:12px;font-size:12px;display:flex;align-items:center;gap:10px;">
+          <span class="mat-ico" style="color:var(--amber);font-size:18px;">info</span>
+          <div>You can also promote any employee to admin from the <b>Employees</b> page using the <span style="color:var(--purple);">admin_panel_settings</span> button.</div>
         </div>
-        <button class="btn btn-amber btn-sm" style="margin-top:10px;" onclick="addAdminModal()"><span class="mat-ico">person_add</span> Add Admin</button>
+        <div class="table-wrap">
+          <table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Source</th><th>Actions</th></tr></thead>
+          <tbody>${DB.admins.map(function(a){
+            var isPromoted=DB.employees.find(function(e){return e.id===a.username;});
+            return '<tr><td class="mono">'+a.username+'</td><td>'+a.name+'</td><td><span class="badge badge-amber">'+a.role+'</span></td><td>'+(isPromoted?'<span class="badge badge-purple">Promoted</span>':'<span class="badge badge-info">Direct</span>')+'</td>'+
+            '<td><div style="display:flex;gap:4px;"><button class="btn btn-sm btn-outline" onclick="changeAdminPw(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">lock_reset</span> PW</button>'+(isPromoted?'<button class="btn btn-sm btn-red" onclick="removeAdminAccess(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">person_remove</span> Remove</button>':'<button class="btn btn-sm btn-red" onclick="deleteAdminAccount(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">delete</span></button>')+'</div></td></tr>';
+          }).join('')}</tbody></table>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <button class="btn btn-amber btn-sm" onclick="addAdminModal()"><span class="mat-ico">person_add</span> Add Admin Manually</button>
+          <button class="btn btn-sm btn-outline" style="border-color:var(--purple);color:var(--purple);" onclick="promoteEmployeeModal()"><span class="mat-ico">admin_panel_settings</span> Promote Employee to Admin</button>
+        </div>
       </div>
       <!-- GOOGLE SHEETS SYNC -->
       <div class="form-section" style="grid-column:1/-1;border:1px solid rgba(62,207,142,.25);background:rgba(62,207,142,.04);">
@@ -3591,6 +3737,41 @@ function addAdminModal(){
     </div></div></div>
     <div class="modal-foot"><button class="btn btn-amber" onclick="saveAdmin()"><span class="mat-ico">save</span> Add Admin</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
   `,"480px");
+}
+function promoteEmployeeModal(){
+  var nonAdmins=DB.employees.filter(function(e){return !DB.admins.find(function(a){return a.username===e.id;});});
+  if(!nonAdmins.length){toast('All employees already have admin access','warning');return;}
+  openModal(
+    '<div class="modal-accent"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(139,109,232,.15)"><span class="mat-ico" style="color:var(--purple);font-size:22px;">admin_panel_settings</span></div><h2>Promote Employee to Admin</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body"><div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Select an employee to give full admin access. They will keep their employee account and also be able to login as admin.</div>'+
+    '<div style="max-height:300px;overflow-y:auto;">'+
+    nonAdmins.map(function(e){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--bdr);border-radius:var(--r-sm);margin-bottom:6px;cursor:pointer;transition:all .2s;" onmouseover="this.style.borderColor=\'var(--purple)\'" onmouseout="this.style.borderColor=\'var(--bdr)\'" onclick="closeModal();giveAdminAccess(\''+e.id+'\')">'+
+        '<div class="avatar" style="width:36px;height:36px;font-size:13px;flex-shrink:0;background:'+avatarColor(e.name)+'">'+avatarInitials(e.name)+'</div>'+
+        '<div style="flex:1;"><div style="font-weight:600;font-size:13px;">'+e.name+'</div><div style="font-size:11px;color:var(--muted);">'+e.id+' · '+e.dept+' · '+e.desig+'</div></div>'+
+        '<span class="mat-ico" style="color:var(--purple);font-size:18px;">arrow_forward</span>'+
+      '</div>';
+    }).join('')+
+    '</div></div>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>'
+  ,"520px");
+}
+function removeAdminAccess(username){
+  if(username==='admin'){toast('Cannot remove the default admin account','error');return;}
+  var a=DB.admins.find(function(x){return x.username===username;});
+  if(!a)return;
+  if(!confirm('Remove admin access for '+a.name+' ('+username+')? They will keep their employee account.'))return;
+  DB.admins=DB.admins.filter(function(x){return x.username!==username;});
+  saveDB();renderSettings();toast(a.name+' admin access removed','success');
+}
+function deleteAdminAccount(username){
+  if(username==='admin'){toast('Cannot delete the default admin account','error');return;}
+  var a=DB.admins.find(function(x){return x.username===username;});
+  if(!a)return;
+  if(!confirm('DELETE admin account '+a.name+' ('+username+') permanently?'))return;
+  DB.admins=DB.admins.filter(function(x){return x.username!==username;});
+  saveDB();renderSettings();toast('Admin account deleted','success');
 }
 function saveAdmin(){
   const u=document.getElementById("na_user").value.trim();
