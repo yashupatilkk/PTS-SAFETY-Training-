@@ -895,7 +895,7 @@ let DB={
   notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
-    sheetUrl:"",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    sheetUrl:"https://script.google.com/macros/s/AKfycbz8yfVZZCAcOYLmccQMuorhSmF_M-3uVuknqyzGS2ipyVOS-DE5BGIEM7YLYxK6lu__/exec",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -1414,6 +1414,8 @@ function startApp(){
   updateBadges();
   gotoView("dashboard");
   startAutoSync();
+  // Auto-sync all data to Google Sheet when admin logs in
+  if(isAdmin)autoSyncToSheet();
   toast(`Welcome back, ${currentUser.name||currentUser.username}!`,"success");
 }
 function updateBadges(){
@@ -3138,6 +3140,20 @@ function submitQuiz(){
       }catch(e){console.warn('Firebase quiz save error:',e);}
     })();
   }
+  // Auto-sync this test result to Google Sheets (fire-and-forget)
+  (async function(){
+    try{
+      var sheetUrl=DB.settings.sheetUrl||"";
+      if(!sheetUrl)return;
+      var r=DB.testResults[DB.testResults.length-1];
+      if(!r)return;
+      var trn=DB.trainings.find(function(t){return t.name===r.training;});
+      var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
+      var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
+      await fetch(sheetUrl,{method:"POST",mode:"no-cors",body:JSON.stringify({sheet:"Training Data",data:[row]}),headers:{"Content-Type":"text/plain"}});
+      console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
+    }catch(e){console.warn('Google Sheets auto-sync error:',e);}
+  })();
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
@@ -3678,11 +3694,28 @@ function renderSettings(){
         </div>
         <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);margin-bottom:10px;line-height:1.8;overflow-x:auto;">
           function doPost(e){<br>
-          &nbsp;&nbsp;var sheet=SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Training Data")||SpreadsheetApp.getActiveSpreadsheet().insertSheet("Training Data");<br>
-          &nbsp;&nbsp;var data=JSON.parse(e.postData.contents);<br>
-          &nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["Date","Emp ID","Name","Department","Training","Category","Score (%)","Correct","Wrong","Total Q","Result","Cert Required","Certificate No","Completion Date"]);<br>
-          &nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.date,r.empId,r.empName,r.dept,r.training,r.cat,r.score,r.correct,r.wrong,r.total,r.result,r.certRequired,r.certNo,r.completionDate]);});<br>
-          &nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK"})).setMimeType(ContentService.MimeType.JSON);<br>
+          &nbsp;&nbsp;var body=JSON.parse(e.postData.contents);<br>
+          &nbsp;&nbsp;var sheetName=body.sheet||"Training Data";<br>
+          &nbsp;&nbsp;var data=body.data||body;<br>
+          &nbsp;&nbsp;if(!Array.isArray(data))return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
+          &nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
+          &nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
+          &nbsp;&nbsp;if(!sheet)sheet=ss.insertSheet(sheetName);<br>
+          &nbsp;&nbsp;if(sheetName==="Training Data"){<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["Date","Emp ID","Name","Department","Training","Category","Score (%)","Correct","Wrong","Total Q","Result","Cert Required","Certificate No","Completion Date"]);<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.date,r.empId,r.empName,r.dept,r.training,r.cat,r.score,r.correct,r.wrong,r.total,r.result,r.certRequired,r.certNo,r.completionDate]);});<br>
+          &nbsp;&nbsp;}else if(sheetName==="Employees"){<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["Emp ID","Name","Department","Designation","Phone","Tests Taken","Tests Passed","Certificates","Trainings Assigned"]);<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.id,r.name,r.dept,r.desig,r.phone,r.testsTaken,r.testsPassed,r.certificates,r.trainingsAssigned]);});<br>
+          &nbsp;&nbsp;}else if(sheetName==="Trainings"){<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["ID","Name","Category","Trainer","Date","Duration","Enrolled","Completed","Passing %","Cert Required","Questions"]);<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.id,r.name,r.cat,r.trainer,r.date,r.duration,r.enrolled,r.completed,r.passing,r.certRequired,r.questions]);});<br>
+          &nbsp;&nbsp;}else{<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;var keys=Object.keys(data[0]||{});<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(keys);<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow(keys.map(function(k){return r[k]||"";}));});<br>
+          &nbsp;&nbsp;}<br>
+          &nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
           }
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -3798,7 +3831,7 @@ function restoreData(input){
 }
 
 /* ============================================================
-   GOOGLE SHEETS SYNC — Fixed with no-cors mode
+   GOOGLE SHEETS SYNC — Sends Test Results, Employees & Trainings
 ============================================================ */
 function buildSyncPayload(){
   return DB.testResults.map(r=>{
@@ -3807,33 +3840,80 @@ function buildSyncPayload(){
     return{date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
   });
 }
+function buildEmployeePayload(){
+  return DB.employees.map(e=>{
+    var testCount=DB.testResults.filter(r=>r.empId===e.id).length;
+    var passCount=DB.testResults.filter(r=>r.empId===e.id&&r.pass).length;
+    var certCount=DB.certificates.filter(c=>c.empId===e.id).length;
+    var assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(e.id)).length;
+    return{id:e.id,name:e.name,dept:e.dept,desig:e.desig||"",phone:e.phone||"",testsTaken:testCount,testsPassed:passCount,certificates:certCount,trainingsAssigned:assignedTrns};
+  });
+}
+function buildTrainingPayload(){
+  return DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined';}).map(t=>{
+    var enrolled=(t.enrolled||[]).length;
+    var passResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
+    var completed=Math.max((t.completed||[]).length,passResults.size);
+    return{id:t.id,name:t.name,cat:t.cat,trainer:t.trainer,date:t.date||"",duration:t.duration||"",enrolled:enrolled,completed:completed,passing:t.passing||70,certRequired:t.cert?"Yes":"No",questions:(t.questions||[]).length};
+  });
+}
+async function pushToSheet(url,payload,sheetName){
+  if(!payload.length)return {sent:0};
+  var body=JSON.stringify({sheet:sheetName,data:payload});
+  await fetch(url,{method:"POST",mode:"no-cors",body:body,headers:{"Content-Type":"text/plain"}});
+  return {sent:payload.length};
+}
 async function syncToGoogleSheet(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
   if(!url){toast("Paste your Google Apps Script URL in Settings first","error");return;}
   DB.settings.sheetUrl=url;
   const statusEl=document.getElementById("syncStatus");
-  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">⏳ Sending data to Google Sheets…</span>';
-  toast("Syncing data to Google Sheets…","info",2000);
-  const payload=buildSyncPayload();
-  if(!payload.length){toast("No test data to sync","warning");return;}
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">⏳ Sending all data to Google Sheets…</span>';
+  toast("Syncing ALL data to Google Sheets…","info",2000);
   try{
-    // Use no-cors mode: browser sends request without CORS preflight.
-    // Apps Script receives and processes data; response is opaque (unreadable) but that's OK.
-    await fetch(url,{
-      method:"POST",
-      mode:"no-cors",
-      body:JSON.stringify(payload),
-      headers:{"Content-Type":"text/plain"}
-    });
-    // With no-cors the fetch resolves (even if response is opaque), meaning the request was sent
-    if(statusEl)statusEl.innerHTML=`<span style="color:var(--green);">✅ Sync request sent for ${payload.length} records on ${new Date().toLocaleString()}. Check your Google Sheet to confirm data appeared.</span>`;
-    toast(`✅ Sync sent — ${payload.length} records dispatched to Google Sheets!`,"success",4000);
-    DB.notifications.unshift({id:genId("N"),msg:`Google Sheets sync: ${payload.length} training records sent.`,time:"Just now",read:false,icon:"table_chart"});
+    var totalSent=0;
+    // 1. Test Results
+    var testPayload=buildSyncPayload();
+    if(testPayload.length>0){
+      var r1=await pushToSheet(url,testPayload,"Training Data");
+      totalSent+=r1.sent;
+    }
+    // 2. Employees
+    var empPayload=buildEmployeePayload();
+    if(empPayload.length>0){
+      var r2=await pushToSheet(url,empPayload,"Employees");
+      totalSent+=r2.sent;
+    }
+    // 3. Trainings
+    var trnPayload=buildTrainingPayload();
+    if(trnPayload.length>0){
+      var r3=await pushToSheet(url,trnPayload,"Trainings");
+      totalSent+=r3.sent;
+    }
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">✅ Sync complete on '+new Date().toLocaleString()+' — '+testPayload.length+' test results, '+empPayload.length+' employees, '+trnPayload.length+' trainings sent. Check your Google Sheet (3 tabs).</span>';
+    toast('✅ All data synced to Google Sheet! ('+totalSent+' records)','success',4000);
+    DB.notifications.unshift({id:genId("N"),msg:'Google Sheets sync: '+totalSent+' records sent (Tests + Employees + Trainings).',time:"Just now",read:false,icon:"table_chart"});
     updateBadges();
   }catch(err){
     if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">❌ Sync failed — check the URL is correct and Apps Script is deployed as Web App with access "Anyone".</span>';
     toast("Sync failed. Check the Apps Script URL.","error",4000);
   }
+}
+// Auto-sync to Google Sheet (fire-and-forget, used on admin login)
+function autoSyncToSheet(){
+  var url=DB.settings.sheetUrl||"";
+  if(!url)return;
+  setTimeout(async function(){
+    try{
+      var testPayload=buildSyncPayload();
+      var empPayload=buildEmployeePayload();
+      var trnPayload=buildTrainingPayload();
+      if(testPayload.length>0)await pushToSheet(url,testPayload,"Training Data");
+      if(empPayload.length>0)await pushToSheet(url,empPayload,"Employees");
+      if(trnPayload.length>0)await pushToSheet(url,trnPayload,"Trainings");
+      console.log('Auto-sync to Google Sheet: '+testPayload.length+' tests, '+empPayload.length+' employees, '+trnPayload.length+' trainings');
+    }catch(e){console.warn('Auto Google Sheet sync error:',e);}
+  },3000);
 }
 async function testSheetConnection(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
@@ -3841,8 +3921,8 @@ async function testSheetConnection(){
   const statusEl=document.getElementById("syncStatus");
   if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">⏳ Testing connection…</span>';
   try{
-    await fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify([{test:true}]),headers:{"Content-Type":"text/plain"}});
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">✅ Connection test OK! Apps Script is reachable. Run "Sync Now" to push your training data.</span>';
+    await pushToSheet(url,[{test:true}],"Training Data");
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">✅ Connection test OK! Apps Script is reachable. Run "Sync Now" to push all your data (Tests + Employees + Trainings).</span>';
     toast("Connection test OK","success");
   }catch{
     if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">⚠ Could not reach the URL — verify it is deployed as a Web App with access set to "Anyone".</span>';
@@ -4567,4 +4647,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
