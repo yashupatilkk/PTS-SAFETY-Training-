@@ -2445,6 +2445,47 @@ async function removeVideoFromTraining(trnId){
 /* ============================================================
    EQUIPMENT LIBRARY
 ============================================================ */
+function openAddEquipModal(){
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head"><div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">build</span></div><h2>Add Custom Equipment</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
+    <div class="modal-body"><div class="form-section"><div class="form-grid">
+      <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Equipment Name *</label><input class="form-control-sm" id="eq_name" placeholder="e.g. Hydraulic Press"></div>
+      <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="eq_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
+      <div class="form-group"><label class="form-label-sm">Icon (emoji)</label><input class="form-control-sm" id="eq_icon" placeholder="🔧" maxlength="4"></div>
+      <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Specifications (one per line, use | to separate key:value)</label><textarea class="form-control-sm" id="eq_specs" rows="3" placeholder="Capacity: 50 Ton|Pressure: 200 BAR|Power: Electric"></textarea></div>
+    </div></div></div>
+    <div class="modal-foot"><button class="btn btn-amber" onclick="saveCustomEquipment()"><span class="mat-ico">save</span> Add Equipment</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>
+  `,"600px");
+}
+function saveCustomEquipment(){
+  var name=document.getElementById('eq_name').value.trim();
+  if(!name){toast('Equipment name required','error');return;}
+  var cat=document.getElementById('eq_cat').value;
+  var icon=document.getElementById('eq_icon').value.trim()||'🔧';
+  var specsRaw=document.getElementById('eq_specs').value.trim();
+  var specs=specsRaw?specsRaw.split('\n').map(function(s){return s.trim();}).filter(function(s){return s;}):['Custom equipment item'];
+  var eq={id:genId('EQ'),n:name,c:cat,i:icon,s:specs.join('|')};
+  if(!DB.customEquipment)DB.customEquipment=[];
+  DB.customEquipment.push(eq);
+  EQUIPMENT_DATA.push(eq);
+  closeModal();
+  saveDB();
+  renderEquipment();
+  updateBadges();
+  toast('Equipment "'+name+'" added!','success');
+}
+function deleteCustomEquipment(eqId){
+  if(!confirm('Delete this equipment permanently?'))return;
+  DB.customEquipment=(DB.customEquipment||[]).filter(function(e){return e.id!==eqId;});
+  var idx=EQUIPMENT_DATA.findIndex(function(e){return e.id===eqId;});
+  if(idx>=0)EQUIPMENT_DATA.splice(idx,1);
+  if(firebaseReady){try{fbDB.collection('customEquipment').doc(String(eqId)).delete();}catch(e){}}
+  saveDB();
+  renderEquipment();
+  updateBadges();
+  toast('Equipment deleted','warning');
+}
 function renderEquipment(){
   const cats=["All",...Object.keys(CATEGORIES)];
   const filtered=EQUIPMENT_DATA.filter(e=>{
@@ -2456,7 +2497,10 @@ function renderEquipment(){
   document.getElementById("view-equipment").innerHTML=`
     <div class="section-header">
       <div class="section-title">Equipment <span>Library</span></div>
-      <span style="font-size:12px;color:var(--muted);">${EQUIPMENT_DATA.length} total items</span>
+      <div style="display:flex;gap:8px;">
+        <span style="font-size:12px;color:var(--muted);align-self:center;">${EQUIPMENT_DATA.length+" total items"}</span>
+        ${isAdmin?`<button class="btn btn-amber" onclick="openAddEquipModal()"><span class="mat-ico">add</span> Add Equipment</button>`:""}
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search equipment..." oninput="equip_search=this.value;renderEquipment()" value="${equip_search}"></div>
@@ -2481,6 +2525,7 @@ function renderEquipment(){
               <button class="btn btn-sm btn-amber" onclick="event.stopPropagation();openEquipDetail(${EQUIPMENT_DATA.indexOf(e)})"><span class="mat-ico" style="font-size:11px;">info</span> Details</button>
               <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border:1px solid var(--green);color:var(--green);" onclick="event.stopPropagation();startQuiz(resolveQuizCategory('${e.c}'),'${e.n} — Equipment Quiz')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               <button class="btn btn-sm" style="background:rgba(232,72,58,.1);border:1px solid var(--red);color:var(--red);" onclick="event.stopPropagation();youtubeSearch('${e.n}')" target="_blank"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</button>
+              ${isAdmin && e.id && e.id.startsWith('EQ') ? `<button class="btn btn-sm btn-red" onclick="event.stopPropagation();deleteCustomEquipment('${e.id}')"><span class="mat-ico" style="font-size:11px;">delete</span></button>` : ''}
             </div>
           </div>
         </div>`;
@@ -2796,6 +2841,49 @@ async function deleteSOP(id){
    QUIZ / TESTS
 ============================================================ */
 function renderQuizMenu(){
+  // For employees: show their test history + link to trainings page
+  if(!isAdmin){
+    var myResults=DB.testResults.filter(function(r){return r.empId===currentUser.id;}).sort(function(a,b){return b.date.localeCompare(a.date);});
+    var passed=myResults.filter(function(r){return r.pass;}).length;
+    var failed=myResults.length-passed;
+    var avgScore=myResults.length?Math.round(myResults.reduce(function(s,r){return s+r.score;},0)/myResults.length):0;
+    document.getElementById("view-quiz").innerHTML=`
+      <div class="section-header"><div class="section-title">My <span>Test Results</span></div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;">
+        <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--amber);">${myResults.length}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">Tests Taken</div>
+        </div>
+        <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--green);">${passed}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">Passed</div>
+        </div>
+        <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--red);">${failed}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">Failed</div>
+        </div>
+        <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--blue);">${avgScore}%</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">Avg Score</div>
+        </div>
+      </div>
+      <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
+        <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
+        <div>Go to <b>Trainings</b> page to watch videos and take tests. Each training test can be taken <b>only once</b> after watching 90% of the video.</div>
+      </div>
+      ${myResults.length?`<div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Training</th><th>Score</th><th>Result</th><th>Attempt</th></tr></thead>
+        <tbody>${myResults.map(function(r){return`<tr>
+          <td style="font-weight:600;">${formatDate(r.date)}</td>
+          <td>${r.training}</td>
+          <td><b style="color:${r.pass?"var(--green)":"var(--red)"};">${r.score}%</b></td>
+          <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASSED":"FAILED"}</span></td>
+          <td>#${r.attempt}</td>
+        </tr>`;}).join("")}</tbody></table></div>`:`<div class="empty-state"><span class="mat-ico">quiz</span><h3>No tests taken yet</h3><p>Go to Trainings page to get started</p></div>`}
+    `;
+    return;
+  }
+  // Admin view: category grid
   const cats=TRAINING_CATS;
   document.getElementById("view-quiz").innerHTML=`
     <div class="section-header"><div class="section-title">Online <span>Tests</span></div></div>
@@ -3413,7 +3501,15 @@ function renderSettings(){
             ${isAdmin?`<button onclick="removeTrainer(${i})" style="color:var(--red);"><span class="mat-ico" style="font-size:13px;">close</span></button>`:""}
           </div>`).join("")}
         </div>
-        ${isAdmin?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"><button style="padding:8px 14px;border-radius:8px;border:1px solid var(--red);background:rgba(232,72,58,.08);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start;" onclick="resetDBToDefault()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">warning</span> Reset All Data to Default</button><div style="display:flex;gap:8px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div></div>`:`<div style="display:flex;gap:8px;margin-bottom:10px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>`}"
+                ${isAdmin?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
+          <div style="padding:12px 14px;border-radius:10px;border:2px solid var(--amber);background:rgba(255,176,32,.06);">
+            <div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">restart_alt</span> Fresh Start (Keep Employees)</div>
+            <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px;">Deletes ALL trainings (keeps HK Safety video one), all test results, all certificates, all notifications, all SOPs. <b style="color:var(--txt);">Employees & admins are kept.</b> Start fresh from today.</div>
+            <button style="padding:10px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.02em;" onclick="freshStartSite()"><span class="mat-ico" style="font-size:16px;vertical-align:middle;">restart_alt</span> Fresh Start Site</button>
+          </div>
+          <button style="padding:8px 14px;border-radius:8px;border:1px solid var(--red);background:rgba(232,72,58,.08);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start;" onclick="resetDBToDefault()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">warning</span> Nuclear Reset (Delete Everything)</button>
+          <div style="display:flex;gap:8px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>
+        </div>`:`<div style="display:flex;gap:8px;margin-bottom:10px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>`}"
       </div>
       ${isAdmin?`
       <div class="form-section" style="grid-column:1/-1;">
@@ -4066,7 +4162,7 @@ async function resetDBToDefault(){
   localStorage.removeItem(TOMBSTONE_KEY);
   if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
     try{
-      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems'];
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems','customEquipment','customQuestions'];
       for(const c of cols){
         const snap=await fbDB.collection(c).get();
         const batch=fbDB.batch();
@@ -4077,6 +4173,73 @@ async function resetDBToDefault(){
     }catch(e){toast('Firebase clear error: '+e.message,'error');}
   }
   location.reload();
+}
+async function freshStartSite(){
+  if(!confirm('FRESH START — This will:\n\n1. DELETE all trainings (except the HK Safety video one)\n2. DELETE all test results\n3. DELETE all certificates\n4. DELETE all notifications\n5. DELETE all custom questions\n6. DELETE all SOPs\n7. Keep all employees & admins\n\nThis cannot be undone. Continue?'))return;
+  // 1. Keep the training that has a YouTube video with "Housekeeping" or "HK" in the name
+  var keepTrn=null;
+  DB.trainings.forEach(function(t){
+    if(t.youtubeLink){
+      var nm=(t.name||'').toLowerCase();
+      if(nm.includes('housekeeping')||nm.includes('hk')){
+        if(!keepTrn)keepTrn=t;
+      }
+    }
+  });
+  // 2. Clear everything
+  DB.trainings=keepTrn?[{...keepTrn,enrolled:[],completed:[],completedDates:{},videoProgress:{},testResults:[]}]:[];
+  DB.testResults=[];
+  DB.certificates=[];
+  DB.notifications=[];
+  DB.customQuestions=[];
+  DB.sops=[];
+  // Also clean customQuestions from QUESTION_BANK
+  Object.keys(QUESTION_BANK).forEach(function(cat){
+    QUESTION_BANK[cat]=QUESTION_BANK[cat].filter(function(q){return !q.customFor;});
+  });
+  // Clear tombstones
+  _deletedIds={employees:[],trainings:[],testResults:[],certificates:[],sops:[]};
+  try{localStorage.removeItem(TOMBSTONE_KEY);}catch(e){}
+  // Save to localStorage immediately
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  // Clear Firebase collections
+  if(firebaseReady){
+    try{
+      var colsToClear=['testResults','certificates','notifications','sops','customQuestions','deletedItems'];
+      for(const c of colsToClear){
+        const snap=await fbDB.collection(c).get();
+        if(snap.size>0){
+          const batch=fbDB.batch();
+          snap.docs.forEach(function(d){batch.delete(d.ref);});
+          await batch.commit();
+        }
+      }
+      // Rewrite trainings (only the kept one)
+      var allTrnIds=DB.trainings.map(function(t){return t.id;});
+      var trnSnap=await fbDB.collection('trainings').get();
+      if(trnSnap.size>0){
+        var delBatch=fbDB.batch();
+        trnSnap.docs.forEach(function(d){
+          if(!allTrnIds.includes(d.id)){delBatch.delete(d.ref);}
+        });
+        await delBatch.commit();
+      }
+      // Push the kept training
+      if(keepTrn){await fbDB.collection('trainings').doc(String(keepTrn.id)).set(DB.trainings[0],{merge:true});}
+      // Clear deletedItems tombstones
+      var delSnap=await fbDB.collection('deletedItems').get();
+      if(delSnap.size>0){
+        var dBatch=fbDB.batch();
+        delSnap.docs.forEach(function(d){dBatch.delete(d.ref);});
+        await dBatch.commit();
+      }
+      toast('Fresh Start done! Firebase cleared.','success');
+    }catch(e){toast('Firebase clear error: '+e.message,'error');}
+  }else{
+    toast('Fresh Start done! (local only)','success');
+  }
+  renderAll();
+  toast(keepTrn?'Fresh Start! Kept training: "'+keepTrn.name+'". Everything else cleared.':'Fresh Start! All data cleared. Add new trainings now.','success',6000);
 }
 
 /* ============================================================
