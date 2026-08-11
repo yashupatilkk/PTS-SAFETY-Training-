@@ -989,6 +989,140 @@ async function forceSyncToCloud(){
   }
 }
 
+// === FORCE SYNC ALL EMPLOYEES INDIVIDUALLY ===
+// This fixes the bug where saveDB() batch skips an employee (e.g. _syncBusy flag)
+// Each employee is written ONE BY ONE to Firebase + Auth account is ensured
+async function forceSyncAllEmployees(){
+  if(!firebaseReady){toast('Firebase not connected','error');return;}
+  var allEmps=DB.employees||[];
+  if(allEmps.length===0){toast('No employees to sync','warning');return;}
+  
+  toast('Syncing '+allEmps.length+' employees to cloud one by one...','info',4000);
+  console.log('[forceSyncAllEmployees] Starting sync of '+allEmps.length+' employees...');
+  
+  var synced=0, failed=0, authCreated=0, authExisted=0, authFailed=0;
+  var failedList=[];
+  
+  // Step 1: Write each employee to Firestore individually
+  for(var i=0;i<allEmps.length;i++){
+    var emp=allEmps[i];
+    if(!emp||!emp.id)continue;
+    try{
+      await fbDB.collection('employees').doc(String(emp.id)).set(emp,{merge:true});
+      synced++;
+      console.log('[forceSyncAllEmployees] Firestore OK: '+emp.id+' ('+emp.name+')');
+    }catch(err){
+      failed++;
+      failedList.push(emp.id+': '+(err.message||err));
+      console.error('[forceSyncAllEmployees] Firestore FAIL: '+emp.id, err);
+    }
+  }
+  
+  // Step 2: Ensure Firebase Auth accounts exist for ALL employees
+  // Re-sign in as admin first (we may have been signed out)
+  try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){console.warn('re-signin admin error:',e);}
+  
+  for(var j=0;j<allEmps.length;j++){
+    var emp2=allEmps[j];
+    if(!emp2||!emp2.id)continue;
+    var email=toEmail(emp2.id);
+    var pw=emp2.password||'emp123';
+    try{
+      await fbAuth.createUserWithEmailAndPassword(email,pw);
+      authCreated++;
+      console.log('[forceSyncAllEmployees] Auth CREATED: '+emp2.id);
+    }catch(authErr){
+      if(authErr.code==='auth/email-already-in-use'){
+        authExisted++;
+        console.log('[forceSyncAllEmployees] Auth EXISTS: '+emp2.id);
+      }else{
+        authFailed++;
+        failedList.push('Auth '+emp2.id+': '+(authErr.message||authErr));
+        console.error('[forceSyncAllEmployees] Auth FAIL: '+emp2.id, authErr);
+      }
+    }
+    // Re-sign in as admin after each auth creation (signing in as employee changes context)
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+  }
+  
+  // Step 3: Verify by reading back from cloud
+  var cloudCount=0;
+  try{
+    var snap=await fbDB.collection('employees').get();
+    cloudCount=snap.size;
+  }catch(e){console.warn('Verify read failed:',e);}
+  
+  var msg='Employee sync complete!\nFirestore: '+synced+'/'+allEmps.length+' written';
+  if(failed>0)msg+=' ('+failed+' failed)';
+  msg+='\nAuth: '+authCreated+' created, '+authExisted+' existed';
+  if(authFailed>0)msg+=' ('+authFailed+' failed)';
+  msg+='\nCloud now has: '+cloudCount+' employees';
+  
+  if(failed>0||authFailed>0){
+    toast(msg+'\nFailures: '+failedList.join('; '),'error',10000);
+    console.error('[forceSyncAllEmployees] FAILURES:',failedList);
+  }else{
+    toast(msg,'success',5000);
+    console.log('[forceSyncAllEmployees] ALL OK! Cloud has '+cloudCount+' employees');
+  }
+  
+  // Update sync status
+  _lastSyncTime=Date.now();
+  updateSyncUI('idle');
+  
+  return {synced,failed,authCreated,authExisted,authFailed,cloudCount,failedList};
+}
+
+// === AUTO-DETECT MISSING EMPLOYEES ON ADMIN LOGIN ===
+// Compares local employees vs cloud and pushes any that are missing
+async function autoSyncMissingEmployees(){
+  if(!firebaseReady||!isAdmin)return;
+  try{
+    var localEmps=DB.employees||[];
+    if(localEmps.length===0)return;
+    
+    var snap=await fbDB.collection('employees').get();
+    var cloudIds=new Set();
+    snap.docs.forEach(function(d){cloudIds.add(d.data().id);});
+    
+    var missing=localEmps.filter(function(e){return !cloudIds.has(e.id);});
+    if(missing.length===0)return;
+    
+    console.warn('[autoSyncMissingEmployees] Found '+missing.length+' employees NOT in cloud, pushing now...',missing.map(function(e){return e.id;}));
+    toast('Found '+missing.length+' employee(s) missing from cloud — syncing now...','warning',5000);
+    
+    // Sign in as admin
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+    
+    var pushed=0;
+    for(var i=0;i<missing.length;i++){
+      var emp=missing[i];
+      try{
+        // Write to Firestore
+        await fbDB.collection('employees').doc(String(emp.id)).set(emp,{merge:true});
+        // Create Auth account
+        var email=toEmail(emp.id);
+        var pw=emp.password||'emp123';
+        try{await fbAuth.createUserWithEmailAndPassword(email,pw);}catch(ae){
+          if(ae.code!=='auth/email-already-in-use')console.warn('Auth create for '+emp.id+':',ae.message);
+        }
+        // Re-sign as admin
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+        pushed++;
+        console.log('[autoSyncMissingEmployees] Pushed: '+emp.id+' ('+emp.name+')');
+      }catch(err){
+        console.error('[autoSyncMissingEmployees] Failed to push '+emp.id+':',err);
+      }
+    }
+    
+    if(pushed>0){
+      toast(pushed+'/'+missing.length+' missing employee(s) synced to cloud! Phone login ready.','success',5000);
+    }
+  }catch(e){
+    console.warn('[autoSyncMissingEmployees] Error:',e);
+  }
+}
+
 // Test Firebase connection — writes and reads a test doc to verify permissions
 async function testFirebaseConnection(){
   const el=document.getElementById('fbTestResult');
@@ -1419,6 +1553,8 @@ function startApp(){
   startAutoSync();
   // Auto-sync all data to Google Sheet when admin logs in
   if(isAdmin)autoSyncToSheet();
+  // Auto-detect and fix employees missing from cloud (fixes phone login)
+  if(isAdmin&&firebaseReady)autoSyncMissingEmployees();
   toast(`Welcome back, ${currentUser.name||currentUser.username}!`,"success");
 }
 function updateBadges(){
@@ -1775,6 +1911,7 @@ function renderEmployees(){
       <div class="section-title">Employee <span>Management</span></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-outline" onclick="exportEmpExcel()"><span class="mat-ico">download</span> Export Excel</button>
+        <button class="btn btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="forceSyncAllEmployees()" title="Sync all employees to Firebase cloud + create login accounts"><span class="mat-ico">phonelink_setup</span> Fix Phone Login</button>
         <button class="btn btn-amber" onclick="openAddEmpModal()"><span class="mat-ico">add</span> Add Employee</button>
       </div>
     </div>
@@ -3664,6 +3801,10 @@ function renderSettings(){
         <button class="btn btn-sm btn-outline" onclick="forceSyncFromCloud()"><span class="mat-ico" style="font-size:12px;">cloud_download</span> Pull from Cloud</button>
         <button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="testFirebaseConnection()"><span class="mat-ico" style="font-size:12px;">science</span> Test Firebase</button>
       </div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-sm" style="background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-weight:700;border:none;" onclick="forceSyncAllEmployees()"><span class="mat-ico" style="font-size:12px;">person_add</span> Fix Employee Phone Login (Sync All to Cloud + Auth)</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.5;">Click "Fix Employee Phone Login" if any employee cannot login from their phone. It writes EVERY employee individually to Firebase and creates login accounts.</div>
       <div id="fbTestResult" style="margin-top:8px;font-size:11px;display:none;"></div>
     </div>
     <div class="settings-grid">
@@ -4254,6 +4395,7 @@ function saveDB(){
       console.log('saveDB: sync busy, queuing pending save');
       return Promise.resolve();
     }
+    console.log('saveDB: syncing '+cleanEmployees.length+' employees (total DB: '+DB.employees.length+')');
     _syncBusy=true;
     updateSyncUI('syncing');
     const syncPromise=Promise.all([
