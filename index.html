@@ -1117,10 +1117,17 @@ async function autoSyncMissingEmployees(){
     console.warn('[autoSyncMissingEmployees] Found '+missing.length+' employee(s) NOT in cloud, pushing now...',missing.map(function(e){return e.id+' ('+e.name+')';}));
     toast('Found '+missing.length+' employee(s) missing from cloud — syncing now...','warning',5000);
     
-    // Sign in as admin
-    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+    // Sign in as admin and VERIFY it works
+    var adminAuthOk=false;
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');adminAuthOk=true;}catch(e){
+      console.error('[autoSyncMissingEmployees] Admin Auth FAILED:',e.message);
+      toast('Firebase Admin Auth failed! Cannot sync employees. Error: '+e.message,'error',8000);
+      return;
+    }
+    if(!adminAuthOk){toast('Firebase Admin Auth failed. Click Fix Phone Login.','error',6000);return;}
     
     var pushed=0;
+    var failReasons=[];
     for(var i=0;i<missing.length;i++){
       var emp=missing[i];
       try{
@@ -1137,8 +1144,18 @@ async function autoSyncMissingEmployees(){
         pushed++;
         console.log('[autoSyncMissingEmployees] Pushed: '+emp.id+' ('+emp.name+')');
       }catch(err){
-        console.error('[autoSyncMissingEmployees] Failed to push '+emp.id+':',err);
+        var errMsg=err.message||String(err);
+        failReasons.push(emp.id+': '+errMsg);
+        console.error('[autoSyncMissingEmployees] Failed to push '+emp.id+':',errMsg);
       }
+    }
+    
+    // Show result to user
+    if(failReasons.length>0){
+      toast('FAILED to sync '+failReasons.length+' employee(s)! '+failReasons.join('; '),'error',10000);
+    }
+    if(pushed>0){
+      toast(pushed+'/'+missing.length+' employee(s) synced to cloud! Phone login ready.','success',5000);
     }
     
     // Verify after push
@@ -1447,18 +1464,23 @@ async function doLogin(){
       }
       currentUser=Object.assign({},emp,{type:"employee"});isAdmin=false;
     }
-    // LOGIN SUCCESS — enter app immediately
+    // For admin: sign in via Firebase Auth BEFORE startApp()
+    // Otherwise autoSyncMissingEmployees() cannot write to Firestore
+    if(isAdmin && firebaseReady) {
+      try { await fbAuth.signInWithEmailAndPassword(toEmail(id), pw); } catch(e) { console.warn('Admin auth:', e.message); }
+    }
+    // LOGIN SUCCESS
     var safeUser=Object.assign({},currentUser);delete safeUser.password;
     if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
     startApp();
-    // Sync Firebase Auth in BACKGROUND after user is already inside the app
-    if(firebaseReady){
+    // Sync Firebase Auth for employee in background
+    if(!isAdmin && firebaseReady){
       (async function(){
         try{
           var realPw=currentUser.password||pw;
           var email=toEmail(id);
           try{await fbAuth.signInWithEmailAndPassword(email,realPw);}catch(e){
-            try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');await fbAuth.createUserWithEmailAndPassword(email,realPw);console.log('[bg-login] Auth account created for '+id);}catch(e2){}
+            try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');await fbAuth.createUserWithEmailAndPassword(email,realPw);}catch(e2){}
           }
         }catch(e){}
       })();
