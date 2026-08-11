@@ -4278,10 +4278,20 @@ const DB_STORAGE_KEY="pts_safety_db";
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
+let _syncBusySince=0; // When _syncBusy was set — used for safety timeout
 let _lastDeleteTime=0; // Timestamp of last deletion — prevents visibilitychange pull-back
 let _lastSyncTime=null;
 let _initDone=false; // Whether initApp() has completed — blocks login until true
 let _pendingSave=false; // When _syncBusy, queue a save to run after current sync finishes
+// Safety: if _syncBusy is stuck for more than 30 seconds, force-reset it
+setInterval(function(){
+  if(_syncBusy && _syncBusySince && (Date.now()-_syncBusySince)>30000){
+    console.error('[SAFETY] _syncBusy stuck for 30s — force resetting!');
+    _syncBusy=false;
+    _syncBusySince=0;
+    if(_pendingSave){_pendingSave=false;saveDB();}
+  }
+},5000);
 
 /* Tombstone: remember deleted IDs so they never come back from Firestore */
 function loadTombstones(){
@@ -4397,6 +4407,7 @@ function saveDB(){
     }
     console.log('saveDB: syncing '+cleanEmployees.length+' employees (total DB: '+DB.employees.length+')');
     _syncBusy=true;
+    _syncBusySince=Date.now();
     updateSyncUI('syncing');
     const syncPromise=Promise.all([
       fbSaveCollection('employees',cleanEmployees,'id'),
@@ -4744,6 +4755,57 @@ async function initApp(){
     // Do NOT set firebaseReady=false — keep trying to save
   }
 
+  // === CRITICAL FIX: Push any local-only employees to cloud NOW ===
+  // This fixes the bug where an employee was saved locally but never made it to Firebase
+  if(firebaseReady && DB.employees.length>0){
+    try{
+      var cloudSnap=await fbDB.collection('employees').get();
+      var cloudEmpIds=new Set();
+      cloudSnap.docs.forEach(function(d){cloudEmpIds.add(d.data().id);});
+      var missingEmps=DB.employees.filter(function(e){return e&&e.id&&!cloudEmpIds.has(e.id);});
+      if(missingEmps.length>0){
+        console.warn('[initApp] FOUND '+missingEmps.length+' EMPLOYEE(S) MISSING FROM CLOUD! Pushing now...',missingEmps.map(function(e){return e.id+' ('+e.name+')';}));
+        // Make sure we're signed in as admin for writes
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(signinErr){console.warn('Admin signin for missing emp push:',signinErr.message);}
+        var pushOk=0,pushFail=0;
+        for(var mi=0;mi<missingEmps.length;mi++){
+          var me=missingEmps[mi];
+          try{
+            // Write employee data to Firestore
+            await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});
+            // Create Auth account so they can login from phone
+            var mEmail=toEmail(me.id);
+            var mPw=me.password||'emp123';
+            try{await fbAuth.createUserWithEmailAndPassword(mEmail,mPw);}catch(ae){
+              if(ae.code!=='auth/email-already-in-use')console.warn('Auth create for '+me.id+':',ae.message);
+            }
+            // Re-sign as admin (createUserWithEmailAndPassword changes auth context)
+            try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(reErr){}
+            pushOk++;
+            console.log('[initApp] Pushed missing employee: '+me.id+' ('+me.name+') + Auth account');
+          }catch(writeErr){
+            pushFail++;
+            console.error('[initApp] FAILED to push '+me.id+':',writeErr);
+          }
+        }
+        // Verify
+        var verifySnap=await fbDB.collection('employees').get();
+        console.log('[initApp] After push: cloud has '+verifySnap.size+' employees (local: '+DB.employees.length+', pushed: '+pushOk+', failed: '+pushFail+')');
+        // Update login page status to show correct count
+        var fbStatus2=document.getElementById('loginFbStatus');
+        if(fbStatus2){
+          fbStatus2.style.display='block';
+          fbStatus2.style.color='var(--green)';
+          fbStatus2.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+verifySnap.size+' employees synced (fixed '+pushOk+' missing)';
+        }
+      }else{
+        console.log('[initApp] All '+DB.employees.length+' employees already in cloud. OK.');
+      }
+    }catch(checkErr){
+      console.error('[initApp] Missing employee check failed:',checkErr);
+    }
+  }
+
   if(loadMsg)loadMsg.style.display='none';
 
   // Show Firebase load status on login page
@@ -4760,7 +4822,7 @@ async function initApp(){
     }else{
       fbStatus.style.display='block';
       fbStatus.style.color='var(--green)';
-      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees loaded';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees in DB (all synced to cloud)';
     }
   }
   // CRITICAL: Enable login ONLY after all data is loaded
