@@ -1911,19 +1911,34 @@ async function saveEmployee(){
   if(firebaseReady){
     (async function(){
       try{
+        // Directly write THIS employee to Firebase Firestore immediately
+        var newEmp=DB.employees.find(function(e){return e.id===id;});
+        if(newEmp){
+          await fbDB.collection('employees').doc(String(id)).set(newEmp,{merge:true});
+          console.log('Employee '+id+' saved directly to Firebase Firestore');
+        }
+        // Also create Firebase Auth account so employee can login from any device
         var authEmail=toEmail(id);
-        try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);}catch(authErr){
+        try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);console.log('Firebase Auth account created for '+id);}catch(authErr){
           if(authErr.code==='auth/email-already-in-use'){
-            try{await fbAuth.signInWithEmailAndPassword(authEmail,empPw);}catch(e2){}
+            console.log('Firebase Auth account already exists for '+id);
+          }else{
+            console.warn('Firebase Auth create error for '+id+':',authErr.message);
           }
         }
-        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+        // Sign back in as admin to restore admin context
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){console.warn('Re-signin as admin error:',e);}
+        // Also run full saveDB to sync everything else
         await saveDB();
+        toast('Employee '+name+' synced to cloud! Phone login ready.','success');
       }catch(fbErr){
-        console.warn('Background sync error for employee '+id+':',fbErr);
+        console.error('Firebase sync error for employee '+id+':',fbErr);
+        toast('Employee saved locally but NOT synced to cloud! Check Firebase. Error: '+(fbErr.message||fbErr),'error',6000);
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
       }
     })();
+  }else{
+    toast('Employee saved locally only (no cloud connection). Employee cannot login from phone until cloud sync is fixed.','warning',6000);
   }
   }catch(e){
     console.error('saveEmployee CRASH:',e);
