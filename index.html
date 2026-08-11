@@ -925,6 +925,32 @@ function toEmail(user){
   return user.toLowerCase().replace(/[^a-z0-9]/g,'')+'@pts-safety.app';
 }
 
+// Sanitize an object for Firestore — remove undefined values, empty strings for specific fields,
+// and any fields that Firestore rejects (undefined, NaN, Infinity, functions, symbols)
+function sanitizeForFirestore(obj){
+  if(!obj || typeof obj !== 'object') return obj;
+  const clean = {};
+  for(const key of Object.keys(obj)){
+    const val = obj[key];
+    // Skip undefined, functions, symbols
+    if(val === undefined || typeof val === 'function' || typeof val === 'symbol') continue;
+    // Skip NaN and Infinity
+    if(typeof val === 'number' && (isNaN(val) || !isFinite(val))) continue;
+    // Keep null, strings (including empty), numbers, booleans, arrays, plain objects
+    if(val === null || typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean'){
+      clean[key] = val;
+    }else if(Array.isArray(val)){
+      clean[key] = val;
+    }else if(typeof val === 'object' && val.constructor === Object){
+      clean[key] = sanitizeForFirestore(val);
+    }else{
+      // For other types (Date objects, etc.), convert to string
+      clean[key] = String(val);
+    }
+  }
+  return clean;
+}
+
 async function fbSaveCollection(collName,items,keyField){
   if(!firebaseReady)return {ok:false,error:'Firebase not ready'};
   try{
@@ -937,7 +963,7 @@ async function fbSaveCollection(collName,items,keyField){
         const docId=item[keyField]||item.id||item.username||item.num;
         if(!docId)continue;
         const ref=fbDB.collection(collName).doc(String(docId));
-        const data={...item};
+        const data=sanitizeForFirestore(item);
         batch.set(ref,data,{merge:true});
         saved++;
       }
@@ -1007,14 +1033,26 @@ async function forceSyncAllEmployees(){
   for(var i=0;i<allEmps.length;i++){
     var emp=allEmps[i];
     if(!emp||!emp.id)continue;
+    // Re-auth as admin before each write to prevent session loss
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){console.warn('re-auth before write:',e.message);}
     try{
-      await fbDB.collection('employees').doc(String(emp.id)).set(emp,{merge:true});
+      var safeEmp=sanitizeForFirestore(emp);
+      await fbDB.collection('employees').doc(String(emp.id)).set(safeEmp,{merge:true});
       synced++;
       console.log('[forceSyncAllEmployees] Firestore OK: '+emp.id+' ('+emp.name+')');
     }catch(err){
-      failed++;
-      failedList.push(emp.id+': '+(err.message||err));
-      console.error('[forceSyncAllEmployees] Firestore FAIL: '+emp.id, err);
+      // Try minimal write as fallback
+      try{
+        var minimal={id:emp.id,name:emp.name,password:emp.password||'emp123',mobile:emp.mobile||'',status:'active'};
+        await fbDB.collection('employees').doc(String(emp.id)).set(minimal,{merge:true});
+        synced++;
+        failedList.push(emp.id+': full object failed, minimal write OK ('+(err.message||err)+')');
+        console.warn('[forceSyncAllEmployees] Minimal OK for '+emp.id);
+      }catch(err2){
+        failed++;
+        failedList.push(emp.id+': '+(err.message||err)+' | minimal: '+(err2.message||err2));
+        console.error('[forceSyncAllEmployees] Firestore FAIL: '+emp.id, err, err2);
+      }
     }
   }
   
@@ -1118,11 +1156,21 @@ async function autoSyncMissingEmployees(){
     toast('Found '+missing.length+' employee(s) missing from cloud — syncing now...','warning',5000);
     
     // Sign in as admin and VERIFY it works
+    // Try the stored admin password first, then fallback to 'admin123'
     var adminAuthOk=false;
-    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');adminAuthOk=true;}catch(e){
-      console.error('[autoSyncMissingEmployees] Admin Auth FAILED:',e.message);
-      toast('Firebase Admin Auth failed! Cannot sync employees. Error: '+e.message,'error',8000);
-      return;
+    var adminRec=DB.admins.find(function(a){return a.username==='admin';});
+    var adminPw=adminRec?adminRec.password:'admin123';
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),adminPw);adminAuthOk=true;
+      console.log('[autoSyncMissingEmployees] Admin auth OK (pw from DB)');
+    }catch(e){
+      console.warn('[autoSyncMissingEmployees] Auth with DB pw failed:',e.message,'— trying admin123...');
+      try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');adminAuthOk=true;
+        console.log('[autoSyncMissingEmployees] Admin auth OK (fallback admin123)');
+      }catch(e2){
+        console.error('[autoSyncMissingEmployees] Admin Auth FAILED with both passwords:',e.message,e2.message);
+        toast('Firebase Admin Auth failed! Cannot sync employees. Try logging out and back in.','error',8000);
+        return;
+      }
     }
     if(!adminAuthOk){toast('Firebase Admin Auth failed. Click Fix Phone Login.','error',6000);return;}
     
@@ -1130,9 +1178,24 @@ async function autoSyncMissingEmployees(){
     var failReasons=[];
     for(var i=0;i<missing.length;i++){
       var emp=missing[i];
+      // VERIFY admin is still signed in before each write
+      if(!fbAuth.currentUser){
+        console.warn('[autoSyncMissingEmployees] Admin auth lost, re-signing in...');
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(reauthErr){
+          var reErrMsg='Admin re-auth failed: '+(reauthErr.message||reauthErr);
+          failReasons.push(emp.id+': '+reErrMsg);
+          console.error('[autoSyncMissingEmployees]',reErrMsg);
+          toast('Cloud sync FAILED — admin session expired. Try logging out and back in.','error',8000);
+          break;
+        }
+      }
       try{
-        // Write to Firestore
-        await fbDB.collection('employees').doc(String(emp.id)).set(emp,{merge:true});
+        // Sanitize the employee object to remove undefined/invalid fields
+        var safeEmp=sanitizeForFirestore(emp);
+        console.log('[autoSyncMissingEmployees] Pushing '+emp.id+' — sanitized keys: '+Object.keys(safeEmp).join(', '));
+        // ATTEMPT 1: Write sanitized full object to Firestore
+        await fbDB.collection('employees').doc(String(emp.id)).set(safeEmp,{merge:true});
+        console.log('[autoSyncMissingEmployees] Pushed: '+emp.id+' ('+emp.name+')');
         // Create Auth account
         var email=toEmail(emp.id);
         var pw=emp.password||'emp123';
@@ -1142,17 +1205,43 @@ async function autoSyncMissingEmployees(){
         // Re-sign as admin
         try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
         pushed++;
-        console.log('[autoSyncMissingEmployees] Pushed: '+emp.id+' ('+emp.name+')');
       }catch(err){
         var errMsg=err.message||String(err);
-        failReasons.push(emp.id+': '+errMsg);
-        console.error('[autoSyncMissingEmployees] Failed to push '+emp.id+':',errMsg);
+        console.error('[autoSyncMissingEmployees] Full object write FAILED for '+emp.id+':',err);
+        // ATTEMPT 2: Try with MINIMAL object (just id + name + password)
+        // This isolates whether it's a data issue or a permission issue
+        try{
+          var minimalEmp={id:emp.id,name:emp.name,password:emp.password||'emp123',mobile:emp.mobile||'',status:'active'};
+          console.log('[autoSyncMissingEmployees] Retrying '+emp.id+' with minimal object...');
+          await fbDB.collection('employees').doc(String(emp.id)).set(minimalEmp,{merge:true});
+          console.log('[autoSyncMissingEmployees] Minimal write OK for '+emp.id);
+          // Still create auth
+          var email2=toEmail(emp.id);
+          try{await fbAuth.createUserWithEmailAndPassword(email2,emp.password||'emp123');}catch(ae2){}
+          try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+          pushed++;
+          failReasons.push(emp.id+': full write failed ('+errMsg+') but MINIMAL write succeeded');
+        }catch(err2){
+          var errMsg2=err2.message||String(err2);
+          failReasons.push(emp.id+': '+errMsg+' | minimal also failed: '+errMsg2);
+          console.error('[autoSyncMissingEmployees] Minimal write ALSO FAILED for '+emp.id+':',err2);
+          // ATTEMPT 3: Try a completely simple test write to check permissions
+          try{
+            console.log('[autoSyncMissingEmployees] Permission test for '+emp.id+'...');
+            await fbDB.collection('config').doc('_permTest').set({t:Date.now()},{merge:true});
+            console.log('[autoSyncMissingEmployees] Config write OK — so employees collection may have restrictive rules');
+            failReasons[failReasons.length-1]+=' [CONFIG write OK — employees RULES may block this]';
+          }catch(permErr){
+            console.error('[autoSyncMissingEmployees] Even config write failed:',permErr);
+            failReasons[failReasons.length-1]+=' [NO write permission at all — check Firebase rules]';
+          }
+        }
       }
     }
     
     // Show result to user
     if(failReasons.length>0){
-      toast('FAILED to sync '+failReasons.length+' employee(s)! '+failReasons.join('; '),'error',10000);
+      toast('FAILED to sync '+failReasons.length+' employee(s)! Details: '+failReasons.join(' | '),'error',15000);
     }
     if(pushed>0){
       toast(pushed+'/'+missing.length+' employee(s) synced to cloud! Phone login ready.','success',5000);
@@ -1172,7 +1261,8 @@ async function autoSyncMissingEmployees(){
       setTimeout(function(){forceSyncAllEmployees();},1000);
     }
   }catch(e){
-    console.warn('[autoSyncMissingEmployees] Error:',e);
+    console.error('[autoSyncMissingEmployees] TOP-LEVEL Error:',e);
+    toast('Employee cloud sync error: '+(e.message||e),'error',8000);
   }
 }
 
@@ -1466,8 +1556,22 @@ async function doLogin(){
     }
     // For admin: sign in via Firebase Auth BEFORE startApp()
     // Otherwise autoSyncMissingEmployees() cannot write to Firestore
+    // Use the STORED admin password (from DB.admins) not the typed password,
+    // because Firebase Auth was created with the stored password
     if(isAdmin && firebaseReady) {
-      try { await fbAuth.signInWithEmailAndPassword(toEmail(id), pw); } catch(e) { console.warn('Admin auth:', e.message); }
+      try {
+        var adminRecord = DB.admins.find(function(a){return a.username===id;});
+        var fbPw = adminRecord ? adminRecord.password : pw;
+        await fbAuth.signInWithEmailAndPassword(toEmail(id), fbPw);
+        console.log('[doLogin] Admin Firebase Auth OK with password from DB record');
+      } catch(e) {
+        // Try with 'admin123' as fallback (default password)
+        console.warn('[doLogin] Admin auth with DB pw failed:', e.message, '— trying admin123...');
+        try { await fbAuth.signInWithEmailAndPassword(toEmail(id), 'admin123'); } catch(e2) {
+          console.error('[doLogin] Admin auth FAILED with both passwords:', e.message, e2.message);
+          toast('Firebase Admin Auth FAILED! Cloud sync disabled. Click "Fix Phone Login" in Settings to fix.','error',10000);
+        }
+      }
     }
     // LOGIN SUCCESS
     var safeUser=Object.assign({},currentUser);delete safeUser.password;
@@ -2126,18 +2230,46 @@ async function saveEmployee(){
   saved=true;
   toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
   // 5. Firebase sync in BACKGROUND (non-blocking)
+  // CRITICAL FIX: Write directly to Firestore FIRST, then saveDB separately
+  // Do NOT let _syncBusy block the direct employee write
   if(firebaseReady){
     (async function(){
       try{
+        // Ensure admin is signed in
+        if(!fbAuth.currentUser){
+          console.log('[saveEmployee] No Firebase user, signing in as admin...');
+          try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){console.warn('Admin signin error:',e.message);}
+        }
         // Directly write THIS employee to Firebase Firestore immediately
         var newEmp=DB.employees.find(function(e){return e.id===id;});
         if(newEmp){
-          await fbDB.collection('employees').doc(String(id)).set(newEmp,{merge:true});
-          console.log('Employee '+id+' saved directly to Firebase Firestore');
+          var safeNewEmp=sanitizeForFirestore(newEmp);
+          console.log('[saveEmployee] Direct Firestore write for '+id+' — keys: '+Object.keys(safeNewEmp).join(', '));
+          try{
+            await fbDB.collection('employees').doc(String(id)).set(safeNewEmp,{merge:true});
+            console.log('[saveEmployee] Employee '+id+' saved directly to Firebase Firestore');
+          }catch(writeErr){
+            // If full object fails, try minimal
+            console.warn('[saveEmployee] Full write failed for '+id+':',writeErr.message,'— trying minimal...');
+            var minimalNew={id:id,name:name,password:empPw,mobile:mobile,status:'active'};
+            try{
+              await fbDB.collection('employees').doc(String(id)).set(minimalNew,{merge:true});
+              console.log('[saveEmployee] Minimal write OK for '+id);
+            }catch(minErr){
+              console.error('[saveEmployee] Minimal write ALSO failed for '+id+':',minErr);
+              toast('Cloud write failed for '+name+'! Error: '+(writeErr.message||writeErr),'error',8000);
+              // Don't return — still try auth creation
+            }
+          }
         }
         // Also create Firebase Auth account so employee can login from any device
         var authEmail=toEmail(id);
-        try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);console.log('Firebase Auth account created for '+id);}catch(authErr){
+        try{
+          // Re-auth as admin before creating user
+          try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+          await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);
+          console.log('Firebase Auth account created for '+id);
+        }catch(authErr){
           if(authErr.code==='auth/email-already-in-use'){
             console.log('Firebase Auth account already exists for '+id);
           }else{
@@ -2147,11 +2279,12 @@ async function saveEmployee(){
         // Sign back in as admin to restore admin context
         try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){console.warn('Re-signin as admin error:',e);}
         // Also run full saveDB to sync everything else
+        // This may be queued if _syncBusy, but the employee was already written directly above
         await saveDB();
         toast('Employee '+name+' synced to cloud! Phone login ready.','success');
       }catch(fbErr){
         console.error('Firebase sync error for employee '+id+':',fbErr);
-        toast('Employee saved locally but NOT synced to cloud! Check Firebase. Error: '+(fbErr.message||fbErr),'error',6000);
+        toast('Employee saved locally but NOT synced to cloud! Error: '+(fbErr.message||fbErr),'error',6000);
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
       }
     })();
