@@ -1400,166 +1400,74 @@ function togglePw(){
   ico.textContent=inp.type==="password"?"visibility":"visibility_off";
 }
 async function doLogin(){
-  const id=document.getElementById("loginId").value.trim();
-  const pw=document.getElementById("loginPw").value;
+  var id=document.getElementById("loginId").value.trim();
+  var pw=document.getElementById("loginPw").value;
   if(!id||!pw){toast("Please enter credentials","error");return;}
-  // Block login if init hasn't finished loading data from cloud
-  if(!_initDone){toast("Still loading data, please wait...","info");return;}
-  // Auto-detect login type based on input
+  if(!_initDone){toast("Still loading...","info");return;}
   if(loginType==="admin"&&id.toUpperCase().startsWith("EMP")){setLoginType("employee");}
   if(loginType==="employee"&&(id.toLowerCase()==="admin")){setLoginType("admin");}
   document.getElementById("loginBtn").disabled=true;
-  document.getElementById("loginBtn").innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Signing in...';
+  document.getElementById("loginBtn").innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Signing in...';
   try{
-    // Try Firebase Auth first (if available and configured)
-    if(firebaseReady){
-      const email=toEmail(id);
-      try{
-        await fbAuth.signInWithEmailAndPassword(email,pw);
-      }catch(fbErr){
-        console.warn('Firebase Auth failed for '+id+', code:',fbErr.code);
-        // If auth/user-not-found or auth/invalid-credential, the Auth account may not exist
-        // Try to create it on the spot using admin credentials
-        if(fbErr.code==='auth/user-not-found'||fbErr.code==='auth/invalid-credential'||fbErr.code==='auth/too-many-requests'){
-          try{
-            // Sign in as admin first
-            await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');
-            // Find the employee to get their password
-            var empForAuth=DB.employees.find(function(e){return e.id===id.toUpperCase();});
-            var authPw=pw;
-            if(empForAuth&&empForAuth.password){
-              // Use the stored password (not what they typed — they might have typed their name)
-              authPw=empForAuth.password;
-            }
-            try{
-              await fbAuth.createUserWithEmailAndPassword(email,authPw);
-              console.log('[doLogin] Created Auth account for '+id+' with pw length: '+authPw.length);
-              toast('Login account created! Signing in...','info',2000);
-              // Now sign in as the employee with the CORRECT password
-              await fbAuth.signInWithEmailAndPassword(email,authPw);
-            }catch(createErr){
-              console.warn('[doLogin] Auth create failed:',createErr.code,createErr.message);
-              // Sign back out so local login can proceed
-              try{await fbAuth.signOut();}catch(sigo){}
-            }
-          }catch(adminAuthErr){
-            console.warn('[doLogin] Admin auth for account creation failed:',adminAuthErr.message);
-            try{await fbAuth.signOut();}catch(sigo2){}
-          }
-        }else{
-          try{await fbAuth.signOut();}catch(sigo3){}
-        }
-      }
-    }
-    // Always verify against local DB (source of truth)
+    // FAST PATH: Check local DB first (instant, no network)
     if(loginType==="admin"){
-      const admin=DB.admins.find(a=>a.username===id);
-      if(!admin){toast("Invalid admin credentials","error");return;}
-      if(admin.password!==pw){toast("Invalid admin credentials","error");return;}
-      currentUser={...admin,type:"admin"};isAdmin=true;
+      var admin=DB.admins.find(function(a){return a.username===id;});
+      if(!admin||admin.password!==pw){toast("Invalid admin credentials","error");return;}
+      currentUser=Object.assign({},admin,{type:"admin"});isAdmin=true;
     }else{
-      // Normalize employee ID to UPPERCASE for matching (admin saves IDs in uppercase)
-      const empId=id.toUpperCase();
-      let emp=DB.employees.find(e=>e.id===empId);
-      // If employee not found locally, force-pull ALL employees from cloud
+      var empId=id.toUpperCase();
+      var emp=DB.employees.find(function(e){return e.id===empId;});
+      // If not found locally, ONE cloud read then check
       if(!emp&&firebaseReady){
         try{
-          toast('Syncing from cloud...','info',3000);
-          // Pull the FULL employees collection (not just one doc) to handle all cases
-          const empSnap=await fbDB.collection('employees').get();
+          toast('Checking cloud...','info',2000);
+          var empSnap=await fbDB.collection('employees').get();
           if(empSnap.size>0){
-            const cloudEmps=empSnap.docs.map(x=>x.data());
-            const cloudIds=new Set(cloudEmps.map(e=>e.id));
-            // Keep local employees that are NOT in cloud (don't lose them!)
-            const localOnly=DB.employees.filter(e=>!cloudIds.has(e.id));
-            DB.employees=[...cloudEmps,...localOnly];
-            // Apply tombstones in case this employee was deleted
+            var cloudEmps=empSnap.docs.map(function(x){return x.data();});
+            var cloudIds=new Set(cloudEmps.map(function(e){return e.id;}));
+            var localOnly=DB.employees.filter(function(e){return !cloudIds.has(e.id);});
+            DB.employees=cloudEmps.concat(localOnly);
             await loadTombstonesFromCloud();
             applyTombstones();
-            // Save to localStorage for next time
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-            // Now search again with the fresh data
-            emp=DB.employees.find(e=>e.id===empId);
-            // ENHANCED: If employee found in cloud, ensure their Auth account exists
-            // This fixes the case where Firestore has the employee but Auth was never created
-            if(emp&&firebaseReady){
-              var empEmail=toEmail(empId);
-              var empPw=emp.password||'emp123';
-              try{
-                await fbAuth.signInWithEmailAndPassword(empEmail,empPw);
-                console.log('[LOGIN] Auth OK for '+empId);
-              }catch(authTryErr){
-                // Auth failed — try creating the account
-                try{
-                  await fbAuth.createUserWithEmailAndPassword(empEmail,empPw);
-                  console.log('[LOGIN] Auth account CREATED for '+empId);
-                  toast('Login account created for '+emp.name+'. Please try login again.','success',4000);
-                  // Sign out so they can re-login fresh
-                  try{await fbAuth.signOut();}catch(sigoErr){}
-                  return;
-                }catch(createAuthErr){
-                  console.warn('[LOGIN] Auth account create failed for '+empId+':',createAuthErr.message);
-                }
-              }
-              // Sign out of employee auth so the main login flow can proceed
-              try{await fbAuth.signOut();}catch(sigoErr2){}
-            }
+            emp=DB.employees.find(function(e){return e.id===empId;});
           }
         }catch(cloudErr){
-          // SHOW the Firebase error — don't hide it!
-          const fbMsg=cloudErr.message||String(cloudErr);
-          console.error('[LOGIN] Cloud employee lookup FAILED:',fbMsg);
-          toast('Cloud read FAILED: '+fbMsg+'. Firebase rules may be blocking access. Tell admin to check Firebase Security Rules.','error',8000);
-          // Update the status on login page
-          const fbStatus=document.getElementById('loginFbStatus');
-          if(fbStatus){fbStatus.style.display='block';fbStatus.style.color='var(--red)';fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Firebase blocked: '+fbMsg;}
-          return;
+          toast('Cloud error: '+cloudErr.message,'error',6000);return;
         }
       }
       if(!emp){
-        console.error('[LOGIN] Employee not found. Local employees:',DB.employees.map(e=>e.id),'Total in DB:',DB.employees.length);
-        toast("Employee ID \""+empId+"\" not found. "+(DB.employees.length===0?'No employees loaded from cloud. Admin must fix Firebase first.':'Available: '+DB.employees.map(e=>e.id).join(', ')),"error",6000);
-        return;
+        toast('Employee '+empId+' not found.','error',5000);return;
       }
-      // Accept EITHER the employee's name OR their password in the second field
-      // This makes login easy for field workers who may not know their password
-      const pwNormalized=pw.trim();
-      const nameMatch=emp.name && emp.name.trim().toLowerCase()===pwNormalized.toLowerCase();
-      const pwMatch=emp.password && emp.password===pwNormalized;
-      if(!nameMatch && !pwMatch){
-        console.error('[LOGIN] Credential mismatch for',empId,'entered:',pwNormalized,'stored name:',emp.name,'stored pw:',emp.password?'***':'(EMPTY - no password set!)');
-        var hint=emp.password ? 'Use your Name or Password.' : 'No password set! Admin must set a password for this employee.';
-        toast("Wrong credentials for \""+emp.name+"\" (ID: "+empId+"). "+hint,"error",5000);
-        return;
+      var pwN=pw.trim();
+      var nameOk=emp.name&&emp.name.trim().toLowerCase()===pwN.toLowerCase();
+      var pwOk=emp.password&&emp.password===pwN;
+      if(!nameOk&&!pwOk){
+        toast('Wrong credentials for '+emp.name+'. Use Name or Password.','error',5000);return;
       }
-      currentUser={...emp,type:"employee"};isAdmin=false;
+      currentUser=Object.assign({},emp,{type:"employee"});isAdmin=false;
     }
-    // If Firebase is ready but auth failed above (wrong pw in Firebase), update it
-    if(firebaseReady&&fbAuth.currentUser){
-      // Already signed in via Firebase Auth - good
-    }else if(firebaseReady){
-      // Firebase Auth didn't work but local DB verified - create/update Firebase account silently
-      // Use the employee's actual stored password for Firebase Auth (not the name they typed)
-      const email=toEmail(id);
-      const actualPw=(loginType==='employee'&&currentUser&&currentUser.password)?currentUser.password:pw;
-      try{
-        await fbAuth.signInWithEmailAndPassword(email,actualPw);
-      }catch(signInErr){
-        try{
-          await fbAuth.createUserWithEmailAndPassword(email,actualPw);
-        }catch(createErr){
-          if(createErr.code!=='auth/email-already-in-use')console.warn('Firebase account sync error:',createErr.message);
-        }
-      }
-    }
-    const safeUser={...currentUser};delete safeUser.password;
+    // LOGIN SUCCESS — enter app immediately
+    var safeUser=Object.assign({},currentUser);delete safeUser.password;
     if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
     startApp();
+    // Sync Firebase Auth in BACKGROUND after user is already inside the app
+    if(firebaseReady){
+      (async function(){
+        try{
+          var realPw=currentUser.password||pw;
+          var email=toEmail(id);
+          try{await fbAuth.signInWithEmailAndPassword(email,realPw);}catch(e){
+            try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');await fbAuth.createUserWithEmailAndPassword(email,realPw);console.log('[bg-login] Auth account created for '+id);}catch(e2){}
+          }
+        }catch(e){}
+      })();
+    }
   }catch(e){
     console.error('doLogin CRASH:',e);
     toast("Login error: "+(e.message||e),"error",6000);
   }finally{
-    const btn=document.getElementById("loginBtn");
+    var btn=document.getElementById("loginBtn");
     if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
   }
 }
@@ -4908,94 +4816,39 @@ async function initApp(){
     // Do NOT set firebaseReady=false — keep trying to save
   }
 
-  // === CRITICAL FIX: Push any local-only employees to cloud NOW ===
-  // This fixes the bug where an employee was saved locally but never made it to Firebase
+  // === Push missing employees + Auth accounts — NON-BLOCKING ===
   if(firebaseReady && DB.employees.length>0){
-    try{
-      var cloudSnap=await fbDB.collection('employees').get();
-      var cloudEmpIds=new Set();
-      cloudSnap.docs.forEach(function(d){cloudEmpIds.add(d.data().id);});
-      var missingEmps=DB.employees.filter(function(e){return e&&e.id&&!cloudEmpIds.has(e.id);});
-      if(missingEmps.length>0){
-        console.warn('[initApp] FOUND '+missingEmps.length+' EMPLOYEE(S) MISSING FROM CLOUD! Pushing now...',missingEmps.map(function(e){return e.id+' ('+e.name+')';}));
-        // Make sure we're signed in as admin for writes
-        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(signinErr){console.warn('Admin signin for missing emp push:',signinErr.message);}
-        var pushOk=0,pushFail=0;
-        for(var mi=0;mi<missingEmps.length;mi++){
-          var me=missingEmps[mi];
-          try{
-            // Write employee data to Firestore
-            await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});
-            // Create Auth account so they can login from phone
-            var mEmail=toEmail(me.id);
-            var mPw=me.password||'emp123';
-            try{await fbAuth.createUserWithEmailAndPassword(mEmail,mPw);}catch(ae){
-              if(ae.code!=='auth/email-already-in-use')console.warn('Auth create for '+me.id+':',ae.message);
-            }
-            // Re-sign as admin (createUserWithEmailAndPassword changes auth context)
-            try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(reErr){}
-            pushOk++;
-            console.log('[initApp] Pushed missing employee: '+me.id+' ('+me.name+') + Auth account');
-          }catch(writeErr){
-            pushFail++;
-            console.error('[initApp] FAILED to push '+me.id+':',writeErr);
-          }
-        }
-        // Verify
-        var verifySnap=await fbDB.collection('employees').get();
-        console.log('[initApp] After push: cloud has '+verifySnap.size+' employees (local: '+DB.employees.length+', pushed: '+pushOk+', failed: '+pushFail+')');
-        // Update login page status to show correct count
-        var fbStatus2=document.getElementById('loginFbStatus');
-        if(fbStatus2){
-          fbStatus2.style.display='block';
-          fbStatus2.style.color='var(--green)';
-          fbStatus2.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+verifySnap.size+' employees synced (fixed '+pushOk+' missing)';
-        }
-      }else{
-        console.log('[initApp] All '+DB.employees.length+' employees already in cloud. OK.');
-      }
-    }catch(checkErr){
-      console.error('[initApp] Missing employee check failed:',checkErr);
-    }
-    // === NUCLEAR FIX: Ensure Auth accounts exist for ALL employees ===
-    // This runs on EVERY page load to guarantee phone login works
-    try{
-      console.log('[initApp] Verifying Auth accounts for all '+DB.employees.length+' employees...');
-      try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(adminSignErr){console.warn('[initApp] Admin signin for Auth check:',adminSignErr.message);}
-      var authFixed=0;
-      for(var ai=0;ai<DB.employees.length;ai++){
-        var aEmp=DB.employees[ai];
-        if(!aEmp||!aEmp.id)continue;
-        var aEmail=toEmail(aEmp.id);
-        var aPw=aEmp.password||'emp123';
-        try{
-          await fbAuth.createUserWithEmailAndPassword(aEmail,aPw);
-          authFixed++;
-          console.log('[initApp] Auth CREATED: '+aEmp.id+' ('+aEmp.name+')');
-        }catch(authErr){
-          if(authErr.code==='auth/email-already-in-use'){
-            /* good — account exists */
-          }else{
-            console.warn('[initApp] Auth issue for '+aEmp.id+':',authErr.message);
-          }
-        }
-        // Always re-sign as admin after each attempt
-        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(reSignErr){}
-      }
-      if(authFixed>0){
-        console.log('[initApp] Created '+authFixed+' missing Auth account(s)! Phone login should now work.');
-        var fbStatus3=document.getElementById('loginFbStatus');
-        if(fbStatus3){
-          fbStatus3.style.display='block';
-          fbStatus3.style.color='var(--green)';
-          fbStatus3.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees + '+authFixed+' login account(s) fixed';
-        }
-      }
-    }catch(authCheckErr){
-      console.error('[initApp] Auth verification failed:',authCheckErr);
-    }
+    // ENABLE LOGIN FIRST — don't make users wait
+    if(loadMsg)loadMsg.style.display='none';
+    var fbSt=document.getElementById('loginFbStatus');
+    if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--amber)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">sync</span> Cloud connected — '+DB.employees.length+' employees. Syncing in background...';}
+    _initDone=true;
+    if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+    var syncBtnBg=document.getElementById('loginSyncBtn');
+    if(syncBtnBg)syncBtnBg.style.display='inline-block';
+    var tBg=localStorage.getItem("mep_theme")||"dark";
+    document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
+    document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
+    if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
+    // Background sync
+    (async function(){
+      try{
+        var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
+        var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
+        if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+        var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}pok++;}catch(we){}}}
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+        var af=0;for(var ai=0;ai<DB.employees.length;ai++){var ae=DB.employees[ai];if(!ae||!ae.id)continue;try{await fbAuth.createUserWithEmailAndPassword(toEmail(ae.id),ae.password||'emp123');af++;}catch(ae2){}try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}}
+        var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
+        if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+fs.size+'/'+DB.employees.length+' employees'+(pok>0?' (fixed '+pok+' missing)':'')+(af>0?' + '+af+' login(s) fixed':'');}
+        console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
+      }catch(e){console.error('[bg]',e);}
+    })();
+    // Auth persistence + session check (needed for auto-login)
+    try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
+    var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
+    return;
   }
-
   if(loadMsg)loadMsg.style.display='none';
 
   // Show Firebase load status on login page
