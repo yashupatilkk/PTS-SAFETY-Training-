@@ -1269,8 +1269,10 @@ async function doLogin(){
           const empSnap=await fbDB.collection('employees').get();
           if(empSnap.size>0){
             const cloudEmps=empSnap.docs.map(x=>x.data());
-            // Replace local employees with cloud data
-            DB.employees=cloudEmps;
+            const cloudIds=new Set(cloudEmps.map(e=>e.id));
+            // Keep local employees that are NOT in cloud (don't lose them!)
+            const localOnly=DB.employees.filter(e=>!cloudIds.has(e.id));
+            DB.employees=[...cloudEmps,...localOnly];
             // Apply tombstones in case this employee was deleted
             await loadTombstonesFromCloud();
             applyTombstones();
@@ -1301,8 +1303,9 @@ async function doLogin(){
       const nameMatch=emp.name && emp.name.trim().toLowerCase()===pwNormalized.toLowerCase();
       const pwMatch=emp.password && emp.password===pwNormalized;
       if(!nameMatch && !pwMatch){
-        console.error('[LOGIN] Credential mismatch for',empId,'entered:',pwNormalized,'stored name:',emp.name,'stored pw:',emp.password?'***':'(empty)');
-        toast("Wrong credentials for \""+emp.name+"\" (ID: "+empId+"). Use your Name or Password.","error",4000);
+        console.error('[LOGIN] Credential mismatch for',empId,'entered:',pwNormalized,'stored name:',emp.name,'stored pw:',emp.password?'***':'(EMPTY - no password set!)');
+        var hint=emp.password ? 'Use your Name or Password.' : 'No password set! Admin must set a password for this employee.';
+        toast("Wrong credentials for \""+emp.name+"\" (ID: "+empId+"). "+hint,"error",5000);
         return;
       }
       currentUser={...emp,type:"employee"};isAdmin=false;
@@ -1804,6 +1807,7 @@ function renderEmployees(){
               <button class="btn btn-sm btn-outline" onclick="editEmp('${e.id}')"><span class="mat-ico" style="font-size:13px;">edit</span></button>
               <button class="btn btn-sm btn-outline" onclick="viewEmpHistory('${e.id}')"><span class="mat-ico" style="font-size:13px;">history</span></button>
               <button class="btn btn-sm btn-outline" onclick="resetPassword('${e.id}')"><span class="mat-ico" style="font-size:13px;">lock_reset</span></button>
+              <button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="pushEmpToCloud('${e.id}')" title="Push to Cloud"><span class="mat-ico" style="font-size:13px;">cloud_upload</span></button>
               <button class="btn btn-sm btn-outline" style="border-color:var(--purple);color:var(--purple);" onclick="giveAdminAccess('${e.id}')" title="Promote to Admin"><span class="mat-ico" style="font-size:13px;">admin_panel_settings</span></button>
               <button class="btn btn-sm btn-red" onclick="deleteEmp('${e.id}')"><span class="mat-ico" style="font-size:13px;">delete</span></button>
             </div></td>
@@ -1851,6 +1855,24 @@ function renderEmpEmployee(){
       </tr>`).join(""):"<tr><td colspan='7' style='text-align:center;color:var(--muted);padding:20px;'>No test history yet</td></tr>"}</tbody></table>
     </div>
   `;
+}
+async function pushEmpToCloud(empId){
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  if(!emp){toast('Employee not found','error');return;}
+  if(!firebaseReady){toast('Firebase not connected','error');return;}
+  toast('Pushing '+emp.name+' to cloud...','info');
+  try{
+    await fbDB.collection('employees').doc(String(empId)).set(emp,{merge:true});
+    var authEmail=toEmail(empId);
+    var empPw=emp.password||'emp123';
+    try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);}catch(authErr){
+      if(authErr.code!=='auth/email-already-in-use')console.warn('Auth create:',authErr.message);
+    }
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+    toast(emp.name+' ('+empId+') pushed to cloud! Phone login ready.','success');
+  }catch(err){
+    toast('Failed to push: '+(err.message||err),'error',6000);
+  }
 }
 function openAddEmpModal(){
   openModal(`
@@ -4389,20 +4411,17 @@ async function loadDBFromFirestore(){
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
 
-    // === SAFETY RESTORE: bring back any locally-added item that was lost ===
-    // An item is "locally-added" if it has _localAddedAt and is NOT in the tombstone list
-    // This catches any edge case where cloud merge or tombstones accidentally drop data
+    // === AGGRESSIVE LOCAL MERGE: ensure NO local employee is ever lost ===
+    // Always merge local employees/trainings that cloud doesn't have (even without _localAddedAt)
     ['employees','trainings','sops'].forEach(function(coll){
       if(!Array.isArray(DB[coll]))return;
-      var snapshotIds=new Set(DB[coll].map(function(x){return x.id;}));
+      var currentIds=new Set(DB[coll].map(function(x){return x.id;}));
       localSnapshot[coll].forEach(function(item){
-        if(!snapshotIds.has(item.id)&&item._localAddedAt){
-          // This item was in localStorage but is now missing — restore it
-          // Only if NOT tombstoned (was intentionally deleted)
+        if(!currentIds.has(item.id)){
           var tombList=_deletedIds[coll]||[];
           if(!tombList.includes(item.id)){
             DB[coll].push(item);
-            console.warn('SAFETY RESTORE: recovered '+coll+' '+item.id+' from local snapshot');
+            console.warn('LOCAL MERGE: restored '+coll+' '+item.id+' ('+item.name+') from local data');
           }
         }
       });
