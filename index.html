@@ -1413,12 +1413,42 @@ async function doLogin(){
   try{
     // Try Firebase Auth first (if available and configured)
     if(firebaseReady){
+      const email=toEmail(id);
       try{
-        const email=toEmail(id);
         await fbAuth.signInWithEmailAndPassword(email,pw);
       }catch(fbErr){
-        console.warn('Firebase Auth failed, using local DB fallback:',fbErr.code);
-        // Fall through to local DB check below
+        console.warn('Firebase Auth failed for '+id+', code:',fbErr.code);
+        // If auth/user-not-found or auth/invalid-credential, the Auth account may not exist
+        // Try to create it on the spot using admin credentials
+        if(fbErr.code==='auth/user-not-found'||fbErr.code==='auth/invalid-credential'||fbErr.code==='auth/too-many-requests'){
+          try{
+            // Sign in as admin first
+            await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');
+            // Find the employee to get their password
+            var empForAuth=DB.employees.find(function(e){return e.id===id.toUpperCase();});
+            var authPw=pw;
+            if(empForAuth&&empForAuth.password){
+              // Use the stored password (not what they typed — they might have typed their name)
+              authPw=empForAuth.password;
+            }
+            try{
+              await fbAuth.createUserWithEmailAndPassword(email,authPw);
+              console.log('[doLogin] Created Auth account for '+id+' with pw length: '+authPw.length);
+              toast('Login account created! Signing in...','info',2000);
+              // Now sign in as the employee with the CORRECT password
+              await fbAuth.signInWithEmailAndPassword(email,authPw);
+            }catch(createErr){
+              console.warn('[doLogin] Auth create failed:',createErr.code,createErr.message);
+              // Sign back out so local login can proceed
+              try{await fbAuth.signOut();}catch(sigo){}
+            }
+          }catch(adminAuthErr){
+            console.warn('[doLogin] Admin auth for account creation failed:',adminAuthErr.message);
+            try{await fbAuth.signOut();}catch(sigo2){}
+          }
+        }else{
+          try{await fbAuth.signOut();}catch(sigo3){}
+        }
       }
     }
     // Always verify against local DB (source of truth)
@@ -4926,6 +4956,43 @@ async function initApp(){
       }
     }catch(checkErr){
       console.error('[initApp] Missing employee check failed:',checkErr);
+    }
+    // === NUCLEAR FIX: Ensure Auth accounts exist for ALL employees ===
+    // This runs on EVERY page load to guarantee phone login works
+    try{
+      console.log('[initApp] Verifying Auth accounts for all '+DB.employees.length+' employees...');
+      try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(adminSignErr){console.warn('[initApp] Admin signin for Auth check:',adminSignErr.message);}
+      var authFixed=0;
+      for(var ai=0;ai<DB.employees.length;ai++){
+        var aEmp=DB.employees[ai];
+        if(!aEmp||!aEmp.id)continue;
+        var aEmail=toEmail(aEmp.id);
+        var aPw=aEmp.password||'emp123';
+        try{
+          await fbAuth.createUserWithEmailAndPassword(aEmail,aPw);
+          authFixed++;
+          console.log('[initApp] Auth CREATED: '+aEmp.id+' ('+aEmp.name+')');
+        }catch(authErr){
+          if(authErr.code==='auth/email-already-in-use'){
+            /* good — account exists */
+          }else{
+            console.warn('[initApp] Auth issue for '+aEmp.id+':',authErr.message);
+          }
+        }
+        // Always re-sign as admin after each attempt
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(reSignErr){}
+      }
+      if(authFixed>0){
+        console.log('[initApp] Created '+authFixed+' missing Auth account(s)! Phone login should now work.');
+        var fbStatus3=document.getElementById('loginFbStatus');
+        if(fbStatus3){
+          fbStatus3.style.display='block';
+          fbStatus3.style.color='var(--green)';
+          fbStatus3.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees + '+authFixed+' login account(s) fixed';
+        }
+      }
+    }catch(authCheckErr){
+      console.error('[initApp] Auth verification failed:',authCheckErr);
     }
   }
 
