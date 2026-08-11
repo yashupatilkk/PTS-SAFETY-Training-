@@ -1075,6 +1075,7 @@ async function forceSyncAllEmployees(){
 
 // === AUTO-DETECT MISSING EMPLOYEES ON ADMIN LOGIN ===
 // Compares local employees vs cloud and pushes any that are missing
+// ENHANCED: If count mismatch detected, does a full force sync to ensure EVERY employee is in cloud
 async function autoSyncMissingEmployees(){
   if(!firebaseReady||!isAdmin)return;
   try{
@@ -1086,9 +1087,34 @@ async function autoSyncMissingEmployees(){
     snap.docs.forEach(function(d){cloudIds.add(d.data().id);});
     
     var missing=localEmps.filter(function(e){return !cloudIds.has(e.id);});
-    if(missing.length===0)return;
+    console.log('[autoSyncMissingEmployees] Local: '+localEmps.length+', Cloud: '+cloudIds.size+', Missing: '+missing.length);
     
-    console.warn('[autoSyncMissingEmployees] Found '+missing.length+' employees NOT in cloud, pushing now...',missing.map(function(e){return e.id;}));
+    if(missing.length===0){
+      // Even if no missing employees, verify AUTH accounts exist for ALL
+      // This fixes the case where Firestore has the employee but Auth account is missing
+      try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+      var authFixCount=0;
+      for(var k=0;k<localEmps.length;k++){
+        var emp3=localEmps[k];
+        if(!emp3||!emp3.id)continue;
+        var email3=toEmail(emp3.id);
+        var pw3=emp3.password||'emp123';
+        try{
+          await fbAuth.createUserWithEmailAndPassword(email3,pw3);
+          authFixCount++;
+          console.log('[autoSyncMissingEmployees] Auth CREATED for existing emp: '+emp3.id);
+        }catch(ae3){
+          if(ae3.code==='auth/email-already-in-use'){/* good */}else{console.warn('[autoSyncMissingEmployees] Auth check for '+emp3.id+':',ae3.message);}
+        }
+        try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+      }
+      if(authFixCount>0){
+        toast(authFixCount+' employee Auth account(s) created! Phone login ready.','success',4000);
+      }
+      return;
+    }
+    
+    console.warn('[autoSyncMissingEmployees] Found '+missing.length+' employee(s) NOT in cloud, pushing now...',missing.map(function(e){return e.id+' ('+e.name+')';}));
     toast('Found '+missing.length+' employee(s) missing from cloud — syncing now...','warning',5000);
     
     // Sign in as admin
@@ -1115,8 +1141,18 @@ async function autoSyncMissingEmployees(){
       }
     }
     
+    // Verify after push
+    var verifySnap=await fbDB.collection('employees').get();
+    var finalCloudCount=verifySnap.size;
+    
     if(pushed>0){
-      toast(pushed+'/'+missing.length+' missing employee(s) synced to cloud! Phone login ready.','success',5000);
+      var finalMsg=pushed+'/'+missing.length+' missing employee(s) synced to cloud! Phone login ready. (Cloud now: '+finalCloudCount+')';
+      toast(finalMsg,'success',5000);
+    }
+    // If still mismatch after push, force sync ALL employees as last resort
+    if(finalCloudCount<localEmps.length){
+      console.warn('[autoSyncMissingEmployees] Still mismatch after push (local:'+localEmps.length+' vs cloud:'+finalCloudCount+'). Running full force sync...');
+      setTimeout(function(){forceSyncAllEmployees();},1000);
     }
   }catch(e){
     console.warn('[autoSyncMissingEmployees] Error:',e);
@@ -1414,6 +1450,30 @@ async function doLogin(){
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
             // Now search again with the fresh data
             emp=DB.employees.find(e=>e.id===empId);
+            // ENHANCED: If employee found in cloud, ensure their Auth account exists
+            // This fixes the case where Firestore has the employee but Auth was never created
+            if(emp&&firebaseReady){
+              var empEmail=toEmail(empId);
+              var empPw=emp.password||'emp123';
+              try{
+                await fbAuth.signInWithEmailAndPassword(empEmail,empPw);
+                console.log('[LOGIN] Auth OK for '+empId);
+              }catch(authTryErr){
+                // Auth failed — try creating the account
+                try{
+                  await fbAuth.createUserWithEmailAndPassword(empEmail,empPw);
+                  console.log('[LOGIN] Auth account CREATED for '+empId);
+                  toast('Login account created for '+emp.name+'. Please try login again.','success',4000);
+                  // Sign out so they can re-login fresh
+                  try{await fbAuth.signOut();}catch(sigoErr){}
+                  return;
+                }catch(createAuthErr){
+                  console.warn('[LOGIN] Auth account create failed for '+empId+':',createAuthErr.message);
+                }
+              }
+              // Sign out of employee auth so the main login flow can proceed
+              try{await fbAuth.signOut();}catch(sigoErr2){}
+            }
           }
         }catch(cloudErr){
           // SHOW the Firebase error — don't hide it!
@@ -1492,6 +1552,7 @@ async function showForgot(){
 }
 
 // Force sync from cloud on login page — used when employee can not login
+// ENHANCED: After loading from cloud, also pushes any local-only employees BACK to cloud
 async function loginForceSync(){
   const syncBtn=document.getElementById('loginSyncBtn');
   const loginBtn=document.getElementById('loginBtn');
@@ -1517,6 +1578,44 @@ async function loginForceSync(){
       }
     }else{
       toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+    }
+    // ENHANCED: After loading from cloud, push any local-only employees BACK to cloud
+    // This fixes the case where admin added employees locally but they never reached Firebase
+    if(firebaseReady&&DB.employees.length>0){
+      try{
+        var snap2=await fbDB.collection('employees').get();
+        var cloudIdSet=new Set();
+        snap2.docs.forEach(function(d){cloudIdSet.add(d.data().id);});
+        var localOnly=DB.employees.filter(function(e){return !cloudIdSet.has(e.id);});
+        if(localOnly.length>0){
+          console.warn('[loginForceSync] Found '+localOnly.length+' local-only employee(s) not in cloud, pushing...');
+          toast('Pushing '+localOnly.length+' employee(s) to cloud...','info',3000);
+          try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+          for(var li=0;li<localOnly.length;li++){
+            var le=localOnly[li];
+            try{
+              await fbDB.collection('employees').doc(String(le.id)).set(le,{merge:true});
+              var lEmail=toEmail(le.id);
+              var lPw=le.password||'emp123';
+              try{await fbAuth.createUserWithEmailAndPassword(lEmail,lPw);}catch(lae){
+                if(lae.code!=='auth/email-already-in-use')console.warn('Auth for '+le.id+':',lae.message);
+              }
+              try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
+              console.log('[loginForceSync] Pushed employee: '+le.id+' ('+le.name+')');
+            }catch(leErr){
+              console.error('[loginForceSync] Failed to push '+le.id+':',leErr);
+            }
+          }
+          toast(localOnly.length+' employee(s) pushed to cloud! Try login again.','success',5000);
+          // Update the count display
+          var finalSnap=await fbDB.collection('employees').get();
+          if(fbStatus){
+            fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+finalSnap.size+' employees (Local: '+DB.employees.length+')';
+          }
+        }
+      }catch(pushErr){
+        console.warn('[loginForceSync] Push error:',pushErr);
+      }
     }
   }catch(e){
     toast('Sync failed: '+e.message,'error',4000);
@@ -4395,11 +4494,35 @@ function saveDB(){
     // Create tombstone-filtered copies ONLY for Firebase upload
     // This prevents deleted items from being resurrected in the cloud
     // WITHOUT touching the in-memory DB (which is the source of truth for localStorage)
+    // BUG FIX: Clean stale tombstones — if an employee EXISTS in DB.employees, remove their tombstone
+    // This handles the case where an employee was deleted then re-added with the same ID
+    if(_deletedIds.employees?.length){
+      var activeEmpIds=new Set(DB.employees.map(function(e){return e.id;}));
+      var staleEmpTombs=_deletedIds.employees.filter(function(tid){return activeEmpIds.has(tid);});
+      if(staleEmpTombs.length>0){
+        console.warn('saveDB: Cleaning '+staleEmpTombs.length+' STALE employee tombstone(s):',staleEmpTombs);
+        _deletedIds.employees=_deletedIds.employees.filter(function(tid){return !activeEmpIds.has(tid);});
+        saveTombstones();
+      }
+    }
+    if(_deletedIds.trainings?.length){
+      var activeTrnIds=new Set(DB.trainings.map(function(t){return t.id;}));
+      var staleTrnTombs=_deletedIds.trainings.filter(function(tid){return activeTrnIds.has(tid);});
+      if(staleTrnTombs.length>0){
+        console.warn('saveDB: Cleaning '+staleTrnTombs.length+' STALE training tombstone(s):',staleTrnTombs);
+        _deletedIds.trainings=_deletedIds.trainings.filter(function(tid){return !activeTrnIds.has(tid);});
+        saveTombstones();
+      }
+    }
     var cleanEmployees=_deletedIds.employees?.length?DB.employees.filter(function(e){return !_deletedIds.employees.includes(e.id);}):DB.employees;
     var cleanTrainings=_deletedIds.trainings?.length?DB.trainings.filter(function(t){return !_deletedIds.trainings.includes(t.id);}):DB.trainings;
     var cleanSops=_deletedIds.sops?.length?DB.sops.filter(function(s){return !_deletedIds.sops.includes(s.id);}):DB.sops;
     var cleanTestResults=_deletedIds.testResults?.length?DB.testResults.filter(function(r){return !_deletedIds.testResults.includes(r.id);}):DB.testResults;
     var cleanCerts=_deletedIds.certificates?.length?DB.certificates.filter(function(c){return !_deletedIds.certificates.includes(c.num);}):DB.certificates;
+    // WARN if clean count differs from DB count (means tombstones are filtering active items)
+    if(cleanEmployees.length!==DB.employees.length){
+      console.error('saveDB: WARNING! cleanEmployees('+cleanEmployees.length+') != DB.employees('+DB.employees.length+'). Filtered IDs:',DB.employees.map(function(e){return e.id;}).filter(function(id){return _deletedIds.employees?.includes(id);}));
+    }
     if(_syncBusy){
       _pendingSave=true;
       console.log('saveDB: sync busy, queuing pending save');
