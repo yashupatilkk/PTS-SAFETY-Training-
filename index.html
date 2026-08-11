@@ -4326,16 +4326,16 @@ async function loadDBFromFirestore(){
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
     // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
     var localSnapshot={
-      employees:JSON.parse(JSON.stringify(DB.employees)),
-      trainings:JSON.parse(JSON.stringify(DB.trainings)),
-      sops:JSON.parse(JSON.stringify(DB.sops)),
-      testResults:JSON.parse(JSON.stringify(DB.testResults)),
-      certificates:JSON.parse(JSON.stringify(DB.certificates)),
-      notifications:JSON.parse(JSON.stringify(DB.notifications))
+      employees:JSON.parse(JSON.stringify(DB.employees||[])),
+      trainings:JSON.parse(JSON.stringify(DB.trainings||[])),
+      sops:JSON.parse(JSON.stringify(DB.sops||[])),
+      testResults:JSON.parse(JSON.stringify(DB.testResults||[])),
+      certificates:JSON.parse(JSON.stringify(DB.certificates||[])),
+      notifications:JSON.parse(JSON.stringify(DB.notifications||[]))
     };
-    var localEmpMap=Object.fromEntries(DB.employees.map(e=>[e.id,e]));
-    var localTrnMap=Object.fromEntries(DB.trainings.map(t=>[t.id,t]));
-    var localSopMap=Object.fromEntries(DB.sops.map(s=>[s.id,s]));
+    var localEmpMap=Object.fromEntries((DB.employees||[]).map(e=>[e.id,e]));
+    var localTrnMap=Object.fromEntries((DB.trainings||[]).map(t=>[t.id,t]));
+    var localSopMap=Object.fromEntries((DB.sops||[]).map(s=>[s.id,s]));
 
     // Load each collection individually — one failure won't break the rest
     const cols=[
@@ -4353,8 +4353,6 @@ async function loadDBFromFirestore(){
       }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
       ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
-      ['videos','id',d=>{
-      }],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
         const cloudIds=new Set(cloudSops.map(s=>s.id));
@@ -4379,7 +4377,8 @@ async function loadDBFromFirestore(){
     // === SAFETY RESTORE: bring back any locally-added item that was lost ===
     // An item is "locally-added" if it has _localAddedAt and is NOT in the tombstone list
     // This catches any edge case where cloud merge or tombstones accidentally drop data
-    ['employees','trainings','videos','sops'].forEach(function(coll){
+    ['employees','trainings','sops'].forEach(function(coll){
+      if(!Array.isArray(DB[coll]))return;
       var snapshotIds=new Set(DB[coll].map(function(x){return x.id;}));
       localSnapshot[coll].forEach(function(item){
         if(!snapshotIds.has(item.id)&&item._localAddedAt){
