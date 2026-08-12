@@ -3546,7 +3546,7 @@ function submitQuiz(){
       var trn=DB.trainings.find(function(t){return t.name===r.training;});
       var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
       var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
-      await fetch(sheetUrl,{method:"POST",mode:"no-cors",body:JSON.stringify({sheet:"Training Data",data:[row]}),headers:{"Content-Type":"text/plain"}});
+      await fetch(sheetUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"json="+encodeURIComponent(JSON.stringify({sheet:"Training Data",data:[row]}))});
       console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
       // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
       queueSheetSync(["Training Data","Certificates"]);
@@ -4284,8 +4284,9 @@ function buildSopPayload(){
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
-  var body=JSON.stringify({sheet:sheetName,data:payload});
-  await fetch(url,{method:"POST",mode:"no-cors",body:body,headers:{"Content-Type":"text/plain"}});
+  var json=JSON.stringify({sheet:sheetName,data:payload});
+  // Use form-urlencoded — survives Google Script redirects (no-ccors drops POST body on redirect)
+  await fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"json="+encodeURIComponent(json)});
   return {sent:payload.length};
 }
 async function syncToGoogleSheet(){
