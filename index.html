@@ -1386,7 +1386,14 @@ function startApp(){
   gotoView("dashboard");
   startAutoSync();
   // Auto-sync all data to Google Sheet when admin logs in
-  if(isAdmin)saveToSheets();
+  if(isAdmin){
+    toast('Pushing data to Google Sheets...','info',3000);
+    saveToSheets().then(function(){
+      toast('Data pushed to cloud! Check your Google Sheet.','success',4000);
+    }).catch(function(err){
+      toast('Cloud sync issue: '+err.message,'error',6000);
+    });
+  }
   // Auto-detect and fix employees missing from cloud (fixes phone login)
   // Auto-sync handled by startAutoSync() via Google Sheets
   toast(`Welcome back, ${currentUser.name||currentUser.username}!`,"success");
@@ -3761,8 +3768,36 @@ function buildTrainingPayload(){
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
   var body=JSON.stringify({sheet:sheetName,data:payload});
-  await fetch(url,{method:"POST",mode:"no-cors",body:body,headers:{"Content-Type":"text/plain"}});
-  return {sent:payload.length};
+  // Use XMLHttpRequest — handles Google's 302 redirect correctly
+  // fetch with no-cors silently loses POST body through Google's redirect
+  return new Promise(function(resolve){
+    try{
+      var xhr=new XMLHttpRequest();
+      xhr.open('POST',url,true);
+      xhr.setRequestHeader('Content-Type','text/plain');
+      xhr.onload=function(){
+        if(xhr.status>=200&&xhr.status<300){
+          try{var r=JSON.parse(xhr.responseText);console.log('[Push] '+sheetName+': OK',r);}catch(e){console.log('[Push] '+sheetName+': sent');}
+          resolve({sent:payload.length,ok:true});
+        }else{
+          console.warn('[Push] '+sheetName+': HTTP '+xhr.status);
+          // Fallback: sendBeacon (fire and forget, always works)
+          navigator.sendBeacon(url,body);
+          resolve({sent:payload.length,ok:false});
+        }
+      };
+      xhr.onerror=function(){
+        console.warn('[Push] '+sheetName+': XHR error — using sendBeacon');
+        navigator.sendBeacon(url,body);
+        resolve({sent:payload.length,ok:false});
+      };
+      xhr.send(body);
+    }catch(e){
+      console.error('[Push] '+sheetName+':',e);
+      navigator.sendBeacon(url,body);
+      resolve({sent:payload.length,ok:false});
+    }
+  });
 }
 async function syncToGoogleSheet(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
