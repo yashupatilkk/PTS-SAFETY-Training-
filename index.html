@@ -3546,7 +3546,7 @@ function submitQuiz(){
       var trn=DB.trainings.find(function(t){return t.name===r.training;});
       var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
       var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
-      await fetch(sheetUrl+"?json="+encodeURIComponent(JSON.stringify({sheet:"Training Data",data:[row]})),{method:"GET",mode:"no-cors"});
+      (function(){var img=new Image();img.src=sheetUrl+"?json="+encodeURIComponent(JSON.stringify({sheet:"Training Data",data:[row]}));})();
       console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
       // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
       queueSheetSync(["Training Data","Certificates"]);
@@ -4284,13 +4284,20 @@ function buildSopPayload(){
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
-  // Split large payloads into chunks of 50 rows (URL length limit ~8000 chars)
-  var CHUNK=50;
+  var CHUNK=30;
   for(var i=0;i<payload.length;i+=CHUNK){
     var chunk=payload.slice(i,i+CHUNK);
     var json=JSON.stringify({sheet:sheetName,data:chunk});
-    // GET with query param — data survives Google Script redirects (POST body gets dropped)
-    await fetch(url+"?json="+encodeURIComponent(json),{method:"GET",mode:"no-cors"});
+    // Use Image tag — 100% reliable, never blocked by CORS
+    await new Promise(function(ok){
+      var img=new Image();
+      img.onload=function(){ok();};
+      img.onerror=function(){ok();};
+      img.src=url+"?json="+encodeURIComponent(json);
+      setTimeout(ok,4000);
+    });
+    // Small delay between chunks
+    if(i+CHUNK<payload.length) await new Promise(function(ok){setTimeout(ok,500);});
   }
   return {sent:payload.length};
 }
