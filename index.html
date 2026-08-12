@@ -895,7 +895,7 @@ let DB={
   notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
-    sheetUrl:"https://script.google.com/macros/s/AKfycbxXwy7me56U0PxqTSH3uE932E3WdVyEWV9oEtO9JwRFQWaT591VVu_bdT-f_uiBJou3Vw/exec",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    sheetUrl:"https://script.google.com/macros/s/AKfycbwfGTkC5qGMaVquAFz0P4hVuQ8osx9lrURiSoAUlqGLvL3VNt-Et4hET_izZWddIAUHyw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -2236,7 +2236,8 @@ async function saveEmployee(){
   try{renderEmployees();updateBadges();}catch(e){console.warn('renderEmployees error:',e);}
   saved=true;
   toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
-  // 5. Firebase sync in BACKGROUND (non-blocking)
+  // Auto-sync to Google Sheet (Employees sheet)
+  queueSheetSync(["Employees"]);
   // CRITICAL FIX: Write directly to Firestore FIRST, then saveDB separately
   // Do NOT let _syncBusy block the direct employee write
   if(firebaseReady){
@@ -2360,7 +2361,7 @@ function updateEmployee(id){
   e.shift=document.getElementById("ee_shift").value;e.status=document.getElementById("ee_status").value;
   e.location=document.getElementById("ee_loc").value;
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  closeModal();renderEmployees();saveDB();toast("Employee updated","success");
+  closeModal();renderEmployees();saveDB();queueSheetSync(["Employees"]);toast("Employee updated","success");
 }
 function viewEmpHistory(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
@@ -2457,6 +2458,8 @@ async function deleteEmp(id){
   // === STEP 6: Mark deletion time ===
   _lastDeleteTime=Date.now();
   toast("Employee \""+empName+"\" ("+id+") deleted permanently","warning");
+  // Auto-sync to Google Sheet (all related sheets)
+  queueSheetSync(["Employees","Training Data","Certificates"]);
 }
 function exportEmpExcel(){
   const ws=XLSX.utils.json_to_sheet(DB.employees.map(e=>({
@@ -3545,6 +3548,8 @@ function submitQuiz(){
       var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
       await fetch(sheetUrl,{method:"POST",mode:"no-cors",body:JSON.stringify({sheet:"Training Data",data:[row]}),headers:{"Content-Type":"text/plain"}});
       console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
+      // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
+      queueSheetSync(["Training Data","Certificates"]);
     }catch(e){console.warn('Google Sheets auto-sync error:',e);}
   })();
   quizState.active=false;
@@ -4084,43 +4089,52 @@ function renderSettings(){
       </div>
       <!-- GOOGLE SHEETS SYNC -->
       <div class="form-section" style="grid-column:1/-1;border:1px solid rgba(62,207,142,.25);background:rgba(62,207,142,.04);">
-        <div class="form-section-title" style="color:var(--green);"><span class="mat-ico">table_chart</span> Google Sheets Sync</div>
+        <div class="form-section-title" style="color:var(--green);"><span class="mat-ico">table_chart</span> Google Sheets Auto-Sync <span id="sheetSyncIndicator" style="font-size:11px;font-weight:400;margin-left:8px;"></span></div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;">
-          Paste your <b style="color:var(--txt);">Google Apps Script Web App URL</b> below to push all training completion data directly to your Google Sheet in one click.<br>
-          <span style="color:var(--amber);">📌 How to set up:</span> In Google Sheets → Extensions → Apps Script → paste the script below → Deploy as Web App → Access: <b>Anyone</b> → copy the URL here.
+          Automatically pushes ALL data to Google Sheets whenever anything changes (employee added, quiz taken, certificate issued, etc.). Creates <b style="color:var(--txt);">6 tabs</b>: Training Data, Employees, Trainings, Certificates, Equipment, SOPs.
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);margin-bottom:10px;line-height:1.8;overflow-x:auto;">
-          function doPost(e){<br>
-          &nbsp;&nbsp;var body=JSON.parse(e.postData.contents);<br>
-          &nbsp;&nbsp;var sheetName=body.sheet||"Training Data";<br>
-          &nbsp;&nbsp;var data=body.data||body;<br>
-          &nbsp;&nbsp;if(!Array.isArray(data))return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
-          &nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
-          &nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
-          &nbsp;&nbsp;if(!sheet)sheet=ss.insertSheet(sheetName);<br>
-          &nbsp;&nbsp;if(sheetName==="Training Data"){<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["Date","Emp ID","Name","Department","Training","Category","Score (%)","Correct","Wrong","Total Q","Result","Cert Required","Certificate No","Completion Date"]);<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.date,r.empId,r.empName,r.dept,r.training,r.cat,r.score,r.correct,r.wrong,r.total,r.result,r.certRequired,r.certNo,r.completionDate]);});<br>
-          &nbsp;&nbsp;}else if(sheetName==="Employees"){<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["Emp ID","Name","Department","Designation","Phone","Tests Taken","Tests Passed","Certificates","Trainings Assigned"]);<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.id,r.name,r.dept,r.desig,r.phone,r.testsTaken,r.testsPassed,r.certificates,r.trainingsAssigned]);});<br>
-          &nbsp;&nbsp;}else if(sheetName==="Trainings"){<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(["ID","Name","Category","Trainer","Date","Duration","Enrolled","Completed","Passing %","Cert Required","Questions"]);<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow([r.id,r.name,r.cat,r.trainer,r.date,r.duration,r.enrolled,r.completed,r.passing,r.certRequired,r.questions]);});<br>
-          &nbsp;&nbsp;}else{<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;var keys=Object.keys(data[0]||{});<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0)sheet.appendRow(keys);<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){sheet.appendRow(keys.map(function(k){return r[k]||"";}));});<br>
-          &nbsp;&nbsp;}<br>
-          &nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
-          }
+        <!-- Auto-Sync Toggle -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--txt);">
+            <input type="checkbox" id="st_sheetAutoSync" ${DB.settings.sheetAutoSync!==false?"checked":""} onchange="DB.settings.sheetAutoSync=this.checked;saveSettings();" style="width:18px;height:18px;accent-color:var(--green);">
+            Auto-Sync to Google Sheets
+          </label>
+          <span style="font-size:11px;color:var(--muted);margin-left:auto;">${DB.settings.sheetAutoSync!==false?'<span style=\'color:var(--green);\'>ON</span> — Data auto-updates on every change':'<span style=\'color:var(--red);\'>OFF</span> — Only manual sync'}  </span>
         </div>
+        <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.7;overflow-x:auto;max-height:260px;overflow-y:auto;">
+          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script):</div>
+function doPost(e){<br>
+&nbsp;&nbsp;try{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var body=JSON.parse(e.postData.contents);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var sheetName=body.sheet||"Data";<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var data=body.data||[];<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(!Array.isArray(data)||data.length===0)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(!sheet) sheet=ss.insertSheet(sheetName);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;// Clear old data and rewrite (keeps sheet in sync with app)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()>0) sheet.deleteRows(1,sheet.getLastRow());<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var headers=Object.keys(data[0]);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return r[k]||"";}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;});<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;}catch(err){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"error",msg:err.toString()}));<br>
+&nbsp;&nbsp;}<br>
+}<br>
+function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API is running. Use POST to sync data.");}
+        </div>
+        <div style="font-size:11px;color:var(--amber);margin-bottom:8px;"><b>STEP 2:</b> Deploy > New Deployment > Web App > Execute as: Me > Access: <b>Anyone</b> > Deploy. Copy the URL below.</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <input class="form-control-sm" id="st_sheeturl" placeholder="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec" value="${DB.settings.sheetUrl||""}" style="flex:1;min-width:260px;">
-          <button class="btn btn-green" onclick="syncToGoogleSheet()"><span class="mat-ico">sync</span> Sync Now</button>
+          <button class="btn btn-green" onclick="syncToGoogleSheet()"><span class="mat-ico">sync</span> Sync All Now</button>
           <button class="btn btn-outline" onclick="testSheetConnection()"><span class="mat-ico">wifi_tethering</span> Test</button>
         </div>
         <div id="syncStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (quiz results), <b>Employees</b> (master list + stats), <b>Trainings</b> (all trainings + progress), <b>Certificates</b> (all issued certs), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures). Each sync replaces the sheet data to stay in sync.</div>
       </div>
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">backup</span> Data Management</div>
@@ -4152,6 +4166,8 @@ function saveSettings(){
   DB.settings.companyLogo=document.getElementById("st_logo")?.value||DB.settings.companyLogo;
   DB.settings.minCertScore=parseInt(document.getElementById("st_mincert")?.value)||70;
   DB.settings.sheetUrl=(document.getElementById("st_sheeturl")?.value||"").trim();
+  var autoSyncEl=document.getElementById("st_sheetAutoSync");
+  if(autoSyncEl) DB.settings.sheetAutoSync=autoSyncEl.checked;
   toast("Settings saved","success");saveDB();
 }
 function addTrainer(){const v=document.getElementById("newTrainer")?.value.trim();if(!v)return;DB.settings.trainerList.push(v);document.getElementById("newTrainer").value="";renderSettings();saveDB();toast("Trainer added","success");}
@@ -4243,7 +4259,7 @@ function buildEmployeePayload(){
     var passCount=DB.testResults.filter(r=>r.empId===e.id&&r.pass).length;
     var certCount=DB.certificates.filter(c=>c.empId===e.id).length;
     var assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(e.id)).length;
-    return{id:e.id,name:e.name,dept:e.dept,desig:e.desig||"",phone:e.phone||"",testsTaken:testCount,testsPassed:passCount,certificates:certCount,trainingsAssigned:assignedTrns};
+    return{id:e.id,name:e.name,dept:e.dept||"",desig:e.desig||"",phone:e.mobile||e.phone||"",email:e.email||"",shift:e.shift||"",status:e.status||"active",location:e.location||"",joining:e.joining||"",testsTaken:testCount,testsPassed:passCount,certificates:certCount,trainingsAssigned:assignedTrns};
   });
 }
 function buildTrainingPayload(){
@@ -4251,8 +4267,20 @@ function buildTrainingPayload(){
     var enrolled=(t.enrolled||[]).length;
     var passResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
     var completed=Math.max((t.completed||[]).length,passResults.size);
-    return{id:t.id,name:t.name,cat:t.cat,trainer:t.trainer,date:t.date||"",duration:t.duration||"",enrolled:enrolled,completed:completed,passing:t.passing||70,certRequired:t.cert?"Yes":"No",questions:(t.questions||[]).length};
+    return{id:t.id,name:t.name,cat:t.cat,trainer:t.trainer,date:t.date||"",duration:t.duration||"",enrolled:enrolled,completed:completed,passing:t.passing||70,certRequired:t.cert?"Yes":"No",questions:(t.questions||[]).length,youtubeLink:t.youtubeLink||""};
   });
+}
+function buildCertificatePayload(){
+  return DB.certificates.map(c=>{
+    const emp=DB.employees.find(e=>e.id===c.empId);
+    return{certNo:c.num,empId:c.empId,empName:emp?emp.name:(c.empName||""),department:emp?emp.dept:(c.dept||""),training:c.training||"",issueDate:c.issueDate||c.date||"",expiryDate:c.expiry||"",score:c.score||"",status:c.status||"Active"};
+  });
+}
+function buildEquipmentPayload(){
+  return EQUIPMENT_DATA.map(eq=>({name:eq.name,category:eq.category||"",checklist:(eq.checklist||[]).join(", "),type:eq.type||"Standard"}));
+}
+function buildSopPayload(){
+  return DB.sops.map(s=>({id:s.id,title:s.title||s.name||"",category:s.cat||"",version:s.version||"1.0",created:s.created||"",applicableDept:(s.dept||"").toString(),status:s.status||"Active"}));
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
@@ -4265,64 +4293,118 @@ async function syncToGoogleSheet(){
   if(!url){toast("Paste your Google Apps Script URL in Settings first","error");return;}
   DB.settings.sheetUrl=url;
   const statusEl=document.getElementById("syncStatus");
-  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">⏳ Sending all data to Google Sheets…</span>';
-  toast("Syncing ALL data to Google Sheets…","info",2000);
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">Sending ALL data to Google Sheets...</span>';
+  toast("Syncing ALL data to Google Sheets...","info",2000);
   try{
     var totalSent=0;
+    var details=[];
     // 1. Test Results
     var testPayload=buildSyncPayload();
-    if(testPayload.length>0){
-      var r1=await pushToSheet(url,testPayload,"Training Data");
-      totalSent+=r1.sent;
-    }
+    if(testPayload.length>0){var r1=await pushToSheet(url,testPayload,"Training Data");totalSent+=r1.sent;details.push(testPayload.length+' test results');}
     // 2. Employees
     var empPayload=buildEmployeePayload();
-    if(empPayload.length>0){
-      var r2=await pushToSheet(url,empPayload,"Employees");
-      totalSent+=r2.sent;
-    }
+    if(empPayload.length>0){var r2=await pushToSheet(url,empPayload,"Employees");totalSent+=r2.sent;details.push(empPayload.length+' employees');}
     // 3. Trainings
     var trnPayload=buildTrainingPayload();
-    if(trnPayload.length>0){
-      var r3=await pushToSheet(url,trnPayload,"Trainings");
-      totalSent+=r3.sent;
-    }
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">✅ Sync complete on '+new Date().toLocaleString()+' — '+testPayload.length+' test results, '+empPayload.length+' employees, '+trnPayload.length+' trainings sent. Check your Google Sheet (3 tabs).</span>';
-    toast('✅ All data synced to Google Sheet! ('+totalSent+' records)','success',4000);
-    DB.notifications.unshift({id:genId("N"),msg:'Google Sheets sync: '+totalSent+' records sent (Tests + Employees + Trainings).',time:"Just now",read:false,icon:"table_chart"});
+    if(trnPayload.length>0){var r3=await pushToSheet(url,trnPayload,"Trainings");totalSent+=r3.sent;details.push(trnPayload.length+' trainings');}
+    // 4. Certificates
+    var certPayload=buildCertificatePayload();
+    if(certPayload.length>0){var r4=await pushToSheet(url,certPayload,"Certificates");totalSent+=r4.sent;details.push(certPayload.length+' certificates');}
+    // 5. Equipment
+    var eqPayload=buildEquipmentPayload();
+    if(eqPayload.length>0){var r5=await pushToSheet(url,eqPayload,"Equipment");totalSent+=r5.sent;details.push(eqPayload.length+' equipment');}
+    // 6. SOPs
+    var sopPayload=buildSopPayload();
+    if(sopPayload.length>0){var r6=await pushToSheet(url,sopPayload,"SOPs");totalSent+=r6.sent;details.push(sopPayload.length+' SOPs');}
+    _lastSheetSync=Date.now();
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Sync complete on '+new Date().toLocaleString()+' — '+totalSent+' records across '+details.length+' sheets ('+details.join(', ')+'). Check your Google Sheet tabs.</span>';
+    toast('All data synced to Google Sheet! ('+totalSent+' records in 6 tabs)','success',4000);
+    DB.notifications.unshift({id:genId("N"),msg:'Google Sheets sync: '+totalSent+' records sent ('+details.join(', ')+').',time:"Just now",read:false,icon:"table_chart"});
     updateBadges();
   }catch(err){
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">❌ Sync failed — check the URL is correct and Apps Script is deployed as Web App with access "Anyone".</span>';
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">Sync failed — check the URL is correct and Apps Script is deployed as Web App with access "Anyone".</span>';
     toast("Sync failed. Check the Apps Script URL.","error",4000);
   }
 }
-// Auto-sync to Google Sheet (fire-and-forget, used on admin login)
-function autoSyncToSheet(){
+// === SMART AUTO-SYNC TO GOOGLE SHEETS ===
+// Debounced: waits 2 seconds after last data change, then syncs ALL sheets at once
+// This prevents flooding Google Sheets with requests on rapid changes
+let _sheetSyncTimer=null;
+let _lastSheetSync=0;
+let _sheetSyncRunning=false;
+
+// Queue a sheet sync — call this after ANY data change (debounced automatically)
+function queueSheetSync(sheetNames){
+  if(!isAdmin) return; // Only admin can sync
+  if(!(DB.settings.sheetAutoSync!==false)) return; // Auto-sync OFF by default, needs to be enabled
   var url=DB.settings.sheetUrl||"";
-  if(!url)return;
-  setTimeout(async function(){
-    try{
-      var testPayload=buildSyncPayload();
-      var empPayload=buildEmployeePayload();
-      var trnPayload=buildTrainingPayload();
-      if(testPayload.length>0)await pushToSheet(url,testPayload,"Training Data");
-      if(empPayload.length>0)await pushToSheet(url,empPayload,"Employees");
-      if(trnPayload.length>0)await pushToSheet(url,trnPayload,"Trainings");
-      console.log('Auto-sync to Google Sheet: '+testPayload.length+' tests, '+empPayload.length+' employees, '+trnPayload.length+' trainings');
-    }catch(e){console.warn('Auto Google Sheet sync error:',e);}
-  },3000);
+  if(!url) return;
+  // Store which sheets need syncing (accumulates until timer fires)
+  if(!window._pendingSheetSyncs) window._pendingSheetSyncs=new Set();
+  if(!sheetNames) sheetNames=["Training Data","Employees","Trainings","Certificates","Equipment","SOPs"];
+  sheetNames.forEach(function(s){window._pendingSheetSyncs.add(s);});
+  // Debounce: reset timer on each call
+  if(_sheetSyncTimer) clearTimeout(_sheetSyncTimer);
+  _sheetSyncTimer=setTimeout(function(){_sheetSyncTimer=null;executeSheetSync();},2000);
 }
+
+// Execute the actual sync for all queued sheets
+async function executeSheetSync(){
+  if(_sheetSyncRunning) return; // Prevent concurrent syncs
+  var url=DB.settings.sheetUrl||"";
+  if(!url) return;
+  if(!window._pendingSheetSyncs||window._pendingSheetSyncs.size===0) return;
+  var sheetsToSync=Array.from(window._pendingSheetSyncs);
+  window._pendingSheetSyncs.clear();
+  _sheetSyncRunning=true;
+  console.log('[Sheet Auto-Sync] Starting sync for: '+sheetsToSync.join(', '));
+  try{
+    var totalSent=0;
+    if(sheetsToSync.includes("Training Data")){
+      var p=buildSyncPayload();if(p.length>0){await pushToSheet(url,p,"Training Data");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Employees")){
+      var p=buildEmployeePayload();if(p.length>0){await pushToSheet(url,p,"Employees");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Trainings")){
+      var p=buildTrainingPayload();if(p.length>0){await pushToSheet(url,p,"Trainings");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Certificates")){
+      var p=buildCertificatePayload();if(p.length>0){await pushToSheet(url,p,"Certificates");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Equipment")){
+      var p=buildEquipmentPayload();if(p.length>0){await pushToSheet(url,p,"Equipment");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("SOPs")){
+      var p=buildSopPayload();if(p.length>0){await pushToSheet(url,p,"SOPs");totalSent+=p.length;}
+    }
+    _lastSheetSync=Date.now();
+    console.log('[Sheet Auto-Sync] Done: '+totalSent+' records across '+sheetsToSync.length+' sheets');
+    // Update status indicator if visible
+    var si=document.getElementById('sheetSyncIndicator');
+    if(si){si.style.color='var(--green)';si.innerHTML='<span class="mat-ico" style="font-size:12px;">check_circle</span> Sheet synced';setTimeout(function(){si.innerHTML='';},3000);}
+  }catch(err){
+    console.warn('[Sheet Auto-Sync] Error:',err);
+  }
+  _sheetSyncRunning=false;
+}
+
+// Legacy: Auto-sync on admin login (full sync)
+function autoSyncToSheet(){
+  queueSheetSync(); // Now uses the debounced system — syncs ALL sheets
+}
+
 async function testSheetConnection(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
   if(!url){toast("Enter the Apps Script URL first","error");return;}
   const statusEl=document.getElementById("syncStatus");
-  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">⏳ Testing connection…</span>';
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">Testing connection...</span>';
   try{
     await pushToSheet(url,[{test:true}],"Training Data");
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">✅ Connection test OK! Apps Script is reachable. Run "Sync Now" to push all your data (Tests + Employees + Trainings).</span>';
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Connection OK! Apps Script is reachable. Enable "Auto-Sync" toggle and run "Sync Now" to push all data.</span>';
     toast("Connection test OK","success");
   }catch{
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">⚠ Could not reach the URL — verify it is deployed as a Web App with access set to "Anyone".</span>';
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">Could not reach URL — verify it is deployed as Web App with access "Anyone".</span>';
     toast("Connection test failed","error");
   }
 }
@@ -4692,7 +4774,7 @@ function saveDB(){
         console.log('saveDB: running pending save after error');
         await saveDB();
       }
-    }).finally(()=>{_syncBusy=false;});
+    }).finally(()=>{_syncBusy=false;queueSheetSync();});
     return ret; // Return promise so callers can await it
   }
   return Promise.resolve();
