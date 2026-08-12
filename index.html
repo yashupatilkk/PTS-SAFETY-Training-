@@ -11,7 +11,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<!-- Firebase removed — now using Google Sheets as backend -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.youtube.com/iframe_api"></script>
 <style>
 :root{--amber:#ffb020;--amber-d:#e0961a;--amber-light:rgba(255,176,32,.12);--red:#e8483a;--green:#3ecf8e;--orange:#f0883e;--purple:#8b6de8;--blue:#3ea0e8;--r:12px;--r-sm:8px;--r-lg:18px;--sidebar-w:260px;--stripe:repeating-linear-gradient(45deg,#151515 0 14px,var(--amber) 14px 28px);--trans:.2s ease;}
@@ -499,9 +501,8 @@ select.form-control-sm{background:var(--sur2);}
       </div>
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
       <div id="loginFbStatus" style="display:none;font-size:11px;text-align:center;margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05);"></div>
-      <button class="btn-primary-full" id="loginBtn" onclick="doLogin()">PTS SAFETY SIGN IN</button>
+      <button class="btn-primary-full" id="loginBtn" onclick="doLogin()" disabled><span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Loading data...</button>
       <button class="link-btn" id="loginSyncBtn" style="margin-top:8px;display:none;" onclick="loginForceSync()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry</button>
-
 
     </div>
     <div class="login-footer">PTS SAFETY — Training Management System</div>
@@ -894,7 +895,7 @@ let DB={
   notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
-    sheetUrl:"https://script.google.com/macros/s/AKfycbzOL8tRg9UM6Wrb-n74N9YgVIPDZT8C_fZBUBTxZKDErQ_YR5ypx6msGrqufnSXiobn-w/exec",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    sheetUrl:"https://script.google.com/macros/s/AKfycbxXwy7me56U0PxqTSH3uE932E3WdVyEWV9oEtO9JwRFQWaT591VVu_bdT-f_uiBJou3Vw/exec",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -902,318 +903,527 @@ let DB={
 };
 
 /* ============================================================
-   GOOGLE SHEETS BACKEND — Firebase-Like Auto Sync
-   ============================================================
-// Every saveDB() → instant push to Google Sheets (debounced 500ms)
-// Auto-pull from sheets every 15 seconds
-// Employee phone login → pulls fresh data from sheets
-// Admin login → pushes all + pulls any changes from other devices
+   FIREBASE CONFIG
+============================================================ */
+const firebaseConfig={
+  apiKey:"AIzaSyBo6I9OrkVn1Bcj4hsdH11mj-X42ZEx3b8",
+  authDomain:"pts-safety-training.firebaseapp.com",
+  projectId:"pts-safety-training",
+  storageBucket:"pts-safety-training.firebasestorage.app",
+  messagingSenderId:"209658017889",
+  appId:"1:209658017889:web:7a7070aa1b146ce8805220",
+  measurementId:"G-GVX3V80NT9"
+};
+firebase.initializeApp(firebaseConfig);
+const fbAuth=firebase.auth();
+const fbDB=firebase.firestore();
+let firebaseReady=false;
+let dbLoadPromise=null;
 
-let sheetReady = false;
-let _syncBusy = false;
-let _syncBusySince = 0;
-let _pendingSave = false;
-let _lastSyncTime = 0;
-let _lastDeleteTime = 0;
-let _saveDebounceTimer = null;
-let _syncCount = 0;  // How many syncs completed (for display)
+// HELPER: Authenticate as admin using the STORED password from DB, with fallback
+// This fixes the bug where hardcoded 'admin123' fails if admin changed their password
+async function authAsAdmin(){
+  if(fbAuth.currentUser){try{var email=fbAuth.currentUser.email;if(email&&email.split('@')[0].toLowerCase()==='admin')return true;}catch(e){}}
+  var adminRecord=DB.admins.find(function(a){return a.username==='admin';});
+  var passwords=adminRecord?[adminRecord.password,'admin123']:['admin123'];
+  for(var i=0;i<passwords.length;i++){
+    try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[i]);console.log('[authAsAdmin] OK with password index '+i);return true;}catch(e){console.warn('[authAsAdmin] Failed with password index '+i+':',e.message);}
+  }
+  console.error('[authAsAdmin] ALL passwords failed!');
+  return false;
+}
 
-function getSheetUrl() {
-    // ALWAYS use the hardcoded URL — this is the single source of truth
-    // so every device (GitHub Pages, phone, etc.) syncs to the same sheet
-    return "https://script.google.com/macros/s/AKfycbzOL8tRg9UM6Wrb-n74N9YgVIPDZT8C_fZBUBTxZKDErQ_YR5ypx6msGrqufnSXiobn-w/exec";
+function toEmail(user){
+  if(!user)return null;
+  return user.toLowerCase().replace(/[^a-z0-9]/g,'')+'@pts-safety.app';
 }
-// ==================== PUSH: Save all data to Google Sheets ====================
-// Called by saveDB() on every data change (debounced)
-// Uses POST with no-cors (always works, no CORS issues)
-async function saveToSheets() {
-    var url = getSheetUrl();
-    if (!url) return;
-    if (_syncBusy) { _pendingSave = true; return; }
-    _syncBusy = true;
-    _syncBusySince = Date.now();
-    updateSyncUI('syncing');
-    try {
-        var r = await Promise.allSettled([
-            pushToSheet(url, DB.employees || [], 'Employees'),
-            pushToSheet(url, (DB.trainings || []).filter(function(t){return t && t.name && t.id && t.name !== 'undefined';}), 'Trainings'),
-            pushToSheet(url, DB.testResults || [], 'TestResults'),
-            pushToSheet(url, buildSyncPayload(), 'Training Data'),
-            pushToSheet(url, DB.admins || [], 'Admins'),
-            pushToSheet(url, DB.certificates || [], 'Certificates'),
-            pushToSheet(url, DB.notifications || [], 'Notifications'),
-            pushToSheet(url, DB.sops || [], 'SOPs'),
-            pushToSheet(url, [Object.assign({}, DB.settings, {_type: 'settings'})], 'Settings'),
-            pushToSheet(url, DB.customEquipment || [], 'CustomEquipment'),
-            pushToSheet(url, DB.customQuestions || [], 'CustomQuestions')
-        ]);
-        var failed = r.filter(function(x){return x.status==='rejected';});
-        if (failed.length > 0) {
-            console.error('saveToSheets: ' + failed.length + ' sheets failed');
-            updateSyncUI('error');
-        } else {
-            _syncCount++;
-            _lastSyncTime = Date.now();
-            updateSyncUI('idle');
-        }
-    } catch (e) {
-        console.error('saveToSheets error:', e);
-        updateSyncUI('error');
-    } finally {
-        _syncBusy = false;
-        if (_pendingSave) {
-            _pendingSave = false;
-            setTimeout(function(){saveToSheets();}, 800);
-        }
+
+// Sanitize an object for Firestore — remove undefined values, empty strings for specific fields,
+// and any fields that Firestore rejects (undefined, NaN, Infinity, functions, symbols)
+function sanitizeForFirestore(obj){
+  if(!obj || typeof obj !== 'object') return obj;
+  const clean = {};
+  for(const key of Object.keys(obj)){
+    const val = obj[key];
+    // Skip undefined, functions, symbols
+    if(val === undefined || typeof val === 'function' || typeof val === 'symbol') continue;
+    // Skip NaN and Infinity
+    if(typeof val === 'number' && (isNaN(val) || !isFinite(val))) continue;
+    // Keep null, strings (including empty), numbers, booleans, arrays, plain objects
+    if(val === null || typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean'){
+      clean[key] = val;
+    }else if(Array.isArray(val)){
+      clean[key] = val;
+    }else if(typeof val === 'object' && val.constructor === Object){
+      clean[key] = sanitizeForFirestore(val);
+    }else{
+      // For other types (Date objects, etc.), convert to string
+      clean[key] = String(val);
     }
+  }
+  return clean;
 }
-// ==================== PULL: Load all data FROM Google Sheets ====================
-// Tries GET first (always works with Apps Script), then POST as fallback
-// Called on: app startup, employee login, tab visible, manual sync
-async function loadFromSheets() {
-    var url = getSheetUrl();
-    if (!url) return {ok:false,error:'No sheet URL'};
-    var loaded=0, failed=[];
-    try{
-        // APPROACH 1: GET request ( doGet handler — always CORS-friendly)
-        var resp = await fetch(url);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        var data = await resp.json();
-        if (data.error) throw new Error(data.error);
-        loaded = mergeSheetData(data, loaded);
-        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-        console.log('[Sheets] Loaded '+loaded+' collections, '+DB.employees.length+' employees');
-        return {ok:true,loaded:loaded,failed:failed};
-    }catch(getErr){
-        console.warn('[Sheets] GET failed:', getErr.message, '— trying POST...');
-        try{
-            // APPROACH 2: POST with readAll action
-            var resp2 = await fetch(url, {
-                method:'POST',
-                body: JSON.stringify({action:'readAll'}),
-                headers:{'Content-Type':'text/plain'}
-            });
-            if (!resp2.ok) throw new Error('HTTP ' + resp2.status);
-            var data2 = await resp2.json();
-            if (data2.error) throw new Error(data2.error);
-            loaded = mergeSheetData(data2, loaded);
-            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-            console.log('[Sheets] POST loaded '+loaded+' collections');
-            return {ok:true,loaded:loaded,failed:failed};
-        }catch(postErr){
-            console.warn('[Sheets] POST also failed:', postErr.message);
-            return {ok:false,loaded:0,failed:['get','post'],error:postErr.message};
-        }
+
+async function fbSaveCollection(collName,items,keyField){
+  if(!firebaseReady)return {ok:false,error:'Firebase not ready'};
+  try{
+    const batch=fbDB.batch();
+    const chunkSize=400;
+    let saved=0;
+    for(let i=0;i<items.length;i+=chunkSize){
+      const chunk=items.slice(i,i+chunkSize);
+      for(const item of chunk){
+        const docId=item[keyField]||item.id||item.username||item.num;
+        if(!docId)continue;
+        const ref=fbDB.collection(collName).doc(String(docId));
+        const data=sanitizeForFirestore(item);
+        batch.set(ref,data,{merge:true});
+        saved++;
+      }
+      await batch.commit();
     }
+    console.log('Firebase saved: '+collName+' ('+saved+' docs)');
+    return {ok:true,count:saved};
+  }catch(e){
+    console.error('fbSaveCollection ERROR ('+collName+'):',e);
+    // Do NOT show toast for individual collection errors — saveDB handles the summary
+    return {ok:false,error:e.message||String(e)};
+  }
 }
-// Merge data loaded from Google Sheets into local DB
-function mergeSheetData(data, loaded) {
-    if (data.Employees && Array.isArray(data.Employees) && data.Employees.length > 0) {
-        var cloudIds = new Set(data.Employees.map(function(e){return e.id;}));
-        var localOnly = (DB.employees||[]).filter(function(e){return !cloudIds.has(e.id);});
-        DB.employees = data.Employees.concat(localOnly);
-        loaded++;
-    }
-    if (data.Trainings && Array.isArray(data.Trainings) && data.Trainings.length > 0) {
-        var cloudIds = new Set(data.Trainings.map(function(t){return t.id;}));
-        var localOnly = (DB.trainings||[]).filter(function(t){return !cloudIds.has(t.id);});
-        data.Trainings.forEach(function(t){
-            if(typeof t.questions==='string') try{t.questions=JSON.parse(t.questions);}catch(e){t.questions=[];}
-            if(typeof t.enrolled==='string') try{t.enrolled=JSON.parse(t.enrolled);}catch(e){t.enrolled=[];}
-            if(typeof t.completed==='string') try{t.completed=JSON.parse(t.completed);}catch(e){t.completed=[];}
-            if(typeof t.completedDates==='string') try{t.completedDates=JSON.parse(t.completedDates);}catch(e){t.completedDates={};}
-        });
-        DB.trainings = data.Trainings.concat(localOnly);
-        loaded++;
-    }
-    if (data.TestResults && Array.isArray(data.TestResults) && data.TestResults.length > 0) {
-        var cloudIds = new Set(data.TestResults.map(function(r){return r.id;}));
-        var localOnly = (DB.testResults||[]).filter(function(r){return !cloudIds.has(r.id);});
-        DB.testResults = data.TestResults.concat(localOnly);
-        loaded++;
-    }
-    if (data.Certificates && Array.isArray(data.Certificates) && data.Certificates.length > 0) {
-        var cloudNums = new Set(data.Certificates.map(function(c){return c.num;}));
-        var localOnly = (DB.certificates||[]).filter(function(c){return !cloudNums.has(c.num);});
-        DB.certificates = data.Certificates.concat(localOnly);
-        loaded++;
-    }
-    if (data.Admins && Array.isArray(data.Admins) && data.Admins.length > 0) { DB.admins=data.Admins; loaded++; }
-    if (data.SOPs && Array.isArray(data.SOPs) && data.SOPs.length > 0) {
-        var cloudIds = new Set(data.SOPs.map(function(s){return s.id;}));
-        var localOnly = (DB.sops||[]).filter(function(s){return !cloudIds.has(s.id);});
-        DB.sops = data.SOPs.concat(localOnly);
-        loaded++;
-    }
-    if (data.Notifications && Array.isArray(data.Notifications) && data.Notifications.length > 0) { DB.notifications=data.Notifications; loaded++; }
-    if (data.Settings && Array.isArray(data.Settings) && data.Settings.length > 0) {
-        var s = data.Settings[0]; if(s){delete s._type;Object.assign(DB.settings,s);loaded++;}
-    }
-    if (data.CustomEquipment && Array.isArray(data.CustomEquipment)) { DB.customEquipment=data.CustomEquipment; loaded++; }
-    if (data.CustomQuestions && Array.isArray(data.CustomQuestions)) {
-        DB.customQuestions = data.CustomQuestions;
-        DB.customQuestions.forEach(function(cq){
-            if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];
-            if(!QUESTION_BANK[cq.cat].find(function(q){return q.q===cq.q&&q.customFor===cq.customFor;})){
-                QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});
-            }
-        });
-        loaded++;
-    }
-    return loaded;
+
+async function fbSaveSettings(){
+  if(!firebaseReady)return;
+  try{await fbDB.collection('config').doc('settings').set(DB.settings,{merge:true});}catch(e){console.warn('fbSaveSettings error:',e);}
 }
-// ==================== DEBOUNCED saveDB — instant save ====================
-// Every data change calls saveDB()
-// This saves to localStorage IMMEDIATELY (0ms)
-// Then pushes to Google Sheets after 500ms debounce
-// So rapid edits (typing, multiple clicks) don't spam the API
-function saveDB(){
-    // ALWAYS save to localStorage first (instant, guaranteed)
-    try{
-        var data=JSON.parse(JSON.stringify(DB));
-        localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(data));
-    }catch(e){}
-    // Push to Google Sheets (debounced — waits 500ms after last save)
-    if(getSheetUrl()){
-        if(_saveDebounceTimer)clearTimeout(_saveDebounceTimer);
-        _saveDebounceTimer=setTimeout(function(){
-            saveToSheets();
-        },500);
-    }
-}
-// ==================== AUTO-SYNC: 15 second push + pull ====================
-function startAutoSync(){
-    if(!getSheetUrl())return;
-    sheetReady=true;
-    // Push to sheets every 15 seconds
-    setInterval(async function(){
-        if(!currentUser||document.hidden||_syncBusy)return;
-        try{
-            await saveToSheets();
-            _lastSyncTime=Date.now();
-            updateSyncUI('idle');
-        }catch(e){console.warn('[AutoSync] Push error:',e);}
-    },15000);
-    // When user returns to the tab, pull latest from sheets
-    document.addEventListener('visibilitychange',async function(){
-        if(!document.hidden&&currentUser&&!_syncBusy&&(Date.now()-_lastDeleteTime)>5000){
-            try{
-                await loadFromSheets();
-                try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB)));}catch(e){}
-                if(typeof renderAll==='function')renderAll();
-                _lastSyncTime=Date.now();
-                updateSyncUI('idle');
-                console.log('[AutoSync] Pulled fresh data on tab return');
-            }catch(e){console.warn('[AutoSync] Pull error:',e);}
-        }
-    });
-}
-// ==================== FORCE SYNC (manual buttons) ====================
+
 async function forceSyncToCloud(){
-    var url=getSheetUrl();
-    if(!url){toast('No Google Sheet URL! Go to Settings.','error');return;}
-    toast('Syncing all data to Google Sheets...','info',2000);
-    updateSyncUI('syncing');
-    try{
-        await saveToSheets();
-        _lastSyncTime=Date.now();
-        updateSyncUI('idle');
-        toast('All data synced to Google Sheets! ('+DB.employees.length+' employees)','success',3000);
-    }catch(e){
-        updateSyncUI('error');
-        toast('Sync error: '+e.message,'error',5000);
+  if(!firebaseReady){toast('Firebase not available','error');return;}
+  toast('Syncing all data to cloud...','info',2000);
+  updateSyncUI('syncing');
+  try{
+    const results=await Promise.all([
+      fbSaveCollection('employees',DB.employees,'id'),
+      fbSaveCollection('admins',DB.admins,'username'),
+      fbSaveCollection('trainings',DB.trainings,'id'),
+      fbSaveCollection('testResults',DB.testResults,'id'),
+      fbSaveCollection('certificates',DB.certificates,'num'),
+      fbSaveCollection('notifications',DB.notifications,'id'),
+      fbSaveCollection('sops',DB.sops,'id'),
+      fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+      fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+      fbSaveSettings()
+    ]);
+    const failed=results.filter(r=>r&&r.ok===false);
+    if(failed.length>0){
+      toast('Sync FAILED for: '+failed.map(f=>f.error).join(', '),'error',6000);
+      updateSyncUI('error');
+    }else{
+      _lastSyncTime=Date.now();
+      updateSyncUI('idle');
+      toast('All data synced to cloud! ('+DB.employees.length+' employees)','success',3000);
     }
+  }catch(e){
+    updateSyncUI('error');
+    toast('Sync error: '+e.message,'error',5000);
+  }
 }
-async function forceSyncFromCloud(){
-    var url=getSheetUrl();
-    if(!url){toast('No Google Sheet URL! Go to Settings.','error');return;}
-    toast('Pulling latest data from Google Sheets...','info',2000);
-    updateSyncUI('syncing');
+
+// === FORCE SYNC ALL EMPLOYEES INDIVIDUALLY ===
+// This fixes the bug where saveDB() batch skips an employee (e.g. _syncBusy flag)
+// Each employee is written ONE BY ONE to Firebase + Auth account is ensured
+async function forceSyncAllEmployees(){
+  if(!firebaseReady){toast('Firebase not connected','error');return;}
+  var allEmps=DB.employees||[];
+  if(allEmps.length===0){toast('No employees to sync','warning');return;}
+  
+  toast('Syncing '+allEmps.length+' employees to cloud one by one...','info',4000);
+  console.log('[forceSyncAllEmployees] Starting sync of '+allEmps.length+' employees...');
+  
+  var synced=0, failed=0, authCreated=0, authExisted=0, authFailed=0;
+  var failedList=[];
+  
+  // Step 0: Authenticate as admin first
+  var fsaOk=await authAsAdmin();
+  if(!fsaOk){toast('Force sync FAILED: Admin Firebase auth failed!','error',8000);return {synced:0,failed:allEmps.length,authCreated:0,authExisted:0,authFailed:0,cloudCount:0,failedList:['Admin auth failed']};}
+  
+  // Step 1: Write each employee to Firestore individually
+  for(var i=0;i<allEmps.length;i++){
+    var emp=allEmps[i];
+    if(!emp||!emp.id)continue;
+    // Re-auth as admin before each write to prevent session loss
+    await authAsAdmin();
     try{
-        var result=await loadFromSheets();
-        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB)));}catch(e){}
-        applyTombstones();
-        reconcileTrainingsFromResults();
-        renderAll();
-        _lastSyncTime=Date.now();
-        updateSyncUI('idle');
-        if(result.ok){
-            toast('Data pulled from sheets! '+DB.employees.length+' employees loaded.','success',3000);
-        }else{
-            toast('Pull error: '+(result.error||'Unknown'),'error',5000);
-        }
-    }catch(e){updateSyncUI('error');toast('Pull error: '+e.message,'error',5000);}
-}
-// ==================== CONNECTION TEST ====================
-async function testSheetConnection(){
-    var url=getSheetUrl();
-    if(!url){toast('No Google Sheet URL!','error');return;}
-    var statusEl=document.getElementById('syncStatus');
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">Testing...</span>';
-    try{
-        var data=await loadFromSheets();
-        if(data.ok){
-            var empCount=(data.data||{}).Employees||[]; // loadFromSheets returns {ok,data}
-            if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Connected! '+DB.employees.length+' employees synced.</span>';
-            toast('Sheet connected! '+DB.employees.length+' employees.','success');
-        }else{
-            throw new Error(data.error||'Read failed');
-        }
-    }catch(e){
-        if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">Connection failed. Check URL.</span>';
-        toast('Connection failed. Check URL.','error');
+      var safeEmp=sanitizeForFirestore(emp);
+      await fbDB.collection('employees').doc(String(emp.id)).set(safeEmp,{merge:true});
+      synced++;
+      console.log('[forceSyncAllEmployees] Firestore OK: '+emp.id+' ('+emp.name+')');
+    }catch(err){
+      // Try minimal write as fallback
+      try{
+        var minimal={id:emp.id,name:emp.name,password:emp.password||'emp123',mobile:emp.mobile||'',status:'active'};
+        await fbDB.collection('employees').doc(String(emp.id)).set(minimal,{merge:true});
+        synced++;
+        failedList.push(emp.id+': full object failed, minimal write OK ('+(err.message||err)+')');
+        console.warn('[forceSyncAllEmployees] Minimal OK for '+emp.id);
+      }catch(err2){
+        failed++;
+        failedList.push(emp.id+': '+(err.message||err)+' | minimal: '+(err2.message||err2));
+        console.error('[forceSyncAllEmployees] Firestore FAIL: '+emp.id, err, err2);
+      }
     }
-}
-// ==================== LOGIN PAGE SYNC BUTTON ====================
-async function loginForceSync(){
-    var syncBtn=document.getElementById('loginSyncBtn');
-    var loginBtn=document.getElementById('loginBtn');
-    if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Syncing...';}
-    if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Syncing...';}
+  }
+  
+  // Step 2: Ensure Firebase Auth accounts exist for ALL employees
+  await authAsAdmin();
+  
+  for(var j=0;j<allEmps.length;j++){
+    var emp2=allEmps[j];
+    if(!emp2||!emp2.id)continue;
+    var email=toEmail(emp2.id);
+    var pw=emp2.password||'emp123';
     try{
-        _initDone=false;
-        var result=await loadFromSheets();
-        _initDone=true;
-        var fbStatus=document.getElementById('loginFbStatus');
+      await fbAuth.createUserWithEmailAndPassword(email,pw);
+      authCreated++;
+      console.log('[forceSyncAllEmployees] Auth CREATED: '+emp2.id);
+    }catch(authErr){
+      if(authErr.code==='auth/email-already-in-use'){
+        authExisted++;
+        console.log('[forceSyncAllEmployees] Auth EXISTS: '+emp2.id);
+      }else{
+        authFailed++;
+        failedList.push('Auth '+emp2.id+': '+(authErr.message||authErr));
+        console.error('[forceSyncAllEmployees] Auth FAIL: '+emp2.id, authErr);
+      }
+    }
+    // Re-sign in as admin after each auth creation (signing in as employee changes context)
+    await authAsAdmin();
+  }
+  
+  // Step 3: Verify by reading back from cloud
+  var cloudCount=0;
+  try{
+    var snap=await fbDB.collection('employees').get();
+    cloudCount=snap.size;
+  }catch(e){console.warn('Verify read failed:',e);}
+  
+  var msg='Employee sync complete!\nFirestore: '+synced+'/'+allEmps.length+' written';
+  if(failed>0)msg+=' ('+failed+' failed)';
+  msg+='\nAuth: '+authCreated+' created, '+authExisted+' existed';
+  if(authFailed>0)msg+=' ('+authFailed+' failed)';
+  msg+='\nCloud now has: '+cloudCount+' employees';
+  
+  if(failed>0||authFailed>0){
+    toast(msg+'\nFailures: '+failedList.join('; '),'error',10000);
+    console.error('[forceSyncAllEmployees] FAILURES:',failedList);
+  }else{
+    toast(msg,'success',5000);
+    console.log('[forceSyncAllEmployees] ALL OK! Cloud has '+cloudCount+' employees');
+  }
+  
+  // Update sync status
+  _lastSyncTime=Date.now();
+  updateSyncUI('idle');
+  
+  return {synced,failed,authCreated,authExisted,authFailed,cloudCount,failedList};
+}
+
+// === AUTO-DETECT MISSING EMPLOYEES ON ADMIN LOGIN ===
+// Compares local employees vs cloud and pushes any that are missing
+// ENHANCED: If count mismatch detected, does a full force sync to ensure EVERY employee is in cloud
+async function autoSyncMissingEmployees(){
+  if(!firebaseReady||!isAdmin)return;
+  try{
+    var localEmps=DB.employees||[];
+    if(localEmps.length===0)return;
     
-        if(fbStatus){
-            if(result&&result.error){
-                fbStatus.style.display='block';
-                fbStatus.style.color='var(--red)';
-                fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sync FAILED: '+result.error;
-                toast('Sync FAILED! '+result.error,'error',6000);
-            }else{
-                fbStatus.style.display='block';
-                fbStatus.style.color='var(--green)';
-                fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Google Sheets — '+DB.employees.length+' employees loaded';
-                toast('Data synced! '+DB.employees.length+' employees.','success',3000);
-            }
-        }
-    }catch(e){
-        _initDone=true;
-        toast('Sync error: '+e.message,'error',5000);
-    }finally{
-        if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico">sync</span> Sync Data from Sheet';}
-        if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
-    }
-}
-// Forgot password — lookup from sheets
-async function showForgot(){
-    var id=prompt('Enter your Employee ID:');
-    if(!id)return;
-    var empId=id.trim().toUpperCase();
-    var emp=DB.employees.find(function(e){return e.id===empId;});
-    if(!emp&&getSheetUrl()){
+    var snap=await fbDB.collection('employees').get();
+    var cloudIds=new Set();
+    snap.docs.forEach(function(d){cloudIds.add(d.data().id);});
+    
+    var missing=localEmps.filter(function(e){return !cloudIds.has(e.id);});
+    console.log('[autoSyncMissingEmployees] Local: '+localEmps.length+', Cloud: '+cloudIds.size+', Missing: '+missing.length);
+    
+    if(missing.length===0){
+      // Even if no missing employees, verify AUTH accounts exist for ALL
+      // This fixes the case where Firestore has the employee but Auth account is missing
+      await authAsAdmin();
+      var authFixCount=0;
+      for(var k=0;k<localEmps.length;k++){
+        var emp3=localEmps[k];
+        if(!emp3||!emp3.id)continue;
+        var email3=toEmail(emp3.id);
+        var pw3=emp3.password||'emp123';
         try{
-            toast('Looking up '+empId+' in Google Sheets...','info',2000);
-            await loadFromSheets();
-            emp=DB.employees.find(function(e){return e.id===empId;});
-        }catch(e){}
+          await fbAuth.createUserWithEmailAndPassword(email3,pw3);
+          authFixCount++;
+          console.log('[autoSyncMissingEmployees] Auth CREATED for existing emp: '+emp3.id);
+        }catch(ae3){
+          if(ae3.code==='auth/email-already-in-use'){/* good */}else{console.warn('[autoSyncMissingEmployees] Auth check for '+emp3.id+':',ae3.message);}
+        }
+        await authAsAdmin();
+      }
+      if(authFixCount>0){
+        toast(authFixCount+' employee Auth account(s) created! Phone login ready.','success',4000);
+      }
+      return;
     }
-    if(!emp){toast('Employee '+empId+' not found. Ask admin to add you.','error',4000);return;}
-    toast('Found: '+emp.name+'. Login with Name ("'+emp.name+'") or Password.','success',5000);
+    
+    console.warn('[autoSyncMissingEmployees] Found '+missing.length+' employee(s) NOT in cloud, pushing now...',missing.map(function(e){return e.id+' ('+e.name+')';}));
+    toast('Found '+missing.length+' employee(s) missing from cloud — syncing now...','warning',5000);
+    
+    // Sign in as admin and VERIFY it works
+    // Try the stored admin password first, then fallback to 'admin123'
+    var adminAuthOk=await authAsAdmin();
+    if(!adminAuthOk){
+      console.error('[autoSyncMissingEmployees] Admin Auth FAILED!');
+      toast('Firebase Admin Auth failed! Cannot sync employees. Try logging out and back in.','error',8000);
+      return;
+    }
+    
+    var pushed=0;
+    var failReasons=[];
+    for(var i=0;i<missing.length;i++){
+      var emp=missing[i];
+      // VERIFY admin is still signed in before each write
+      if(!fbAuth.currentUser){
+        console.warn('[autoSyncMissingEmployees] Admin auth lost, re-signing in...');
+        var reauthOk=await authAsAdmin();
+        if(!reauthOk){
+          failReasons.push(emp.id+': Admin re-auth failed');
+          console.error('[autoSyncMissingEmployees] Admin re-auth failed');
+          toast('Cloud sync FAILED — admin session expired. Try logging out and back in.','error',8000);
+          break;
+        }
+      }
+      try{
+        // Sanitize the employee object to remove undefined/invalid fields
+        var safeEmp=sanitizeForFirestore(emp);
+        console.log('[autoSyncMissingEmployees] Pushing '+emp.id+' — sanitized keys: '+Object.keys(safeEmp).join(', '));
+        // ATTEMPT 1: Write sanitized full object to Firestore
+        await fbDB.collection('employees').doc(String(emp.id)).set(safeEmp,{merge:true});
+        console.log('[autoSyncMissingEmployees] Pushed: '+emp.id+' ('+emp.name+')');
+        // Create Auth account
+        var email=toEmail(emp.id);
+        var pw=emp.password||'emp123';
+        try{await fbAuth.createUserWithEmailAndPassword(email,pw);}catch(ae){
+          if(ae.code!=='auth/email-already-in-use')console.warn('Auth create for '+emp.id+':',ae.message);
+        }
+        // Re-sign as admin
+        await authAsAdmin();
+        pushed++;
+      }catch(err){
+        var errMsg=err.message||String(err);
+        console.error('[autoSyncMissingEmployees] Full object write FAILED for '+emp.id+':',err);
+        // ATTEMPT 2: Try with MINIMAL object (just id + name + password)
+        // This isolates whether it's a data issue or a permission issue
+        try{
+          var minimalEmp={id:emp.id,name:emp.name,password:emp.password||'emp123',mobile:emp.mobile||'',status:'active'};
+          console.log('[autoSyncMissingEmployees] Retrying '+emp.id+' with minimal object...');
+          await fbDB.collection('employees').doc(String(emp.id)).set(minimalEmp,{merge:true});
+          console.log('[autoSyncMissingEmployees] Minimal write OK for '+emp.id);
+          // Still create auth
+          var email2=toEmail(emp.id);
+          try{await fbAuth.createUserWithEmailAndPassword(email2,emp.password||'emp123');}catch(ae2){}
+          await authAsAdmin();
+          pushed++;
+          failReasons.push(emp.id+': full write failed ('+errMsg+') but MINIMAL write succeeded');
+        }catch(err2){
+          var errMsg2=err2.message||String(err2);
+          failReasons.push(emp.id+': '+errMsg+' | minimal also failed: '+errMsg2);
+          console.error('[autoSyncMissingEmployees] Minimal write ALSO FAILED for '+emp.id+':',err2);
+          // ATTEMPT 3: Try a completely simple test write to check permissions
+          try{
+            console.log('[autoSyncMissingEmployees] Permission test for '+emp.id+'...');
+            await fbDB.collection('config').doc('_permTest').set({t:Date.now()},{merge:true});
+            console.log('[autoSyncMissingEmployees] Config write OK — so employees collection may have restrictive rules');
+            failReasons[failReasons.length-1]+=' [CONFIG write OK — employees RULES may block this]';
+          }catch(permErr){
+            console.error('[autoSyncMissingEmployees] Even config write failed:',permErr);
+            failReasons[failReasons.length-1]+=' [NO write permission at all — check Firebase rules]';
+          }
+        }
+      }
+    }
+    
+    // Show result to user
+    if(failReasons.length>0){
+      toast('FAILED to sync '+failReasons.length+' employee(s)! Details: '+failReasons.join(' | '),'error',15000);
+    }
+    if(pushed>0){
+      toast(pushed+'/'+missing.length+' employee(s) synced to cloud! Phone login ready.','success',5000);
+    }
+    
+    // Verify after push
+    var verifySnap=await fbDB.collection('employees').get();
+    var finalCloudCount=verifySnap.size;
+    
+    if(pushed>0){
+      var finalMsg=pushed+'/'+missing.length+' missing employee(s) synced to cloud! Phone login ready. (Cloud now: '+finalCloudCount+')';
+      toast(finalMsg,'success',5000);
+    }
+    // If still mismatch after push, force sync ALL employees as last resort
+    if(finalCloudCount<localEmps.length){
+      console.warn('[autoSyncMissingEmployees] Still mismatch after push (local:'+localEmps.length+' vs cloud:'+finalCloudCount+'). Running full force sync...');
+      setTimeout(function(){forceSyncAllEmployees();},1000);
+    }
+  }catch(e){
+    console.error('[autoSyncMissingEmployees] TOP-LEVEL Error:',e);
+    toast('Employee cloud sync error: '+(e.message||e),'error',8000);
+  }
 }
-// ==================== SYNC UI ====================
+
+// Test Firebase connection — writes and reads a test doc to verify permissions
+async function testFirebaseConnection(){
+  const el=document.getElementById('fbTestResult');
+  if(!el){toast('Test element not found','error');return;}
+  el.style.display='block';
+  el.innerHTML='<span style="color:var(--amber);">Testing Firebase connection...</span>';
+  const results=[];
+  // Test 1: Read from employees
+  try{
+    const snap=await fbDB.collection('employees').get();
+    results.push('<span style="color:var(--green);">READ employees: OK ('+snap.size+' docs)</span>');
+  }catch(e){
+    results.push('<span style="color:var(--red);">READ employees: FAILED — '+e.message+'</span>');
+  }
+  // Test 2: Write a test doc
+  try{
+    await fbDB.collection('config').doc('_connectionTest').set({testAt:Date.now(),testBy:'admin'});
+    results.push('<span style="color:var(--green);">WRITE test doc: OK</span>');
+    // Clean up
+    try{await fbDB.collection('config').doc('_connectionTest').delete();}catch(e){}
+  }catch(e){
+    results.push('<span style="color:var(--red);">WRITE test doc: FAILED — '+e.message+'</span>');
+  }
+  // Test 3: Write to employees collection (this is what fails most often)
+  try{
+    const batch=fbDB.batch();
+    const ref=fbDB.collection('employees').doc('__test__'+Date.now());
+    batch.set(ref,{id:'__test__',name:'Connection Test',_test:true},{merge:true});
+    await batch.commit();
+    results.push('<span style="color:var(--green);">WRITE employees: OK</span>');
+    // Clean up
+    try{await fbDB.collection('employees').doc(ref.id).delete();}catch(e){}
+  }catch(e){
+    results.push('<span style="color:var(--red);">WRITE employees: FAILED — '+e.message+'</span>');
+  }
+  // Test 4: Auth status
+  results.push('Auth user: '+(fbAuth.currentUser?fbAuth.currentUser.email:'NOT signed in'));
+  el.innerHTML=results.map(r=>'<div style="margin:2px 0;">'+r+'</div>').join('');
+}
+
+async function forceSyncFromCloud(){
+  if(!firebaseReady){toast('Firebase not available','error');return;}
+  toast('Pulling latest data from cloud...','info',2000);
+  updateSyncUI('syncing');
+  try{
+    await loadDBFromFirestore();
+    // Save to localStorage only (don't push back — cloud is source of truth)
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    renderAll();
+    _lastSyncTime=Date.now();
+    updateSyncUI('idle');
+    toast('Cloud data pulled! Page refreshed.','success',3000);
+  }catch(e){
+    updateSyncUI('error');
+    toast('Pull error: '+e.message,'error',5000);
+  }
+}
+
+// Auto-sync: PUSH to cloud + Admin pulls employee results
+function startAutoSync(){
+  if(!firebaseReady)return;
+  setInterval(async function(){
+    if(!currentUser||document.hidden||_syncBusy)return;
+    try{
+      // CRITICAL: Pull tombstones from cloud FIRST before pushing anything
+      // This prevents pushing back items that were deleted by admin on another device
+      const newTombstones=await loadTombstonesFromCloud();
+      if(newTombstones>0){
+        const removed=applyTombstones();
+        if(removed>0){
+          console.log('Auto-sync: removed '+removed+' deleted items before push');
+          // Save cleaned data to localStorage
+          try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+          // Re-render UI to show items are gone
+          if(typeof renderAll==='function')renderAll();
+        }
+      }
+      // STEP 1: Push all local data to cloud (now filtered — no deleted items)
+      await Promise.all([
+        fbSaveCollection('employees',DB.employees,'id'),
+        fbSaveCollection('trainings',DB.trainings,'id'),
+        fbSaveCollection('sops',DB.sops,'id'),
+        fbSaveCollection('testResults',DB.testResults,'id'),
+        fbSaveCollection('certificates',DB.certificates,'num'),
+        fbSaveCollection('notifications',DB.notifications,'id'),
+        fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+        fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+        fbSaveSettings()
+      ]);
+      // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
+      if(isAdmin){
+        try{
+          const fbTestSnap=await fbDB.collection('testResults').get();
+          const fbTests=fbTestSnap.docs.map(d=>d.data());
+          let newTests=0;
+          fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
+          const fbCertSnap=await fbDB.collection('certificates').get();
+          const fbCerts=fbCertSnap.docs.map(d=>d.data());
+          let newCerts=0;
+          fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
+          // Reconcile training completed arrays from all testResults (source of truth)
+          const trainingsUpdated=reconcileTrainingsFromResults()>0;
+          // Save merged data to localStorage (don't re-push to avoid loop)
+          if(newTests||newCerts||trainingsUpdated){
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            if(typeof renderAll==='function')renderAll();
+          }
+        }catch(e){console.warn('Admin pull merge error:',e);}
+      }
+      _lastSyncTime=Date.now();
+      updateSyncUI('idle');
+    }catch(e){console.warn('Auto-sync error:',e);}
+  },30000);
+  // When user returns to the tab, pull latest from cloud
+  // But skip if a delete just happened (within 10s) to prevent pulling back deleted items
+  document.addEventListener('visibilitychange',async function(){
+    if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&(Date.now()-_lastDeleteTime)>10000){
+      try{
+        await loadDBFromFirestore();
+        // Save to localStorage only (don't push back to cloud — cloud is source of truth)
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+        if(typeof renderAll==='function')renderAll();
+        _lastSyncTime=Date.now();
+        updateSyncUI('idle');
+      }catch(e){console.warn('Visibility sync error:',e);}
+    }
+  });
+}
+
+async function seedFirestore(){
+  if(!firebaseReady)return;
+  try{
+    const metaDoc=await fbDB.collection('config').doc('meta').get();
+    if(metaDoc.exists)return;
+    console.log('Seeding Firestore with default data...');
+    await fbDB.collection('config').doc('meta').set({seeded:true,version:2});
+    await fbSaveCollection('employees',DB.employees,'id');
+    await fbSaveCollection('admins',DB.admins,'username');
+    await fbSaveCollection('trainings',DB.trainings,'id');
+    await fbSaveCollection('testResults',DB.testResults,'id');
+    await fbSaveCollection('certificates',DB.certificates,'num');
+    await fbSaveCollection('notifications',DB.notifications,'id');
+    await fbSaveCollection('sops',DB.sops,'id');
+    await fbSaveSettings();
+    // Create default Firebase Auth accounts
+    try{
+      await fbAuth.createUserWithEmailAndPassword(toEmail('admin'),'admin123');
+    }catch(e){}
+    console.log('Firestore seeded successfully');
+  }catch(e){console.warn('Seed error:',e);}
+}
+
 /* ============================================================
    APP STATE
 ============================================================ */
@@ -1304,39 +1514,43 @@ function togglePw(){
 }
 async function doLogin(){
   var id=document.getElementById("loginId").value.trim();
-  var pw=document.getElementById("loginPw").value.trim();
+  var pw=document.getElementById("loginPw").value;
   if(!id||!pw){toast("Please enter credentials","error");return;}
+  if(!_initDone){toast("Still loading...","info");return;}
   if(loginType==="admin"&&id.toUpperCase().startsWith("EMP")){setLoginType("employee");}
   if(loginType==="employee"&&(id.toLowerCase()==="admin")){setLoginType("admin");}
   document.getElementById("loginBtn").disabled=true;
   document.getElementById("loginBtn").innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Signing in...';
   try{
+    // FAST PATH: Check local DB first (instant, no network)
     if(loginType==="admin"){
-      // HARDCODED FALLBACK: admin/admin123 always works
-      if(id==="admin"&&pw==="admin123"){
-        currentUser={username:"admin",password:"admin123",name:"Admin User",role:"admin",type:"admin"};
-        isAdmin=true;
-      }else{
-        var admin=DB.admins.find(function(a){return a.username===id;});
-        if(!admin||admin.password!==pw){toast("Invalid admin credentials","error");return;}
-        currentUser=Object.assign({},admin,{type:"admin"});isAdmin=true;
-      }
+      var admin=DB.admins.find(function(a){return a.username===id;});
+      if(!admin||admin.password!==pw){toast("Invalid admin credentials","error");return;}
+      currentUser=Object.assign({},admin,{type:"admin"});isAdmin=true;
     }else{
       var empId=id.toUpperCase();
       var emp=DB.employees.find(function(e){return e.id===empId;});
-      // If not found locally, try loading from Google Sheets
-      if(!emp&&getSheetUrl()){
+      // If not found locally, ONE cloud read then check
+      if(!emp&&firebaseReady){
         try{
-          toast('Checking Google Sheets...','info',2000);
-          await loadFromSheets();
-          try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-          emp=DB.employees.find(function(e){return e.id===empId;});
+          toast('Checking cloud...','info',2000);
+          var empSnap=await fbDB.collection('employees').get();
+          if(empSnap.size>0){
+            var cloudEmps=empSnap.docs.map(function(x){return x.data();});
+            var cloudIds=new Set(cloudEmps.map(function(e){return e.id;}));
+            var localOnly=DB.employees.filter(function(e){return !cloudIds.has(e.id);});
+            DB.employees=cloudEmps.concat(localOnly);
+            await loadTombstonesFromCloud();
+            applyTombstones();
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            emp=DB.employees.find(function(e){return e.id===empId;});
+          }
         }catch(cloudErr){
-          toast('Sheet error: '+cloudErr.message,'error',6000);return;
+          toast('Cloud error: '+cloudErr.message,'error',6000);return;
         }
       }
       if(!emp){
-        toast('Employee '+empId+' not found. Ask admin to add you.','error',5000);return;
+        toast('Employee '+empId+' not found.','error',5000);return;
       }
       var pwN=pw.trim();
       var nameOk=emp.name&&emp.name.trim().toLowerCase()===pwN.toLowerCase();
@@ -1346,10 +1560,41 @@ async function doLogin(){
       }
       currentUser=Object.assign({},emp,{type:"employee"});isAdmin=false;
     }
+    // For admin: sign in via Firebase Auth BEFORE startApp()
+    // Otherwise autoSyncMissingEmployees() cannot write to Firestore
+    // Use the STORED admin password (from DB.admins) not the typed password,
+    // because Firebase Auth was created with the stored password
+    if(isAdmin && firebaseReady) {
+      try {
+        var adminRecord = DB.admins.find(function(a){return a.username===id;});
+        var fbPw = adminRecord ? adminRecord.password : pw;
+        await fbAuth.signInWithEmailAndPassword(toEmail(id), fbPw);
+        console.log('[doLogin] Admin Firebase Auth OK with password from DB record');
+      } catch(e) {
+        // Try with 'admin123' as fallback (default password)
+        console.warn('[doLogin] Admin auth with DB pw failed:', e.message, '— trying admin123...');
+        try { await fbAuth.signInWithEmailAndPassword(toEmail(id), 'admin123'); } catch(e2) {
+          console.error('[doLogin] Admin auth FAILED with both passwords:', e.message, e2.message);
+          toast('Firebase Admin Auth FAILED! Cloud sync disabled. Click "Fix Phone Login" in Settings to fix.','error',10000);
+        }
+      }
+    }
     // LOGIN SUCCESS
     var safeUser=Object.assign({},currentUser);delete safeUser.password;
     if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
     startApp();
+    // Sync Firebase Auth for employee in background
+    if(!isAdmin && firebaseReady){
+      (async function(){
+        try{
+          var realPw=currentUser.password||pw;
+          var email=toEmail(id);
+          try{await fbAuth.signInWithEmailAndPassword(email,realPw);}catch(e){
+            try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(email,realPw);}catch(e2){}
+          }
+        }catch(e){}
+      })();
+    }
   }catch(e){
     console.error('doLogin CRASH:',e);
     toast("Login error: "+(e.message||e),"error",6000);
@@ -1358,11 +1603,102 @@ async function doLogin(){
     if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
   }
 }
+async function showForgot(){
+  // On employee mobile, offer to sync from cloud first
+  const id=prompt('Enter your Employee ID:');
+  if(!id)return;
+  const empId=id.trim().toUpperCase();
+  let emp=DB.employees.find(e=>e.id===empId);
+  if(!emp&&firebaseReady){
+    try{
+      toast('Looking up '+empId+' in cloud...','info',2000);
+      const snap=await fbDB.collection('employees').get();
+      if(snap.size>0){DB.employees=snap.docs.map(x=>x.data());await loadTombstonesFromCloud();applyTombstones();}
+      emp=DB.employees.find(e=>e.id===empId);
+    }catch(e){}
+  }
+  if(!emp){toast('Employee '+empId+' not found. Ask admin to add you.','error',4000);return;}
+  toast('Found: '+emp.name+'. You can login with your Name ("'+emp.name+'") or Password.','success',5000);
+}
 
-
+// Force sync from cloud on login page — used when employee can not login
+// ENHANCED: After loading from cloud, also pushes any local-only employees BACK to cloud
+async function loginForceSync(){
+  const syncBtn=document.getElementById('loginSyncBtn');
+  const loginBtn=document.getElementById('loginBtn');
+  if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;animation:spin 1s linear infinite">sync</span> Syncing...';}
+  if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
+  try{
+    _initDone=false;
+    const result=await loadDBFromFirestore();
+    _initDone=true;
+    // Update the Firebase status display
+    const fbStatus=document.getElementById('loginFbStatus');
+    if(fbStatus){
+      if(result&&result.failed&&result.failed.length>0){
+        fbStatus.style.display='block';
+        fbStatus.style.color='var(--red)';
+        fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sync FAILED for: '+result.failed.join(', ')+(result.error?' — '+result.error:'')+'. Firebase Security Rules may be blocking access.';
+        toast('Sync FAILED! '+result.failed.join(', ')+' could not load from Firebase.','error',6000);
+      }else{
+        fbStatus.style.display='block';
+        fbStatus.style.color='var(--green)';
+        fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees loaded';
+        toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+      }
+    }else{
+      toast('Data synced! '+DB.employees.length+' employees loaded.','success',3000);
+    }
+    // ENHANCED: After loading from cloud, push any local-only employees BACK to cloud
+    // This fixes the case where admin added employees locally but they never reached Firebase
+    if(firebaseReady&&DB.employees.length>0){
+      try{
+        var snap2=await fbDB.collection('employees').get();
+        var cloudIdSet=new Set();
+        snap2.docs.forEach(function(d){cloudIdSet.add(d.data().id);});
+        var localOnly=DB.employees.filter(function(e){return !cloudIdSet.has(e.id);});
+        if(localOnly.length>0){
+          console.warn('[loginForceSync] Found '+localOnly.length+' local-only employee(s) not in cloud, pushing...');
+          toast('Pushing '+localOnly.length+' employee(s) to cloud...','info',3000);
+          try{await authAsAdmin();}catch(e){}
+          for(var li=0;li<localOnly.length;li++){
+            var le=localOnly[li];
+            try{
+              await fbDB.collection('employees').doc(String(le.id)).set(le,{merge:true});
+              var lEmail=toEmail(le.id);
+              var lPw=le.password||'emp123';
+              try{await fbAuth.createUserWithEmailAndPassword(lEmail,lPw);}catch(lae){
+                if(lae.code!=='auth/email-already-in-use')console.warn('Auth for '+le.id+':',lae.message);
+              }
+              await authAsAdmin();
+              console.log('[loginForceSync] Pushed employee: '+le.id+' ('+le.name+')');
+            }catch(leErr){
+              console.error('[loginForceSync] Failed to push '+le.id+':',leErr);
+              await authAsAdmin();
+            }
+          }
+          toast(localOnly.length+' employee(s) pushed to cloud! Try login again.','success',5000);
+          // Update the count display
+          var finalSnap=await fbDB.collection('employees').get();
+          if(fbStatus){
+            fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+finalSnap.size+' employees (Local: '+DB.employees.length+')';
+          }
+        }
+      }catch(pushErr){
+        console.warn('[loginForceSync] Push error:',pushErr);
+      }
+    }
+  }catch(e){
+    toast('Sync failed: '+e.message,'error',4000);
+    _initDone=true;
+  }
+  if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+  if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry';}
+}
 function doLogout(){
   currentUser=null;isAdmin=false;
   localStorage.removeItem("mep_user");
+  fbAuth.signOut().catch(()=>{});
   if(quizState.timer)clearInterval(quizState.timer);
   quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0};
   document.getElementById("loginPage").style.display="flex";
@@ -1386,16 +1722,9 @@ function startApp(){
   gotoView("dashboard");
   startAutoSync();
   // Auto-sync all data to Google Sheet when admin logs in
-  if(isAdmin){
-    toast('Pushing data to Google Sheets...','info',3000);
-    saveToSheets().then(function(){
-      toast('Data pushed to cloud! Check your Google Sheet.','success',4000);
-    }).catch(function(err){
-      toast('Cloud sync issue: '+err.message,'error',6000);
-    });
-  }
+  if(isAdmin)autoSyncToSheet();
   // Auto-detect and fix employees missing from cloud (fixes phone login)
-  // Auto-sync handled by startAutoSync() via Google Sheets
+  if(isAdmin&&firebaseReady)autoSyncMissingEmployees();
   toast(`Welcome back, ${currentUser.name||currentUser.username}!`,"success");
 }
 function updateBadges(){
@@ -1752,7 +2081,7 @@ function renderEmployees(){
       <div class="section-title">Employee <span>Management</span></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-outline" onclick="exportEmpExcel()"><span class="mat-ico">download</span> Export Excel</button>
-        <button class="btn btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="forceSyncToCloud()" title="Sync all data to Google Sheets"><span class="mat-ico">phonelink_setup</span> Sync to Sheet</button>
+        <button class="btn btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="forceSyncAllEmployees()" title="Sync all employees to Firebase cloud + create login accounts"><span class="mat-ico">phonelink_setup</span> Fix Phone Login</button>
         <button class="btn btn-amber" onclick="openAddEmpModal()"><span class="mat-ico">add</span> Add Employee</button>
       </div>
     </div>
@@ -1835,8 +2164,22 @@ function renderEmpEmployee(){
   `;
 }
 async function pushEmpToCloud(empId){
-  saveDB();
-  toast('Employee data synced to Google Sheet!','success');
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  if(!emp){toast('Employee not found','error');return;}
+  if(!firebaseReady){toast('Firebase not connected','error');return;}
+  toast('Pushing '+emp.name+' to cloud...','info');
+  try{
+    await fbDB.collection('employees').doc(String(empId)).set(emp,{merge:true});
+    var authEmail=toEmail(empId);
+    var empPw=emp.password||'emp123';
+    try{await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);}catch(authErr){
+      if(authErr.code!=='auth/email-already-in-use')console.warn('Auth create:',authErr.message);
+    }
+    await authAsAdmin();
+    toast(emp.name+' ('+empId+') pushed to cloud! Phone login ready.','success');
+  }catch(err){
+    toast('Failed to push: '+(err.message||err),'error',6000);
+  }
 }
 function openAddEmpModal(){
   openModal(`
@@ -1893,9 +2236,88 @@ async function saveEmployee(){
   try{renderEmployees();updateBadges();}catch(e){console.warn('renderEmployees error:',e);}
   saved=true;
   toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
-  // 5. Sync to Google Sheets in background
-  saveDB();
-  toast('Employee '+name+' saved! Phone login works from any device.','success');
+  // 5. Firebase sync in BACKGROUND (non-blocking)
+  // CRITICAL FIX: Write directly to Firestore FIRST, then saveDB separately
+  // Do NOT let _syncBusy block the direct employee write
+  if(firebaseReady){
+    (async function(){
+      try{
+        // FIX: Use authAsAdmin() instead of hardcoded 'admin123'
+        var adminOk=await authAsAdmin();
+        if(!adminOk){
+          console.error('[saveEmployee] FAILED to authenticate as admin — employee will NOT be in cloud!');
+          toast('Cloud sync FAILED: Admin Firebase auth failed! Employee saved locally only. Use "Fix Phone Login" in Settings.','error',10000);
+          return;
+        }
+        // Directly write THIS employee to Firebase Firestore immediately
+        var newEmp=DB.employees.find(function(e){return e.id===id;});
+        if(newEmp){
+          var safeNewEmp=sanitizeForFirestore(newEmp);
+          console.log('[saveEmployee] Direct Firestore write for '+id+' — keys: '+Object.keys(safeNewEmp).join(', '));
+          var writeOk=false;
+          try{
+            await fbDB.collection('employees').doc(String(id)).set(safeNewEmp,{merge:true});
+            console.log('[saveEmployee] Employee '+id+' saved directly to Firebase Firestore');
+            writeOk=true;
+          }catch(writeErr){
+            // If full object fails, try minimal
+            console.warn('[saveEmployee] Full write failed for '+id+':',writeErr.message,'— trying minimal...');
+            var minimalNew={id:id,name:name,password:empPw,mobile:mobile,status:'active'};
+            try{
+              await fbDB.collection('employees').doc(String(id)).set(minimalNew,{merge:true});
+              console.log('[saveEmployee] Minimal write OK for '+id);
+              writeOk=true;
+            }catch(minErr){
+              console.error('[saveEmployee] Minimal write ALSO failed for '+id+':',minErr);
+              toast('Cloud write failed for '+name+'! Error: '+(writeErr.message||writeErr),'error',8000);
+            }
+          }
+          // VERIFY: Confirm employee is actually in cloud after write
+          if(writeOk){
+            try{
+              var verifyDoc=await fbDB.collection('employees').doc(String(id)).get();
+              if(!verifyDoc.exists){
+                console.error('[saveEmployee] VERIFICATION FAILED: '+id+' NOT found in cloud after write!');
+                toast('WARNING: '+name+' may not be in cloud. Use "Fix Phone Login" in Settings.','error',8000);
+                writeOk=false;
+              }else{
+                console.log('[saveEmployee] VERIFIED: '+id+' exists in cloud with name='+verifyDoc.data().name);
+              }
+            }catch(verifyErr){
+              console.warn('[saveEmployee] Verification check error:',verifyErr.message);
+            }
+          }
+          if(!writeOk) return; // Don't create auth if Firestore write failed
+        }
+        // Also create Firebase Auth account so employee can login from any device
+        var authEmail=toEmail(id);
+        try{
+          // Re-auth as admin before creating user
+          await authAsAdmin();
+          await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);
+          console.log('Firebase Auth account created for '+id);
+        }catch(authErr){
+          if(authErr.code==='auth/email-already-in-use'){
+            console.log('Firebase Auth account already exists for '+id);
+          }else{
+            console.warn('Firebase Auth create error for '+id+':',authErr.message);
+          }
+        }
+        // Sign back in as admin to restore admin context
+        await authAsAdmin();
+        // Also run full saveDB to sync everything else
+        // This may be queued if _syncBusy, but the employee was already written directly above
+        await saveDB();
+        toast('Employee '+name+' synced to cloud! Phone login ready.','success');
+      }catch(fbErr){
+        console.error('Firebase sync error for employee '+id+':',fbErr);
+        toast('Employee saved locally but NOT synced to cloud! Error: '+(fbErr.message||fbErr),'error',6000);
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }
+    })();
+  }else{
+    toast('Employee saved locally only (no cloud connection). Employee cannot login from phone until cloud sync is fixed.','warning',6000);
+  }
   }catch(e){
     console.error('saveEmployee CRASH:',e);
     toast('Error: '+e.message,'error',6000);
@@ -1977,6 +2399,14 @@ function giveAdminAccess(empId){
   var adminPw=emp.password||'admin123';
   DB.admins.push({username:empId,name:emp.name,password:adminPw,role:'admin'});
   saveDB();
+  // Also create Firebase Auth account if available
+  if(firebaseReady){
+    var aEmail=empId.toLowerCase().replace(/[^a-z0-9]/g,'')+'@pts.com';
+    fbAuth.createUserWithEmailAndPassword(aEmail,adminPw).catch(function(){
+      // Account may already exist, try signing in to verify
+      fbAuth.signInWithEmailAndPassword(aEmail,adminPw).catch(function(){});
+    });
+  }
   toast(emp.name+' promoted to Admin! They can now login with username: '+empId,'success',4000);
   renderSettings();
 }
@@ -1985,7 +2415,7 @@ async function deleteEmp(id){
   const empName=emp?emp.name:id;
   if(!confirm("Delete employee \""+empName+"\" ("+id+") PERMANENTLY? All data will be erased. This cannot be undone."))return;
 
-  // === STEP 1: Collect linked IDs ===
+  // === STEP 1: Collect IDs to delete from Firebase BEFORE touching local arrays ===
   const testResultIds=DB.testResults.filter(r=>r.empId===id).map(r=>r.id);
   const certNums=DB.certificates.filter(c=>c.empId===id).map(c=>c.num);
 
@@ -2010,8 +2440,21 @@ async function deleteEmp(id){
   certNums.forEach(cnum=>tombPromises.push(addToTombstone('certificates',cnum)));
   await Promise.all(tombPromises);
 
-  // Push to Google Sheets
-  saveDB();
+  // === STEP 4: Delete from Firebase directly (best-effort) ===
+  if(firebaseReady){
+    try{await fbDB.collection('employees').doc(String(id)).delete();}catch(e){console.warn('FB del employee:',e);}
+    for(const tid of testResultIds){
+      try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){console.warn('FB del testResult:',e);}
+    }
+    for(const cnum of certNums){
+      try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){console.warn('FB del cert:',e);}
+    }
+  }
+
+  // === STEP 5: Push cleaned data to cloud ===
+  if(firebaseReady){await new Promise(r=>{saveDB();setTimeout(r,1500);});}
+
+  // === STEP 6: Mark deletion time ===
   _lastDeleteTime=Date.now();
   toast("Employee \""+empName+"\" ("+id+") deleted permanently","warning");
 }
@@ -2289,8 +2732,19 @@ async function saveTraining(){
   try{renderTrainings();updateBadges();}catch(e){}
   saved=true;
   toast('Training "'+name+'" saved! ('+DB.trainings.length+' total)','success');
-  // 5. Sync to Google Sheets in background
-  saveDB();
+  // 5. Firebase sync in BACKGROUND (non-blocking)
+  if(firebaseReady){
+    (async function(){
+      try{
+        // Also remove tombstone from cloud
+        try{await fbDB.collection('deletedItems').doc('trainings_'+t.id).delete();}catch(e){}
+        await saveDB();
+      }catch(fbErr){
+        console.warn('Background sync error for training '+t.id+':',fbErr);
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }
+    })();
+  }
   }catch(e){
     toast('Error: '+e.message,'error',6000);
   }finally{
@@ -2432,8 +2886,17 @@ async function deleteTraining(id){
   linkedCertNums.forEach(function(cnum){tombPromises.push(addToTombstone('certificates',cnum));});
   await Promise.all(tombPromises);
 
-  // Push to Google Sheets
-  saveDB();
+  // === STEP 3: Delete from Firebase directly (best-effort) ===
+  if(firebaseReady){
+    try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
+    for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
+    for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
+  }
+
+  // === STEP 4: Push cleaned data to cloud ===
+  if(firebaseReady){await new Promise(function(r){saveDB();setTimeout(r,1500);});}
+
+  // === STEP 5: Mark deletion time ===
   _lastDeleteTime=Date.now();
   toast('Training "'+trnName+'" deleted permanently','warning');
 }
@@ -2446,8 +2909,13 @@ async function removeVideoFromTraining(trnId){
   delete trn.videoProgress;
   // Save to localStorage immediately
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  // Save and sync
-  saveDB();
+  // Sync to Firebase
+  if(firebaseReady){
+    try{
+      var clean={...trn};
+      await fbDB.collection('trainings').doc(String(trnId)).set(clean,{merge:true});
+    }catch(e){console.warn('FB remove video error:',e);}
+  }
   closeModal();
   renderTrainings();
   toast('Video link removed from "'+trn.name+'"','success');
@@ -2491,7 +2959,8 @@ function deleteCustomEquipment(eqId){
   DB.customEquipment=(DB.customEquipment||[]).filter(function(e){return e.id!==eqId;});
   var idx=EQUIPMENT_DATA.findIndex(function(e){return e.id===eqId;});
   if(idx>=0)EQUIPMENT_DATA.splice(idx,1);
-    saveDB();
+  if(firebaseReady){try{fbDB.collection('customEquipment').doc(String(eqId)).delete();}catch(e){}}
+  saveDB();
   renderEquipment();
   updateBadges();
   toast('Equipment deleted','warning');
@@ -2680,7 +3149,8 @@ function initTrnVideoTracker(ytVideoId,trnId,empId){
             var trn3=DB.trainings.find(function(t){return t.id===trnId;});
             if(trn3){if(!trn3.videoProgress)trn3.videoProgress={};trn3.videoProgress[empId]=tracker.percent;}
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-            }catch(ex){}
+            if(firebaseReady){try{saveDB();}catch(e){}}
+          }catch(ex){}
         }
       },
       onError:function(e){console.warn('YT Player error:',e.data);}
@@ -2836,9 +3306,12 @@ function saveSOP(){
 async function deleteSOP(id){
   if(!confirm("Delete this SOP PERMANENTLY?"))return;
   DB.sops=DB.sops.filter(s=>s.id!==id);
-  // Remove from DB and save
+  // AWAIT tombstone cloud write so other devices know immediately
   await addToTombstone('sops',id);
-  saveDB();
+  // Delete from Firebase FIRST
+  if(firebaseReady){try{await fbDB.collection('sops').doc(String(id)).delete();}catch(e){console.warn('FB del SOP:',e);}}
+  // Then save cleaned data
+  await new Promise(r=>{saveDB();setTimeout(r,1500);});
   _lastDeleteTime=Date.now();
   renderSOP();updateBadges();toast("SOP PERMANENTLY deleted","warning");
 }
@@ -3046,6 +3519,20 @@ function submitQuiz(){
   }
   updateBadges();
   saveDB();
+  // Force immediate Firebase save for test result so it's not lost
+  if(firebaseReady){
+    (async function(){
+      try{
+        const r=DB.testResults[DB.testResults.length-1];
+        if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
+        if(certNum){
+          const c=DB.certificates[DB.certificates.length-1];
+          if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
+        }
+        console.log('Quiz result saved to Firebase immediately');
+      }catch(e){console.warn('Firebase quiz save error:',e);}
+    })();
+  }
   // Auto-sync this test result to Google Sheets (fire-and-forget)
   (async function(){
     try{
@@ -3525,15 +4012,16 @@ function renderSettings(){
       ${isAdmin?`<button class="btn btn-amber" onclick="saveSettings()"><span class="mat-ico">save</span> Save Settings</button>`:""}
     </div>
     <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
-      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Google Sheets)</div>
-        <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone. Data syncs automatically via Google Sheets. No Firebase Auth needed.</div>
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Status: <span id="fbStatusText" style="color:${firebaseReady?'var(--green)':'var(--red)'};"><span class="mat-ico" style="font-size:14px;">${firebaseReady?'check_circle':'cloud_off'}</span> ${firebaseReady?'Connected — data syncs across devices':'Not Connected — using local storage only'}</span></div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone/device. Admin-added data syncs automatically via Firebase. New employees get Firebase Auth accounts created automatically.</div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-sm btn-green" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">cloud_upload</span> Force Sync to Cloud</button>
         <button class="btn btn-sm btn-outline" onclick="forceSyncFromCloud()"><span class="mat-ico" style="font-size:12px;">cloud_download</span> Pull from Cloud</button>
-        <button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="testSheetConnection()"><span class="mat-ico" style="font-size:12px;">science</span> Test Sheet Connection</button>
+        <button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="testFirebaseConnection()"><span class="mat-ico" style="font-size:12px;">science</span> Test Firebase</button>
       </div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-sm" style="background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-weight:700;border:none;" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">person_add</span> Fix Employee Phone Login (Sync All to Cloud + Auth)</button>
+        <button class="btn btn-sm" style="background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-weight:700;border:none;" onclick="forceSyncAllEmployees()"><span class="mat-ico" style="font-size:12px;">person_add</span> Fix Employee Phone Login (Sync All to Cloud + Auth)</button>
       </div>
       <div style="font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.5;">Click "Fix Employee Phone Login" if any employee cannot login from their phone. It writes EVERY employee individually to Firebase and creates login accounts.</div>
       <div id="fbTestResult" style="margin-top:8px;font-size:11px;display:none;"></div>
@@ -3628,7 +4116,7 @@ function renderSettings(){
           }
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <input class="form-control-sm" id="st_sheeturl" placeholder="https://script.google.com/macros/s/AKfycbzOL8tRg9UM6Wrb-n74N9YgVIPDZT8C_fZBUBTxZKDErQ_YR5ypx6msGrqufnSXiobn-w/exec" value="${DB.settings.sheetUrl||""}" style="flex:1;min-width:260px;">
+          <input class="form-control-sm" id="st_sheeturl" placeholder="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec" value="${DB.settings.sheetUrl||""}" style="flex:1;min-width:260px;">
           <button class="btn btn-green" onclick="syncToGoogleSheet()"><span class="mat-ico">sync</span> Sync Now</button>
           <button class="btn btn-outline" onclick="testSheetConnection()"><span class="mat-ico">wifi_tethering</span> Test</button>
         </div>
@@ -3725,7 +4213,8 @@ function saveAdmin(){
   if(DB.admins.find(a=>a.username===u)){toast("Username already exists","error");return;}
   DB.admins.push({username:u,name:n,password:p,role:document.getElementById("na_role").value});
   closeModal();renderSettings();saveDB();toast("Admin added","success");
-  }
+  if(firebaseReady){const aEmail=toEmail(u);fbAuth.signInWithEmailAndPassword(aEmail,p).catch(()=>{fbAuth.createUserWithEmailAndPassword(aEmail,p).catch(()=>{});});}
+}
 function backupData(){
   const blob=new Blob([JSON.stringify(DB,null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="mep_backup_"+new Date().toISOString().split("T")[0]+".json";a.click();
@@ -3768,36 +4257,8 @@ function buildTrainingPayload(){
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
   var body=JSON.stringify({sheet:sheetName,data:payload});
-  // Use XMLHttpRequest — handles Google's 302 redirect correctly
-  // fetch with no-cors silently loses POST body through Google's redirect
-  return new Promise(function(resolve){
-    try{
-      var xhr=new XMLHttpRequest();
-      xhr.open('POST',url,true);
-      xhr.setRequestHeader('Content-Type','text/plain');
-      xhr.onload=function(){
-        if(xhr.status>=200&&xhr.status<300){
-          try{var r=JSON.parse(xhr.responseText);console.log('[Push] '+sheetName+': OK',r);}catch(e){console.log('[Push] '+sheetName+': sent');}
-          resolve({sent:payload.length,ok:true});
-        }else{
-          console.warn('[Push] '+sheetName+': HTTP '+xhr.status);
-          // Fallback: sendBeacon (fire and forget, always works)
-          navigator.sendBeacon(url,body);
-          resolve({sent:payload.length,ok:false});
-        }
-      };
-      xhr.onerror=function(){
-        console.warn('[Push] '+sheetName+': XHR error — using sendBeacon');
-        navigator.sendBeacon(url,body);
-        resolve({sent:payload.length,ok:false});
-      };
-      xhr.send(body);
-    }catch(e){
-      console.error('[Push] '+sheetName+':',e);
-      navigator.sendBeacon(url,body);
-      resolve({sent:payload.length,ok:false});
-    }
-  });
+  await fetch(url,{method:"POST",mode:"no-cors",body:body,headers:{"Content-Type":"text/plain"}});
+  return {sent:payload.length};
 }
 async function syncToGoogleSheet(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
@@ -3833,6 +4294,36 @@ async function syncToGoogleSheet(){
   }catch(err){
     if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">❌ Sync failed — check the URL is correct and Apps Script is deployed as Web App with access "Anyone".</span>';
     toast("Sync failed. Check the Apps Script URL.","error",4000);
+  }
+}
+// Auto-sync to Google Sheet (fire-and-forget, used on admin login)
+function autoSyncToSheet(){
+  var url=DB.settings.sheetUrl||"";
+  if(!url)return;
+  setTimeout(async function(){
+    try{
+      var testPayload=buildSyncPayload();
+      var empPayload=buildEmployeePayload();
+      var trnPayload=buildTrainingPayload();
+      if(testPayload.length>0)await pushToSheet(url,testPayload,"Training Data");
+      if(empPayload.length>0)await pushToSheet(url,empPayload,"Employees");
+      if(trnPayload.length>0)await pushToSheet(url,trnPayload,"Trainings");
+      console.log('Auto-sync to Google Sheet: '+testPayload.length+' tests, '+empPayload.length+' employees, '+trnPayload.length+' trainings');
+    }catch(e){console.warn('Auto Google Sheet sync error:',e);}
+  },3000);
+}
+async function testSheetConnection(){
+  const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
+  if(!url){toast("Enter the Apps Script URL first","error");return;}
+  const statusEl=document.getElementById("syncStatus");
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">⏳ Testing connection…</span>';
+  try{
+    await pushToSheet(url,[{test:true}],"Training Data");
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">✅ Connection test OK! Apps Script is reachable. Run "Sync Now" to push all your data (Tests + Employees + Trainings).</span>';
+    toast("Connection test OK","success");
+  }catch{
+    if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">⚠ Could not reach the URL — verify it is deployed as a Web App with access set to "Anyone".</span>';
+    toast("Connection test failed","error");
   }
 }
 
@@ -4005,7 +4496,12 @@ function exportFullStatusReport(){
 const DB_STORAGE_KEY="pts_safety_db";
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
+let _syncBusy=false;
+let _syncBusySince=0; // When _syncBusy was set — used for safety timeout
+let _lastDeleteTime=0; // Timestamp of last deletion — prevents visibilitychange pull-back
+let _lastSyncTime=null;
 let _initDone=false; // Whether initApp() has completed — blocks login until true
+let _pendingSave=false; // When _syncBusy, queue a save to run after current sync finishes
 // Safety: if _syncBusy is stuck for more than 30 seconds, force-reset it
 setInterval(function(){
   if(_syncBusy && _syncBusySince && (Date.now()-_syncBusySince)>30000){
@@ -4026,12 +4522,53 @@ function saveTombstones(){
 async function addToTombstone(collection,id){
   if(!_deletedIds[collection])_deletedIds[collection]=[];
   if(!_deletedIds[collection].includes(id)){_deletedIds[collection].push(id);saveTombstones();}
+  // AWAIT cloud write so ALL devices see the deletion immediately
+  if(firebaseReady){
+    try{await fbDB.collection('deletedItems').doc(collection+'_'+id).set({collection,id,deletedAt:Date.now()});}catch(e){console.warn('Tombstone cloud write error:',e);}
+  }
 }
 async function removeFromTombstone(collection,id){
   if(!_deletedIds[collection])return;
   const before=_deletedIds[collection].length;
   _deletedIds[collection]=_deletedIds[collection].filter(x=>x!==id);
   if(_deletedIds[collection].length!==before)saveTombstones();
+  // AWAIT cloud delete so re-added items are not immediately re-tombstoned
+  if(firebaseReady){
+    try{await fbDB.collection('deletedItems').doc(collection+'_'+id).delete();}catch(e){console.warn('Tombstone cloud delete error:',e);}
+  }
+}
+async function loadTombstonesFromCloud(){
+  if(!firebaseReady)return 0;
+  try{
+    const snap=await fbDB.collection('deletedItems').get();
+    let added=0;
+    // Build sets of IDs that EXIST in current DB — if an item was re-added locally,
+    // do NOT apply its old tombstone (it was intentionally re-added)
+    const existingEmpIds=new Set(DB.employees.map(e=>e.id));
+    const existingTrnIds=new Set(DB.trainings.map(t=>t.id));
+    const existingSopIds=new Set(DB.sops.map(s=>s.id));
+    const existingTestIds=new Set(DB.testResults.map(r=>r.id));
+    const existingCertNums=new Set(DB.certificates.map(c=>c.num));
+    snap.docs.forEach(d=>{
+      const data=d.data();
+      if(data&&data.collection&&data.id){
+        // Skip tombstones for items that currently exist in DB (re-added items)
+        if(data.collection==='employees'&&existingEmpIds.has(data.id))return;
+        if(data.collection==='trainings'&&existingTrnIds.has(data.id))return;
+        if(data.collection==='sops'&&existingSopIds.has(data.id))return;
+        if(data.collection==='testResults'&&existingTestIds.has(data.id))return;
+        if(data.collection==='certificates'&&existingCertNums.has(data.id))return;
+        if(!_deletedIds[data.collection])_deletedIds[data.collection]=[];
+        if(!_deletedIds[data.collection].includes(data.id)){
+          _deletedIds[data.collection].push(data.id);
+          added++;
+        }
+      }
+    });
+    if(added)saveTombstones();
+    console.log('Loaded tombstones from cloud: '+snap.size+' entries ('+added+' new, skipped items that exist in DB)');
+    return added;
+  }catch(e){console.warn('Load cloud tombstones error:',e);return 0;}
 }
 /* Remove any doc from DB arrays that is in the tombstone list */
 function applyTombstones(){
@@ -4061,23 +4598,104 @@ function updateSyncUI(status){
     setTimeout(()=>updateSyncUI('idle'),4000);
   }else{
     icon.textContent='cloud_done';icon.style.color='var(--green)';icon.style.animation='';
-    // Show 'synced Xs ago' with live counter
-    if(_lastSyncTime){
-      var secs=Math.round((Date.now()-_lastSyncTime)/1000);
-      txt.textContent='Synced '+secs+'s ago';txt.style.color='var(--green)';
-    }else{
-      txt.textContent='Ready';txt.style.color='var(--muted)';
-    }
+    const ago=_lastSyncTime?Math.round((Date.now()-_lastSyncTime)/1000)+'s ago':'Ready';
+    txt.textContent='Synced';txt.style.color='var(--muted)';
     wrap.style.borderColor='var(--bdr)';
   }
-  // Live counter update every second while synced
-  clearInterval(window._syncCounterTimer);
-  if(_lastSyncTime){
-    window._syncCounterTimer=setInterval(function(){
-      var s=Math.round((Date.now()-_lastSyncTime)/1000);
-      if(txt)txt.textContent='Synced '+s+'s ago';
-    },1000);
+}
+function saveDB(){
+  // Step 1: Always save current in-memory DB to localStorage first (source of truth)
+  try{
+    const data=JSON.parse(JSON.stringify(DB));
+    localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(data));
+  }catch(e){}
+  // Step 2: Firebase sync — use CLEAN COPIES for upload, never modify in-memory DB
+  if(firebaseReady){
+    // Create tombstone-filtered copies ONLY for Firebase upload
+    // This prevents deleted items from being resurrected in the cloud
+    // WITHOUT touching the in-memory DB (which is the source of truth for localStorage)
+    // BUG FIX: Clean stale tombstones — if an employee EXISTS in DB.employees, remove their tombstone
+    // This handles the case where an employee was deleted then re-added with the same ID
+    if(_deletedIds.employees?.length){
+      var activeEmpIds=new Set(DB.employees.map(function(e){return e.id;}));
+      var staleEmpTombs=_deletedIds.employees.filter(function(tid){return activeEmpIds.has(tid);});
+      if(staleEmpTombs.length>0){
+        console.warn('saveDB: Cleaning '+staleEmpTombs.length+' STALE employee tombstone(s):',staleEmpTombs);
+        _deletedIds.employees=_deletedIds.employees.filter(function(tid){return !activeEmpIds.has(tid);});
+        saveTombstones();
+      }
+    }
+    if(_deletedIds.trainings?.length){
+      var activeTrnIds=new Set(DB.trainings.map(function(t){return t.id;}));
+      var staleTrnTombs=_deletedIds.trainings.filter(function(tid){return activeTrnIds.has(tid);});
+      if(staleTrnTombs.length>0){
+        console.warn('saveDB: Cleaning '+staleTrnTombs.length+' STALE training tombstone(s):',staleTrnTombs);
+        _deletedIds.trainings=_deletedIds.trainings.filter(function(tid){return !activeTrnIds.has(tid);});
+        saveTombstones();
+      }
+    }
+    var cleanEmployees=_deletedIds.employees?.length?DB.employees.filter(function(e){return !_deletedIds.employees.includes(e.id);}):DB.employees;
+    var cleanTrainings=_deletedIds.trainings?.length?DB.trainings.filter(function(t){return !_deletedIds.trainings.includes(t.id);}):DB.trainings;
+    var cleanSops=_deletedIds.sops?.length?DB.sops.filter(function(s){return !_deletedIds.sops.includes(s.id);}):DB.sops;
+    var cleanTestResults=_deletedIds.testResults?.length?DB.testResults.filter(function(r){return !_deletedIds.testResults.includes(r.id);}):DB.testResults;
+    var cleanCerts=_deletedIds.certificates?.length?DB.certificates.filter(function(c){return !_deletedIds.certificates.includes(c.num);}):DB.certificates;
+    // WARN if clean count differs from DB count (means tombstones are filtering active items)
+    if(cleanEmployees.length!==DB.employees.length){
+      console.error('saveDB: WARNING! cleanEmployees('+cleanEmployees.length+') != DB.employees('+DB.employees.length+'). Filtered IDs:',DB.employees.map(function(e){return e.id;}).filter(function(id){return _deletedIds.employees?.includes(id);}));
+    }
+    if(_syncBusy){
+      _pendingSave=true;
+      console.log('saveDB: sync busy, queuing pending save');
+      return Promise.resolve();
+    }
+    console.log('saveDB: syncing '+cleanEmployees.length+' employees (total DB: '+DB.employees.length+')');
+    _syncBusy=true;
+    _syncBusySince=Date.now();
+    updateSyncUI('syncing');
+    const syncPromise=Promise.all([
+      fbSaveCollection('employees',cleanEmployees,'id'),
+      fbSaveCollection('admins',DB.admins,'username'),
+      fbSaveCollection('trainings',cleanTrainings,'id'),
+      fbSaveCollection('testResults',cleanTestResults,'id'),
+      fbSaveCollection('certificates',cleanCerts,'num'),
+      fbSaveCollection('notifications',DB.notifications,'id'),
+      fbSaveCollection('sops',cleanSops,'id'),
+      fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
+      fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+      fbSaveSettings()
+    ]).then(results=>{
+      // Check if any collection FAILED to save to Firebase
+      const failed=results.filter(r=>r&&r.ok===false);
+      if(failed.length>0){
+        console.error('saveDB: '+failed.length+' collections failed to save to Firebase:',failed);
+        updateSyncUI('error');
+      }
+      return results;
+    });
+    const ret=syncPromise.then(async (results)=>{
+      _lastSyncTime=Date.now();
+      updateSyncUI('idle');
+      // If another save was queued while we were busy, run it now
+      if(_pendingSave){
+        _pendingSave=false;
+        _syncBusy=false; // Clear before recursing to avoid infinite loop
+        console.log('saveDB: running pending save');
+        await saveDB();
+      }
+      return results; // Pass results through to caller
+    }).catch(async ()=>{
+      updateSyncUI('error');
+      // Still run pending save even on error
+      if(_pendingSave){
+        _pendingSave=false;
+        _syncBusy=false; // Clear before recursing
+        console.log('saveDB: running pending save after error');
+        await saveDB();
+      }
+    }).finally(()=>{_syncBusy=false;});
+    return ret; // Return promise so callers can await it
   }
+  return Promise.resolve();
 }
 function loadDBFromLocal(){
   try{
@@ -4134,7 +4752,87 @@ function reconcileTrainingsFromResults(){
   return updated;
 }
 
-  
+async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      videos:['VID001','VID002','VID003','VID004','VID005','VID006','VID007','VID008','VID009','VID010','VID011','VID012','VID013','VID014','VID015','VID016','VID017','VID018','VID019','VID020','VID021','VID022','VID023'],      employees:['EMP001','EMP002','EMP003','EMP004','EMP005','EMP006','EMP007','EMP008'],      trainings:['TRN001','TRN002','TRN003','TRN004','TRN005','TRN006'],      testResults:['TST001','TST002','TST003','TST004','TST005'],      certificates:['CERT-2025-001','CERT-2025-002','CERT-2025-003','CERT-2025-004'],      notifications:['N001','N002','N003','N004','N005']    };    const batch=fbDB.batch();    let count=0;    for(const [coll,ids] of Object.entries(sampleIds)){      for(const id of ids){        const ref=fbDB.collection(coll).doc(id);        batch.delete(ref);        count++;      }    }    await batch.commit();    if(count>0)console.log('Cleaned up '+count+' sample docs from cloud');  }catch(e){console.warn('Sample data cleanup error:',e);}}
+async function loadDBFromFirestore(){
+  let loaded=0;let failed=[];
+  try{
+    // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
+    // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
+    var localSnapshot={
+      employees:JSON.parse(JSON.stringify(DB.employees||[])),
+      trainings:JSON.parse(JSON.stringify(DB.trainings||[])),
+      sops:JSON.parse(JSON.stringify(DB.sops||[])),
+      testResults:JSON.parse(JSON.stringify(DB.testResults||[])),
+      certificates:JSON.parse(JSON.stringify(DB.certificates||[])),
+      notifications:JSON.parse(JSON.stringify(DB.notifications||[]))
+    };
+    var localEmpMap=Object.fromEntries((DB.employees||[]).map(e=>[e.id,e]));
+    var localTrnMap=Object.fromEntries((DB.trainings||[]).map(t=>[t.id,t]));
+    var localSopMap=Object.fromEntries((DB.sops||[]).map(s=>[s.id,s]));
+
+    // Load each collection individually — one failure won't break the rest
+    const cols=[
+      ['employees','id',d=>{
+        const cloudEmps=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudEmps.map(e=>e.id));
+        const localOnly=Object.values(localEmpMap).filter(e=>!cloudIds.has(e.id));
+        DB.employees=[...cloudEmps,...localOnly];
+      }],
+      ['trainings','id',d=>{
+        const cloudTrns=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudTrns.map(t=>t.id));
+        const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id));
+        DB.trainings=[...cloudTrns,...localOnly];
+      }],
+      ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
+      ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
+      ['sops','id',d=>{
+        const cloudSops=d.docs.map(x=>x.data());
+        const cloudIds=new Set(cloudSops.map(s=>s.id));
+        const localOnly=Object.values(localSopMap).filter(s=>!cloudIds.has(s.id));
+        DB.sops=[...cloudSops,...localOnly];
+      }],
+      ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
+      ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
+      ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
+      ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}]
+    ];
+    const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
+    // Load settings separately (it's a single doc, not a collection)
+    try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');}
+    // Load tombstones from cloud
+    await loadTombstonesFromCloud();
+    // Rebuild completed arrays from testResults (source of truth)
+    reconcileTrainingsFromResults();
+    // Filter out permanently deleted items (tombstone)
+    applyTombstones();
+
+    // === AGGRESSIVE LOCAL MERGE: ensure NO local employee is ever lost ===
+    // Always merge local employees/trainings that cloud doesn't have (even without _localAddedAt)
+    ['employees','trainings','sops'].forEach(function(coll){
+      if(!Array.isArray(DB[coll]))return;
+      var currentIds=new Set(DB[coll].map(function(x){return x.id;}));
+      localSnapshot[coll].forEach(function(item){
+        if(!currentIds.has(item.id)){
+          var tombList=_deletedIds[coll]||[];
+          if(!tombList.includes(item.id)){
+            DB[coll].push(item);
+            console.warn('LOCAL MERGE: restored '+coll+' '+item.id+' ('+item.name+') from local data');
+          }
+        }
+      });
+    });
+
+    // Save merged data to localStorage
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':'')+' — Trainings: '+DB.trainings.length+', Employees: '+DB.employees.length);
+    return {ok:true,loaded,failed};
+  }catch(e){
+    console.warn('Firestore load error:',e);
+    return {ok:false,loaded:0,failed:['all'],error:e.message||String(e)};
+  }
+}
+
 function loadDB(){
   // Load tombstone list first
   loadTombstones();
@@ -4153,24 +4851,40 @@ function loadDB(){
   });
   if(badTrnIds.length>0){
     console.warn('[loadDB] Removed '+badTrnIds.length+' corrupted training(s):',badTrnIds);
+    // Also delete from Firebase
+    if(firebaseReady){
+      badTrnIds.forEach(function(tid){
+        fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});
+      });
+    }
+    // Save cleaned data immediately
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   }
   // Rebuild completed arrays from testResults (source of truth)
   reconcileTrainingsFromResults();
-  // Always ensure default admin exists with correct password
-  var existingAdmin=DB.admins.find(a=>a.username==="admin");
-  if(existingAdmin){
-    existingAdmin.password="admin123"; // Force-reset password to default
-  }else{
+  // Always ensure defaults exist
+  if(!DB.admins.find(a=>a.username==="admin")){
     DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
   }
   // Default employee re-creation removed — deleted employees stay deleted
 }
 async function resetDBToDefault(){
-  if(!confirm("Reset ALL data to defaults? This will delete everything. This cannot be undone."))return;
+  if(!confirm("Reset ALL data to defaults? This will delete all employees, trainings, test results, and certificates you added. This cannot be undone."))return;
   localStorage.removeItem(DB_STORAGE_KEY);
   localStorage.removeItem(TOMBSTONE_KEY);
- location.reload();
+  if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
+    try{
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems','customEquipment','customQuestions'];
+      for(const c of cols){
+        const snap=await fbDB.collection(c).get();
+        const batch=fbDB.batch();
+        snap.docs.forEach(d=>batch.delete(d.ref));
+        if(snap.size)await batch.commit();
+      }
+      toast('Firebase data cleared','success');
+    }catch(e){toast('Firebase clear error: '+e.message,'error');}
+  }
+  location.reload();
 }
 async function freshStartSite(){
   if(!confirm('FRESH START — This will:\n\n1. DELETE all trainings (except the HK Safety video one)\n2. DELETE all test results\n3. DELETE all certificates\n4. DELETE all notifications\n5. DELETE all custom questions\n6. DELETE all SOPs\n7. Keep all employees & admins\n\nThis cannot be undone. Continue?'))return;
@@ -4200,9 +4914,42 @@ async function freshStartSite(){
   try{localStorage.removeItem(TOMBSTONE_KEY);}catch(e){}
   // Save to localStorage immediately
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  // Push cleaned data to Google Sheets
-  if(getSheetUrl()){saveToSheets();}
-  toast('Fresh Start done! Data saved to Google Sheets.','success');
+  // Clear Firebase collections
+  if(firebaseReady){
+    try{
+      var colsToClear=['testResults','certificates','notifications','sops','customQuestions','deletedItems'];
+      for(const c of colsToClear){
+        const snap=await fbDB.collection(c).get();
+        if(snap.size>0){
+          const batch=fbDB.batch();
+          snap.docs.forEach(function(d){batch.delete(d.ref);});
+          await batch.commit();
+        }
+      }
+      // Rewrite trainings (only the kept one)
+      var allTrnIds=DB.trainings.map(function(t){return t.id;});
+      var trnSnap=await fbDB.collection('trainings').get();
+      if(trnSnap.size>0){
+        var delBatch=fbDB.batch();
+        trnSnap.docs.forEach(function(d){
+          if(!allTrnIds.includes(d.id)){delBatch.delete(d.ref);}
+        });
+        await delBatch.commit();
+      }
+      // Push the kept training
+      if(keepTrn){await fbDB.collection('trainings').doc(String(keepTrn.id)).set(DB.trainings[0],{merge:true});}
+      // Clear deletedItems tombstones
+      var delSnap=await fbDB.collection('deletedItems').get();
+      if(delSnap.size>0){
+        var dBatch=fbDB.batch();
+        delSnap.docs.forEach(function(d){dBatch.delete(d.ref);});
+        await dBatch.commit();
+      }
+      toast('Fresh Start done! Firebase cleared.','success');
+    }catch(e){toast('Firebase clear error: '+e.message,'error');}
+  }else{
+    toast('Fresh Start done! (local only)','success');
+  }
   renderAll();
   toast(keepTrn?'Fresh Start! Kept training: "'+keepTrn.name+'". Everything else cleared.':'Fresh Start! All data cleared. Add new trainings now.','success',6000);
 }
@@ -4218,111 +4965,150 @@ async function freshStartSite(){
   }catch(e){localStorage.removeItem("mep_user");}
 })();
 
-// ===== ENABLE LOGIN BUTTON IMMEDIATELY — before anything can go wrong =====
-(function(){
-  try{
-    var lb=document.getElementById('loginBtn');
-    if(lb){lb.disabled=false;lb.textContent='PTS SAFETY SIGN IN';}
-  }catch(e){}
-  _initDone=true;
-})();
-
 async function initApp(){
+  // Show loading state
+  const loginForm=document.querySelector('.login-wrap');
+  const loadMsg=document.getElementById('fbLoadStatus');
+  const loginBtn=document.getElementById('loginBtn');
+  if(loadMsg)loadMsg.style.display='block';
+  if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Loading data...';}
+
+  // 1. Load from localStorage immediately (sync)
+  loadDB();
+
+  // 2. Try Firebase/Firestore
+  let fbLoadError=null;
   try{
-    var loadMsg=document.getElementById('fbLoadStatus');
-    var loginBtn=document.getElementById('loginBtn');
+    firebaseReady=true;
+    // Run sample data cleanup in background (don't block login)
+    cleanupSampleDataFromCloud();
+    const loadResult=await loadDBFromFirestore();
+    if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
+      fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
+    }
+    // Always keep firebaseReady ON — even partial load is OK
+    if(!DB.admins.find(a=>a.username==="admin")){
+      DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
+      saveDB();
+    }
+    seedFirestore();
+  }catch(e){
+    console.warn('Firebase init error:',e);
+    fbLoadError=e.message||String(e);
+    // Do NOT set firebaseReady=false — keep trying to save
+  }
 
-    // 1. Load from localStorage immediately (fast, offline)
-    try{loadDB();}catch(dbErr){console.warn('loadDB error:',dbErr);}
-
-    // 2. Ensure default admin exists with correct password
-    try{
-      var existingAdmin2=DB.admins.find(function(a){return a.username==="admin";});
-      if(existingAdmin2){
-        existingAdmin2.password="admin123";
-      }else{
-        DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
-      }
-      try{saveDB();}catch(e){}
-    }catch(e){console.warn('admin fix error:',e);}
-
-    // 3. Enable login (idempotent — already enabled by IIFE above)
+  // === Push missing employees + Auth accounts — NON-BLOCKING ===
+  if(firebaseReady && DB.employees.length>0){
+    // ENABLE LOGIN FIRST — don't make users wait
     if(loadMsg)loadMsg.style.display='none';
+    var fbSt=document.getElementById('loginFbStatus');
+    if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--amber)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">sync</span> Cloud connected — '+DB.employees.length+' employees. Syncing in background...';}
     _initDone=true;
     if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
     var syncBtnBg=document.getElementById('loginSyncBtn');
     if(syncBtnBg)syncBtnBg.style.display='inline-block';
-
-    // 4. Apply theme
-    var t=localStorage.getItem("mep_theme")||"dark";
-    document.documentElement.setAttribute("data-theme",t);
-    DB.settings.theme=t;
-    var themeBtnIcon=document.getElementById("themeBtn");
-    if(themeBtnIcon){var ico=themeBtnIcon.querySelector(".mat-ico");if(ico)ico.textContent=t==="dark"?"dark_mode":"light_mode";}
-
-    // 5. Show sheet status on login page
-    var statusEl=document.getElementById('loginFbStatus');
-    if(getSheetUrl()){
-      if(statusEl){statusEl.style.display='block';statusEl.style.color='var(--amber)';statusEl.innerHTML='<span class="mat-ico" style="font-size:13px;">sync</span> Syncing with Google Sheets...';}
-    }else if(statusEl){
-      statusEl.style.display='block';statusEl.style.color='var(--amber)';statusEl.innerHTML='<span class="mat-ico" style="font-size:13px;">warning</span> No Sheet URL. Go to Settings to connect Google Sheets.';
-    }
-
-    // 6. Auto-login from saved session
-    var sv=localStorage.getItem("mep_user");
-    if(sv){
+    var tBg=localStorage.getItem("mep_theme")||"dark";
+    document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
+    document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
+    if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
+    // Background sync
+    (async function(){
       try{
-        var p=JSON.parse(sv);var v=false;
-        if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}
-        else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}
-        if(v){startApp();}else{localStorage.removeItem("mep_user");}
-      }catch(e2){localStorage.removeItem("mep_user");}
-    }
+        var bgAdminOk=await authAsAdmin();
+        if(!bgAdminOk){console.error('[bg] Admin auth failed — cannot push missing employees');return;}
+        var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
+        var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
+        if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');
+        var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we){await authAsAdmin();}}}
+        var af=0;for(var ai=0;ai<DB.employees.length;ai++){var ae=DB.employees[ai];if(!ae||!ae.id)continue;try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(ae.id),ae.password||'emp123');af++;}catch(ae2){}}
+        await authAsAdmin();
+        var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
+        if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+fs.size+'/'+DB.employees.length+' employees'+(pok>0?' (fixed '+pok+' missing)':'')+(af>0?' + '+af+' login(s) fixed':'');}
+        console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
+      }catch(e){console.error('[bg]',e);}
+    })();
+    // Auth persistence + session check (needed for auto-login)
+    try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
+    var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
+    return;
+  }
+  if(loadMsg)loadMsg.style.display='none';
 
-    // 7. Load from Google Sheets in BACKGROUND (with 8-second timeout)
-    if(getSheetUrl()){
-      var sheetLoadTimeout=setTimeout(function(){
-        console.warn('Sheets load timed out after 8s');
-        if(statusEl){statusEl.style.color='var(--amber)';statusEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sheet sync timed out. Click "Sync Data" to retry.';}
-      },8000);
-      try{
-        var result=await Promise.race([
-          loadFromSheets(),
-          new Promise(function(_,reject){setTimeout(function(){reject(new Error('Timeout'));},8000);})
-        ]);
-        clearTimeout(sheetLoadTimeout);
-        if(result&&result.error){
-          if(statusEl){statusEl.style.display='block';statusEl.style.color='var(--red)';statusEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sheet error: '+result.error;}
+  // Show Firebase load status on login page
+  const fbStatus=document.getElementById('loginFbStatus');
+  if(fbStatus){
+    if(fbLoadError){
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--red)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Cloud load error: '+fbLoadError+' — Employees may not appear. Click "Sync Data" below.';
+    }else if(DB.employees.length===0){
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--amber)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">warning</span> 0 employees loaded from cloud. Ask admin to add you first.';
+    }else{
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--green)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees in DB (all synced to cloud)';
+    }
+  }
+  // CRITICAL: Enable login ONLY after all data is loaded
+  _initDone=true;
+  if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+  const syncBtn=document.getElementById('loginSyncBtn');
+  if(syncBtn)syncBtn.style.display='inline-block';
+
+  // Double-check: guarantee default admin always present
+  if(!DB.admins.find(a=>a.username==="admin")){
+    DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
+    saveDB();
+  }
+  const t=localStorage.getItem("mep_theme")||"dark";
+  document.documentElement.setAttribute("data-theme",t);
+  DB.settings.theme=t;
+  document.getElementById("themeBtn").querySelector(".mat-ico").textContent=t==="dark"?"dark_mode":"light_mode";
+
+  // Try Firebase Auth persistence first
+  try{
+    if(firebaseReady){
+      await new Promise(r=>{const unsub=fbAuth.onAuthStateChanged(r);setTimeout(unsub,3000);});
+      const fbUser=fbAuth.currentUser;
+      if(fbUser){
+        const uid=fbUser.email.split('@')[0].toUpperCase();
+        let found=false;
+        if(uid==='ADMIN'){
+          const admin=DB.admins.find(a=>a.username==='admin');
+          if(admin){currentUser={...admin,type:"admin"};isAdmin=true;found=true;}
         }else{
-          sheetReady=true;
-          var ea=DB.admins.find(function(a){return a.username==="admin";});
-          if(ea)ea.password="admin123";
-          console.log('Google Sheets loaded: '+DB.employees.length+' employees');
-          if(statusEl){statusEl.style.display='block';statusEl.style.color='var(--green)';statusEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Google Sheets — '+DB.employees.length+' employees loaded';}
+          const emp=DB.employees.find(e=>e.id===uid);
+          if(emp){currentUser={...emp,type:"employee"};isAdmin=false;found=true;}
         }
-      }catch(e){
-        clearTimeout(sheetLoadTimeout);
-        console.warn('Sheets load error:',e);
-        if(statusEl){statusEl.style.display='block';statusEl.style.color='var(--red)';statusEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sheet sync failed. Login works with local data.';}
+        if(found){startApp();return;}
       }
     }
-  }catch(initErr){
-    console.error('initApp error:',initErr);
-    // LAST RESORT: make sure login is enabled even if initApp crashes
-    var btn=document.getElementById('loginBtn');
-    if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
-    _initDone=true;
+  }catch(e){console.warn('Auth persistence check error:',e);}
+
+  // Fallback: check localStorage session
+  const saved=localStorage.getItem("mep_user");
+  if(saved){
+    try{
+      const parsed=JSON.parse(saved);
+      let valid=false;
+      if(parsed.type==="admin"){
+        const match=DB.admins.find(a=>a.username===parsed.username);
+        if(match){currentUser={...match,type:"admin"};isAdmin=true;valid=true;}
+      }else if(parsed.type==="employee"){
+        const match=DB.employees.find(e=>e.id===parsed.id);
+        if(match){currentUser={...match,type:"employee"};isAdmin=false;valid=true;}
+      }
+      if(valid){startApp();}else{localStorage.removeItem("mep_user");}
+    }catch{localStorage.removeItem("mep_user");}
   }
 }
 
-try{initApp();}catch(e){
-  console.error('initApp CRASH:',e);
-  var btn2=document.getElementById('loginBtn');
-  if(btn2){btn2.disabled=false;btn2.textContent='PTS SAFETY SIGN IN';}
-  _initDone=true;
-}
-try{document.getElementById("loginId").addEventListener("keydown",function(e){if(e.key==="Enter")document.getElementById("loginPw").focus();});}catch(e){}
-try{document.getElementById("loginPw").addEventListener("keydown",function(e){if(e.key==="Enter")doLogin();});}catch(e){}
+initApp();
+document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPw").focus();});
+document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
 </html>
