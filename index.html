@@ -902,7 +902,6 @@ let DB={
 };
 
 /* ============================================================
-/* ============================================================
    GOOGLE SHEETS BACKEND — Firebase-Like Auto Sync
    ============================================================
 // Every saveDB() → instant push to Google Sheets (debounced 500ms)
@@ -969,28 +968,42 @@ async function saveToSheets() {
     }
 }
 // ==================== PULL: Load all data FROM Google Sheets ====================
-// Tries CORS mode first (can read response), falls back gracefully
+// Tries GET first (always works with Apps Script), then POST as fallback
 // Called on: app startup, employee login, tab visible, manual sync
 async function loadFromSheets() {
     var url = getSheetUrl();
     if (!url) return {ok:false,error:'No sheet URL'};
     var loaded=0, failed=[];
     try{
-        // APPROACH 1: CORS mode (can read JSON response)
-        var resp = await fetch(url, {
-            method:'POST',
-            body: JSON.stringify({action:'readAll'}),
-            headers:{'Content-Type':'text/plain'}
-        });
+        // APPROACH 1: GET request ( doGet handler — always CORS-friendly)
+        var resp = await fetch(url);
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         var data = await resp.json();
+        if (data.error) throw new Error(data.error);
         loaded = mergeSheetData(data, loaded);
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         console.log('[Sheets] Loaded '+loaded+' collections, '+DB.employees.length+' employees');
         return {ok:true,loaded:loaded,failed:failed};
-    }catch(corsErr){
-        console.warn('[Sheets] CORS read failed:', corsErr.message, '— this is normal if Apps Script does not have readAll handler');
-        return {ok:false,loaded:0,failed:['cors'],error:corsErr.message};
+    }catch(getErr){
+        console.warn('[Sheets] GET failed:', getErr.message, '— trying POST...');
+        try{
+            // APPROACH 2: POST with readAll action
+            var resp2 = await fetch(url, {
+                method:'POST',
+                body: JSON.stringify({action:'readAll'}),
+                headers:{'Content-Type':'text/plain'}
+            });
+            if (!resp2.ok) throw new Error('HTTP ' + resp2.status);
+            var data2 = await resp2.json();
+            if (data2.error) throw new Error(data2.error);
+            loaded = mergeSheetData(data2, loaded);
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            console.log('[Sheets] POST loaded '+loaded+' collections');
+            return {ok:true,loaded:loaded,failed:failed};
+        }catch(postErr){
+            console.warn('[Sheets] POST also failed:', postErr.message);
+            return {ok:false,loaded:0,failed:['get','post'],error:postErr.message};
+        }
     }
 }
 // Merge data loaded from Google Sheets into local DB
