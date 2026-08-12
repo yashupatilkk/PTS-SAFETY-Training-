@@ -3546,7 +3546,16 @@ function submitQuiz(){
       var trn=DB.trainings.find(function(t){return t.name===r.training;});
       var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
       var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
-      (function(){var img=new Image();img.src=sheetUrl+"?json="+encodeURIComponent(JSON.stringify({sheet:"Training Data",data:[row]}));})();
+      (function(){
+      var f=document.createElement('form');
+      f.method='POST';f.action=sheetUrl;f.target='_gsq_'+Date.now();
+      f.style.display='none';
+      var inp=document.createElement('input');
+      inp.type='hidden';inp.name='json';
+      inp.value=JSON.stringify({sheet:'Training Data',data:[row]});
+      f.appendChild(inp);document.body.appendChild(f);f.submit();
+      setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);
+    })();
       console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
       // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
       queueSheetSync(["Training Data","Certificates"]);
@@ -4284,22 +4293,29 @@ function buildSopPayload(){
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
-  var CHUNK=30;
-  for(var i=0;i<payload.length;i+=CHUNK){
-    var chunk=payload.slice(i,i+CHUNK);
-    var json=JSON.stringify({sheet:sheetName,data:chunk});
-    // Use Image tag — 100% reliable, never blocked by CORS
-    await new Promise(function(ok){
-      var img=new Image();
-      img.onload=function(){ok();};
-      img.onerror=function(){ok();};
-      img.src=url+"?json="+encodeURIComponent(json);
-      setTimeout(ok,4000);
-    });
-    // Small delay between chunks
-    if(i+CHUNK<payload.length) await new Promise(function(ok){setTimeout(ok,500);});
-  }
-  return {sent:payload.length};
+  var json=JSON.stringify({sheet:sheetName,data:payload});
+  // Form POST — only method that works with Google Apps Script
+  return new Promise(function(resolve){
+    var fname='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
+    var iframe=document.createElement('iframe');
+    iframe.name=fname;iframe.style.display='none';
+    document.body.appendChild(iframe);
+    var form=document.createElement('form');
+    form.method='POST';form.action=url;form.target=fname;
+    var input=document.createElement('input');
+    input.type='hidden';input.name='json';input.value=json;
+    form.appendChild(input);document.body.appendChild(form);
+    var done=false;
+    function cleanup(){
+      if(done)return;done=true;
+      try{document.body.removeChild(iframe);}catch(e){}
+      try{document.body.removeChild(form);}catch(e){}
+      resolve({sent:payload.length});
+    }
+    iframe.onload=cleanup;
+    setTimeout(cleanup,6000);
+    form.submit();
+  });
 }
 async function syncToGoogleSheet(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
