@@ -895,7 +895,7 @@ let DB={
   notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
-    sheetUrl:"https://script.google.com/macros/s/AKfycbxkCzs8CBN4fbpRGIr5BQBj2PKXuKxFhkfcxNLpB9VlSPvnxW7mF6dEtNs5I6AJJ9styg/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    sheetUrl:"https://script.google.com/macros/s/AKfycbzNr4QxrtODvP3-pooK6Kq7iY1seWPWRdGumpggp_diWjzv5PqliEfdQdKdw6k6kigW4w/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -3546,7 +3546,7 @@ function submitQuiz(){
       var trn=DB.trainings.find(function(t){return t.name===r.training;});
       var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
       var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
-      await fetch(sheetUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"json="+encodeURIComponent(JSON.stringify({sheet:"Training Data",data:[row]}))});
+      await fetch(sheetUrl+"?json="+encodeURIComponent(JSON.stringify({sheet:"Training Data",data:[row]})),{method:"GET",mode:"no-cors"});
       console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
       // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
       queueSheetSync(["Training Data","Certificates"]);
@@ -4284,9 +4284,14 @@ function buildSopPayload(){
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
-  var json=JSON.stringify({sheet:sheetName,data:payload});
-  // Use form-urlencoded — survives Google Script redirects (no-ccors drops POST body on redirect)
-  await fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"json="+encodeURIComponent(json)});
+  // Split large payloads into chunks of 50 rows (URL length limit ~8000 chars)
+  var CHUNK=50;
+  for(var i=0;i<payload.length;i+=CHUNK){
+    var chunk=payload.slice(i,i+CHUNK);
+    var json=JSON.stringify({sheet:sheetName,data:chunk});
+    // GET with query param — data survives Google Script redirects (POST body gets dropped)
+    await fetch(url+"?json="+encodeURIComponent(json),{method:"GET",mode:"no-cors"});
+  }
   return {sent:payload.length};
 }
 async function syncToGoogleSheet(){
@@ -5194,4 +5199,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
