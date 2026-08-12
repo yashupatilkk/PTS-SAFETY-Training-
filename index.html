@@ -4336,7 +4336,7 @@ let _sheetSyncRunning=false;
 // Queue a sheet sync — call this after ANY data change (debounced automatically)
 function queueSheetSync(sheetNames){
   if(!isAdmin) return; // Only admin can sync
-  if(!(DB.settings.sheetAutoSync!==false)) return; // Auto-sync OFF by default, needs to be enabled
+  if(DB.settings.sheetAutoSync===false) return; // Auto-sync OFF (default is ON)
   var url=DB.settings.sheetUrl||"";
   if(!url) return;
   // Store which sheets need syncing (accumulates until timer fires)
