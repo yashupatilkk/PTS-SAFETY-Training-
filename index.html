@@ -5226,5 +5226,48 @@ initApp();
 document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPw").focus();});
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
+  <script>
+// === GOOGLE SHEET AUTO-SYNC PATCH ===
+(function(){
+  var PATCH_URL="https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec";
+
+  // Fix URL on load
+  var origLoad=window.loadDB;
+  var patched=false;
+  function applyPatch(){
+    if(patched)return;
+    patched=true;
+    DB.settings.sheetUrl=PATCH_URL;
+    DB.settings.sheetAutoSync=true;
+    // Override pushToSheet with form POST (only method that works)
+    window.pushToSheet=function(url,payload,sheetName){
+      if(!payload.length)return Promise.resolve({sent:0});
+      var json=JSON.stringify({sheet:sheetName,data:payload});
+      return new Promise(function(resolve){
+        var fn='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
+        var ifr=document.createElement('iframe');ifr.name=fn;ifr.style.display='none';document.body.appendChild(ifr);
+        var frm=document.createElement('form');frm.method='POST';frm.action=(url||PATCH_URL);frm.target=fn;
+        var inp=document.createElement('input');inp.type='hidden';inp.name='json';inp.value=json;
+        frm.appendChild(inp);document.body.appendChild(frm);
+        var done=false;
+        function clean(){if(done)return;done=true;try{document.body.removeChild(ifr);}catch(e){}try{document.body.removeChild(frm);}catch(e){}resolve({sent:payload.length});}
+        ifr.onload=clean;setTimeout(clean,6000);frm.submit();
+      });
+    };
+    console.log('[Sheet Patch] Applied! Auto-sync ready.');
+  }
+  // Patch after DB loads
+  var origLoadDB=window.loadDB;
+  if(origLoadDB){
+    window.loadDB=function(){
+      var r=origLoadDB.apply(this,arguments);
+      applyPatch();
+      return r;
+    };
+  }
+  // Also patch immediately if DB already loaded
+  setTimeout(applyPatch,3000);
+})();
+</script>
 </body>
 </html>
