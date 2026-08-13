@@ -895,7 +895,7 @@ let DB={
   notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
-    sheetUrl:"https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    sheetUrl:"https://script.google.com/macros/s/AKfycbyn5NCt91JkixFDMG2-P86X30edpJUY5b0WYDF4-pGWRsf0d3gLsyk_p4rx4JsM0R6SXw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -4381,11 +4381,12 @@ function queueSheetSync(sheetNames){
 async function executeSheetSync(){
   if(_sheetSyncRunning) return; // Prevent concurrent syncs
   var url=DB.settings.sheetUrl||"";
-  if(!url) return;
+  if(!url){toast('Auto-sync: No Sheet URL','error');return;}
   if(!window._pendingSheetSyncs||window._pendingSheetSyncs.size===0) return;
   var sheetsToSync=Array.from(window._pendingSheetSyncs);
   window._pendingSheetSyncs.clear();
   _sheetSyncRunning=true;
+  toast('Auto-syncing to Google Sheet...','info',2000);
   console.log('[Sheet Auto-Sync] Starting sync for: '+sheetsToSync.join(', '));
   try{
     var totalSent=0;
@@ -4414,6 +4415,7 @@ async function executeSheetSync(){
     if(si){si.style.color='var(--green)';si.innerHTML='<span class="mat-ico" style="font-size:12px;">check_circle</span> Sheet synced';setTimeout(function(){si.innerHTML='';},3000);}
   }catch(err){
     console.warn('[Sheet Auto-Sync] Error:',err);
+    toast('Auto-sync error: '+err.message,'error',3000);
   }
   _sheetSyncRunning=false;
 }
@@ -4949,6 +4951,15 @@ function loadDB(){
   loadTombstones();
   // Synchronous: load from localStorage for immediate use
   loadDBFromLocal();
+  // CRITICAL: Ensure Google Sheet URL is set (old localStorage may not have it)
+  if(!DB.settings.sheetUrl){
+    DB.settings.sheetUrl="https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec";
+    console.log('[init] Sheet URL restored from default');
+  }
+  if(DB.settings.sheetAutoSync===undefined||DB.settings.sheetAutoSync===null){
+    DB.settings.sheetAutoSync=true;
+    console.log('[init] Auto-sync enabled by default');
+  }
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
@@ -5222,4 +5233,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
