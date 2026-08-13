@@ -4951,15 +4951,9 @@ function loadDB(){
   loadTombstones();
   // Synchronous: load from localStorage for immediate use
   loadDBFromLocal();
-  // CRITICAL: Ensure Google Sheet URL is set (old localStorage may not have it)
-  if(!DB.settings.sheetUrl){
-    DB.settings.sheetUrl="https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec";
-    console.log('[init] Sheet URL restored from default');
-  }
-  if(DB.settings.sheetAutoSync===undefined||DB.settings.sheetAutoSync===null){
-    DB.settings.sheetAutoSync=true;
-    console.log('[init] Auto-sync enabled by default');
-  }
+  // CRITICAL: ALWAYS use the correct Google Sheet URL (old localStorage may have wrong URL)
+  DB.settings.sheetUrl="https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec";
+  DB.settings.sheetAutoSync=true;
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
@@ -5233,3 +5227,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
