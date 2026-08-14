@@ -1365,7 +1365,8 @@ function startAutoSync(){
         fbSaveSettings()
       ]);
       // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
-      if(isAdmin){
+      // GUARD: If cloud load is blocked (fresh reset), skip pulling old data from Firebase
+      if(isAdmin && !_skipCloudLoad){
         try{
           const fbTestSnap=await fbDB.collection('testResults').get();
           const fbTests=fbTestSnap.docs.map(d=>d.data());
@@ -1391,7 +1392,7 @@ function startAutoSync(){
   // When user returns to the tab, pull latest from cloud
   // But skip if a delete just happened (within 10s) to prevent pulling back deleted items
   document.addEventListener('visibilitychange',async function(){
-    if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&(Date.now()-_lastDeleteTime)>10000){
+    if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&!_skipCloudLoad&&(Date.now()-_lastDeleteTime)>10000){
       try{
         await loadDBFromFirestore();
         // Save to localStorage only (don't push back to cloud — cloud is source of truth)
@@ -1406,6 +1407,8 @@ function startAutoSync(){
 
 async function seedFirestore(){
   if(!firebaseReady)return;
+  // GUARD: Don't seed if cloud load is blocked (fresh reset mode)
+  if(_skipCloudLoad)return;
   try{
     const metaDoc=await fbDB.collection('config').doc('meta').get();
     if(metaDoc.exists)return;
@@ -1535,7 +1538,8 @@ async function doLogin(){
       var empId=id.toUpperCase();
       var emp=DB.employees.find(function(e){return e.id===empId;});
       // If not found locally, ONE cloud read then check
-      if(!emp&&firebaseReady){
+      // GUARD: Don't pull from cloud if we're in fresh-reset mode
+      if(!emp&&firebaseReady&&!_skipCloudLoad){
         try{
           toast('Checking cloud...','info',2000);
           var empSnap=await fbDB.collection('employees').get();
@@ -2640,9 +2644,18 @@ function openAddTrnModal(){
       <div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="nt_desc" rows="2" placeholder="Training description..."></textarea></div>
       <div class="form-section" style="margin-top:14px;border:2px solid rgba(62,207,142,.3);background:rgba(62,207,142,.04);">
         <div class="form-section-title" style="color:var(--green);"><span class="mat-ico" style="font-size:14px;">description</span> Training Document (for Audit)</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Upload PPT/PDF given to employees during training. This is shown in Audit Trail for auditors.</div>
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Document Name</label><input class="form-control-sm" id="nt_docname" placeholder="e.g. Fire Safety Training PPT Aug 2026"></div>
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Document Link (Google Drive / any URL)</label><input class="form-control-sm" id="nt_doclink" placeholder="https://drive.google.com/file/d/..."></div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Upload PPT/PDF or leave blank — a training document will be <b style="color:var(--green);">auto-generated</b> for audit. Shown in Audit Trail for auditors.</div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Upload Training Document (PPT/PDF)</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:rgba(62,207,142,.1);border:1px dashed var(--green);border-radius:var(--r-sm);cursor:pointer;font-size:12px;color:var(--green);font-weight:600;transition:all .2s;" onmouseover="this.style.background='rgba(62,207,142,.2)'" onmouseout="this.style.background='rgba(62,207,142,.1)'">
+              <span class="mat-ico" style="font-size:18px;">upload_file</span> Choose File
+              <input type="file" id="nt_docfile" accept=".ppt,.pptx,.pdf,.doc,.docx" style="display:none;" onchange="handleDocUpload(this)">
+            </label>
+            <span id="nt_docstatus" style="font-size:11px;color:var(--muted);">No file chosen — PDF will be auto-generated</span>
+            <button type="button" style="display:inline-flex;align-items:center;gap:5px;padding:8px 14px;background:rgba(255,176,32,.1);border:1px solid var(--amber);border-radius:var(--r-sm);cursor:pointer;font-size:11px;color:var(--amber);font-weight:600;" onclick="previewAutoDoc()"><span class="mat-ico" style="font-size:15px;">auto_awesome</span> Preview Auto-Generated</button>
+          </div>
+          <div id="nt_docpreview" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:var(--r-sm);font-size:11px;"></div>
+        </div>
       </div>
       </div>
       <div class="form-section" style="margin-top:14px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);">
@@ -2710,6 +2723,119 @@ function getCustomQuestions(){
   }
   return qs;
 }
+
+// === AUTO-GENERATE TRAINING DOCUMENT (PDF) ===
+function autoGenerateTrainingDoc(name,cat,dept,trainer,date,duration,passing,desc,ytUrl){
+  try{
+    var jsPDF=window.jspdf.jsPDF;
+    var doc=new jsPDF();
+    var y=20;
+    // Header bar
+    doc.setFillColor(232,72,58);
+    doc.rect(0,0,210,32,'F');
+    doc.setFillColor(255,176,32);
+    doc.rect(0,32,210,3,'F');
+    // Title
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(20);
+    doc.setFont('helvetica','bold');
+    doc.text('PTS SAFETY',14,16);
+    doc.setFontSize(11);
+    doc.setFont('helvetica','normal');
+    doc.text('Training Document (For Audit Purpose)',14,24);
+    // Training details
+    y=45;
+    doc.setTextColor(30,30,30);
+    doc.setFontSize(16);
+    doc.setFont('helvetica','bold');
+    doc.text('Training: '+name,14,y); y+=12;
+    // Info table
+    doc.setFontSize(10);
+    doc.setFont('helvetica','normal');
+    var info=[
+      ['Category',cat||'General'],['Department',dept||'All'],['Trainer',trainer||'N/A'],
+      ['Date',date||'-'],['Duration',duration||'4 hrs'],['Passing Marks',passing+'%'],
+      ['Valid For','1 Year']
+    ];
+    info.forEach(function(row){
+      doc.setFont('helvetica','bold');
+      doc.text(row[0]+':',14,y);
+      doc.setFont('helvetica','normal');
+      doc.text(row[1],70,y);
+      y+=7;
+    });
+    y+=4;
+    // Description
+    if(desc){
+      doc.setDrawColor(200,200,200);
+      doc.line(14,y,196,y); y+=6;
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(11);
+      doc.text('Description:',14,y); y+=7;
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(10);
+      var descLines=doc.splitTextToSize(desc,170);
+      doc.text(descLines,14,y); y+=descLines.length*5+4;
+    }
+    // YouTube link
+    if(ytUrl){
+      doc.setDrawColor(200,200,200);
+      doc.line(14,y,196,y); y+=6;
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(11);
+      doc.text('Training Video:',14,y); y+=7;
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(10);
+      doc.setTextColor(62,160,232);
+      var ytLines=doc.splitTextToSize(ytUrl,170);
+      doc.text(ytLines,14,y); y+=ytLines.length*5+4;
+    }
+    // Assessment section
+    doc.setTextColor(30,30,30);
+    doc.setDrawColor(200,200,200);
+    doc.line(14,y,196,y); y+=6;
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(11);
+    doc.text('Assessment Details:',14,y); y+=7;
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(10);
+    doc.text('Employees must achieve '+passing+'% or higher to pass this training.',14,y); y+=6;
+    doc.text('Test can be taken only ONE TIME after watching 90% of the training video.',14,y); y+=6;
+    doc.text('Failed tests require re-training before re-attempt.',14,y); y+=10;
+    // Sign-off section
+    doc.setDrawColor(200,200,200);
+    doc.line(14,y,196,y); y+=8;
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(11);
+    doc.text('Sign-Off:',14,y); y+=10;
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(10);
+    doc.text('Trainer Signature: ________________________',14,y); y+=8;
+    doc.text('Date: ________________________',14,y); y+=8;
+    doc.text('HOD Signature:   ________________________',14,y); y+=8;
+    doc.text('Date: ________________________',14,y); y+=12;
+    // Footer
+    doc.setDrawColor(232,72,58);
+    doc.setLineWidth(0.5);
+    doc.line(14,y,196,y); y+=5;
+    doc.setFontSize(8);
+    doc.setTextColor(130,130,130);
+    doc.text('This document was auto-generated by PTS SAFETY Training Management System on '+new Date().toLocaleDateString(),14,y);
+    doc.text('Document ID: '+name.replace(/\s+/g,'-').toUpperCase()+'-'+date.replace(/-/g,''),14,y+4);
+    // Generate blob
+    var pdfBlob=doc.output('blob');
+    var docName=name.replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')+'_Training_Document.pdf';
+    return new Promise(function(resolve){
+      var reader=new FileReader();
+      reader.onload=function(e){resolve({name:docName,data:e.target.result});};
+      reader.readAsDataURL(pdfBlob);
+    });
+  }catch(e){
+    console.warn('Auto-generate doc error:',e);
+    return null;
+  }
+}
+
 async function saveTraining(){
   var btn=document.getElementById('saveTrnBtn');
   var saved=false;
@@ -2732,16 +2858,34 @@ async function saveTraining(){
   var ytId=extractYoutubeId(ytUrl);
   if(!ytUrl){toast('YouTube video link is required!','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:document.getElementById('nt_docname')?document.getElementById('nt_docname').value.trim():'',docLink:document.getElementById('nt_doclink')?document.getElementById('nt_doclink').value.trim():'',enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
+  var docN=_uploadedDocName||'';
+  var docL=_uploadedDocData||'';
+  var docData=_uploadedDocData||'';
+  // AUTO-GENERATE: If no document was uploaded, create a PDF automatically
+  if(!docN||!docL){
+    var dept=document.getElementById('nt_dept').value;
+    var trainer=document.getElementById('nt_trainer').value;
+    var trnDate=document.getElementById('nt_date').value;
+    var trnDur=document.getElementById('nt_dur').value||'4 hrs';
+    var trnPass=parseInt(document.getElementById('nt_pass').value)||75;
+    var trnDesc=document.getElementById('nt_desc').value;
+    var autoDoc=await autoGenerateTrainingDoc(name,cat,dept,trainer,trnDate,trnDur,trnPass,trnDesc,ytUrl);
+    if(autoDoc){
+      docN=autoDoc.name;
+      docL=autoDoc.data;
+      docData=autoDoc.data;
+      console.log('[saveTraining] Auto-generated audit document: '+autoDoc.name);
+    }
+  }
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:docN,docLink:docL,docData:docData,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
 
   // 1. Add to local array
   DB.trainings.push(t);
   DB.notifications.unshift({id:genId('N'),msg:'New training: '+name,read:false,time:'Just now',icon:'school'});
   // Audit log for training creation
-  var docN=document.getElementById('nt_docname')?document.getElementById('nt_docname').value.trim():'';
-  var docL=document.getElementById('nt_doclink')?document.getElementById('nt_doclink').value.trim():'';
+  _uploadedDocName='';_uploadedDocData=''; // clear after saving
   if(!DB.auditLog)DB.auditLog=[];
-  DB.auditLog.push({id:genId('AUD'),date:new Date().toISOString().split('T')[0],type:'training_doc',training:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,details:'Training created'+(docN?' with document: '+docN:' (no document attached)'),docName:docN,docLink:docL,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
+  DB.auditLog.push({id:genId('AUD'),date:new Date().toISOString().split('T')[0],type:'training_doc',training:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,details:'Training created with document: '+(docN||'auto-generated'),docName:docN,docLink:docL,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
   // 2. ALWAYS remove tombstone for this ID (even if Firebase not ready)
   try{removeFromTombstone('trainings',t.id);}catch(e){}
   // 3. Save to localStorage IMMEDIATELY (guaranteed save)
@@ -2797,7 +2941,7 @@ function openTrainingDetail(id){
         <div><span style="color:var(--muted);">Validity</span><div><b>${t.validity}</b></div></div>
         <div><span style="color:var(--muted);">Certificate</span><div><b>${t.cert?"Yes":"No"}</b></div></div>
       </div>
-      ${t.docName?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--green);font-size:22px;">description</span><div style="flex:1;"><div style="font-size:12px;font-weight:700;color:var(--green);">Training Document</div><div style="font-size:12px;">${t.docName}</div></div>${t.docLink?`<a href="${t.docLink}" target="_blank" class="btn btn-sm btn-green"><span class="mat-ico" style="font-size:12px;">open_in_new</span> Open</a>`:''}</div>`:''}
+      ${t.docName?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--green);font-size:22px;">description</span><div style="flex:1;"><div style="font-size:12px;font-weight:700;color:var(--green);">Training Document</div><div style="font-size:12px;">${t.docName}</div></div><button class="btn btn-sm btn-green" onclick="downloadTrainingDoc('${t.id}')"><span class="mat-ico" style="font-size:12px;">${t.docData?'download':'open_in_new'}</span> ${t.docData?'Download':'Open'}</button></div>`:''}
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn btn-amber" onclick="assignEmployees('${t.id}')"><span class="mat-ico">person_add</span> Assign Employees</button>
         <button class="btn btn-outline" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico">quiz</span> Take Test</button>
@@ -4033,7 +4177,7 @@ function renderAuditTrail(){
     var actionHtml='';
     if(l.type==='training_doc'){
       typeBadge='<span class="badge badge-green">Training Doc</span>';
-      actionHtml=l.docName?`<div style="font-size:11px;margin-top:4px;"><b>Document:</b> ${l.docName}</div>${l.docLink?`<a href="${l.docLink}" target="_blank" style="font-size:11px;color:var(--blue);">Open Document</a>`:''}`:'<div style="font-size:11px;color:var(--muted);">No document attached</div>';
+      actionHtml=l.docName?`<div style="font-size:11px;margin-top:4px;"><b>Document:</b> ${l.docName} <button style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;padding:0;text-decoration:underline;" onclick="downloadAuditDoc('${l.id}')">${l.docLink&&l.docLink.startsWith('data:')?'Download':'Open'}</button></div>`:'<div style="font-size:11px;color:var(--muted);">No document attached</div>';
     }else if(l.type==='test_result'){
       if(l.pass){
         typeBadge='<span class="badge badge-green">PASS</span>';
@@ -4186,6 +4330,130 @@ function renderAdminAccess(){
     '</div></div>';
 }
 
+// === DOCUMENT UPLOAD ===
+let _uploadedDocName='';
+let _uploadedDocData='';
+function previewAutoDoc(){
+  var name=document.getElementById('nt_name')?document.getElementById('nt_name').value.trim():'';
+  if(!name){toast('Enter training name first','warning');return;}
+  var cat=document.getElementById('nt_cat')?document.getElementById('nt_cat').value:'';
+  var dept=document.getElementById('nt_dept')?document.getElementById('nt_dept').value:'';
+  var trainer=document.getElementById('nt_trainer')?document.getElementById('nt_trainer').value:'';
+  var date=document.getElementById('nt_date')?document.getElementById('nt_date').value:'';
+  var dur=document.getElementById('nt_dur')?document.getElementById('nt_dur').value:'4 hrs';
+  var pass=document.getElementById('nt_pass')?parseInt(document.getElementById('nt_pass').value)||75:75;
+  var desc=document.getElementById('nt_desc')?document.getElementById('nt_desc').value:'';
+  var ytUrl=document.getElementById('nt_yturl')?document.getElementById('nt_yturl').value.trim():'';
+  autoGenerateTrainingDoc(name,cat,dept,trainer,date,dur,pass,desc,ytUrl).then(function(result){
+    if(!result){toast('Failed to generate preview','error');return;}
+    var previewEl=document.getElementById('nt_docpreview');
+    if(previewEl){
+      previewEl.style.display='block';
+      previewEl.innerHTML='<span class="mat-ico" style="color:var(--amber);">auto_awesome</span> <b>Auto-generated:</b> '+result.name+' — Preview opened in new tab';
+      var win=window.open('');
+      if(win){win.document.write('<iframe src="'+result.data+'" style="width:100%;height:100vh;border:none;"></iframe>');win.document.title=result.name;}
+      else{toast('Pop-up blocked! Allow pop-ups to preview','warning');}
+    }
+    toast('Document preview ready!','success');
+  });
+}
+function handleDocUpload(input){
+  var file=input.files[0];
+  if(!file)return;
+  if(file.size>5*1024*1024){toast('File too large! Max 5MB','error');input.value='';return;}
+  var statusEl=document.getElementById('nt_docstatus');
+  var previewEl=document.getElementById('nt_docpreview');
+  statusEl.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite;font-size:13px;">sync</span> Reading '+file.name+'...';
+  statusEl.style.color='var(--amber)';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    _uploadedDocName=file.name;
+    _uploadedDocData=e.target.result;
+    statusEl.innerHTML='<span class="mat-ico" style="color:var(--green);font-size:13px;">check_circle</span> '+file.name+' ('+((file.size/1024).toFixed(1))+' KB)';
+    statusEl.style.color='var(--green)';
+    previewEl.style.display='block';
+    previewEl.innerHTML='<span class="mat-ico" style="color:var(--green);">description</span> <b>'+file.name+'</b> — Ready to attach with training';
+  };
+  reader.onerror=function(){toast('Failed to read file','error');statusEl.innerHTML='Error reading file';statusEl.style.color='var(--red)';};
+  reader.readAsDataURL(file);
+}
+function downloadTrainingDoc(trnId){var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t){toast('Training not found','error');return;}if(t.docData){var a=document.createElement('a');a.href=t.docData;a.download=t.docName||'document';document.body.appendChild(a);a.click();document.body.removeChild(a);}else if(t.docLink){window.open(t.docLink,'_blank');}else{toast('No document','warning');}}
+function downloadAuditDoc(logId){var l=DB.auditLog?DB.auditLog.find(function(x){return x.id===logId;}):null;if(!l){toast('Log not found','error');return;}if(l.docLink&&l.docLink.startsWith('data:')){var a=document.createElement('a');a.href=l.docLink;a.download=l.docName||'document';document.body.appendChild(a);a.click();document.body.removeChild(a);}else if(l.docLink){window.open(l.docLink,'_blank');}else{toast('No document','warning');}}
+function downloadDoc(docName,docData,docLink){
+  if(docData){
+    var a=document.createElement('a');a.href=docData;a.download=docName||'document';document.body.appendChild(a);a.click();document.body.removeChild(a);
+  }else if(docLink){window.open(docLink,'_blank');}
+  else{toast('No document available','warning');}
+}
+// === FACTORY RESET ===
+function factoryReset(){
+  openModal(
+    '<div class="modal-accent" style="background:var(--red);"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(232,72,58,.15);"><span class="mat-ico" style="color:var(--red);font-size:22px;">warning</span></div>'+
+    '<div><h2>Factory Reset</h2><span style="font-size:12px;color:var(--muted);">This will permanently delete ALL data</span></div>'+
+    '<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="padding:14px;background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.3);border-radius:var(--r-sm);margin-bottom:14px;">'+
+    '<div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px;">This will DELETE:</div>'+
+    '<div style="font-size:12px;color:var(--muted);line-height:1.8;">'+
+    '<div>• All <b>'+DB.employees.length+'</b> employees</div>'+
+    '<div>• All <b>'+DB.trainings.length+'</b> trainings</div>'+
+    '<div>• All <b>'+DB.testResults.length+'</b> test results</div>'+
+    '<div>• All <b>'+DB.certificates.length+'</b> certificates</div>'+
+    '<div>• All <b>'+(DB.auditLog?DB.auditLog.length:0)+'</b> audit logs</div>'+
+    '<div>• All SOPs, custom questions, notifications</div>'+
+    '</div></div>'+
+    '<div style="font-size:12px;color:var(--muted);">Type <b style="color:var(--red);">DELETE ALL</b> to confirm:</div>'+
+    '<input class="form-control-sm" id="factoryResetConfirm" placeholder="Type DELETE ALL" style="margin-top:8px;border-color:var(--red);">'+
+    '</div>'+
+    '<div class="modal-foot">'+
+    '<button class="btn" style="background:var(--red);color:#fff;border:none;" onclick="doFactoryReset()"><span class="mat-ico">delete_forever</span> Delete Everything</button>'+
+    '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+    '</div>',"480px");
+}
+async function doFactoryReset(){
+  var confirm=document.getElementById('factoryResetConfirm');
+  if(!confirm||confirm.value.trim()!=='DELETE ALL'){toast('Type DELETE ALL to confirm','error');return;}
+  try{closeModal();}catch(e){}
+  toast('Deleting all data...','info',3000);
+  // 1. Clear ALL DB arrays
+  DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
+  DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
+  DB.sops=[];
+  DB.admins=[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}];
+  _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
+  // 2. Clear localStorage
+  localStorage.removeItem(DB_STORAGE_KEY);
+  localStorage.removeItem(DB_STORAGE_KEY+'_tombstones');
+  localStorage.removeItem(DB_STORAGE_KEY+'_version');
+  localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
+  localStorage.removeItem('mep_user');
+  // 3. Try to clear Firebase collections
+  if(firebaseReady){
+    try{await authAsAdmin();}catch(e){}
+    var cols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog','admins'];
+    for(var i=0;i<cols.length;i++){
+      try{
+        var snap=await fbDB.collection(cols[i]).get();
+        var batch=fbDB.batch();
+        snap.docs.forEach(function(d){batch.delete(d.ref);});
+        if(snap.size>0)await batch.commit();
+        console.log('[factoryReset] Cleared '+cols[i]+': '+snap.size);
+      }catch(e){console.warn('[factoryReset] Error clearing '+cols[i],e);}
+    }
+    try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
+    try{await fbDB.collection('config').doc('meta').delete();}catch(e){}
+  }
+  // 4. Save fresh empty state
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  // 5. Block cloud load permanently for this version
+  _skipCloudLoad=true;
+  localStorage.setItem(DB_STORAGE_KEY+'_skipCloud',DB_VERSION);
+  localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+  toast('All data deleted! Reloading...','success');
+  setTimeout(function(){location.reload();},1500);
+}
+
 function renderSettings(){
   const s=DB.settings;
   document.getElementById("view-settings").innerHTML=`
@@ -4314,10 +4582,15 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
       </div>
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">backup</span> Data Management</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
           <button class="btn btn-outline" onclick="backupData()"><span class="mat-ico">download</span> Export Backup</button>
           <button class="btn btn-outline" onclick="document.getElementById('restoreFile').click()"><span class="mat-ico">upload</span> Import Backup</button>
           <input type="file" id="restoreFile" style="display:none;" accept=".json" onchange="restoreData(this)">
+        </div>
+        <div style="margin-top:12px;padding:14px;background:rgba(232,72,58,.06);border:2px solid rgba(232,72,58,.3);border-radius:var(--r);">
+          <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:16px;vertical-align:middle;">warning</span> Factory Reset</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Delete ALL data — employees, trainings, test results, certificates, audit logs. Start from zero. This cannot be undone.</div>
+          <button class="btn" style="background:var(--red);color:#fff;border:none;" onclick="factoryReset()"><span class="mat-ico">delete_forever</span> Factory Reset — Delete Everything</button>
         </div>
       </div>
       <div class="form-section">
@@ -4784,7 +5057,7 @@ function exportFullStatusReport(){
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
-const DB_VERSION="v5-clean"; // Change this string to force full data reset on all devices
+const DB_VERSION="v7-final-reset"; // Change this string to force full data reset on all devices
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
@@ -5136,10 +5409,15 @@ function loadDB(){
     console.warn('[loadDB] Version mismatch (stored:'+storedVersion+' vs current:'+DB_VERSION+') — wiping ALL data for fresh start');
     localStorage.removeItem(DB_STORAGE_KEY);
     localStorage.removeItem(DB_STORAGE_KEY+'_tombstones');
+    localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
     localStorage.removeItem('mep_user');
-    // Note: Firebase wipe is handled in initApp() AFTER firebaseReady=true,
-    // so it can actually delete cloud data before loadDBFromFirestore() runs
-    // DO NOT set version here — initApp() sets it AFTER Firebase wipe completes
+    // FORCE clear all DB arrays — nothing old survives
+    DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
+    DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
+    DB.sops=[];DB.admins=[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}];
+    _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
+    console.log('[loadDB] All DB arrays force-cleared');
+    // Note: Firebase wipe/block is handled in initApp() AFTER firebaseReady=true
   }
   // Synchronous: load from localStorage for immediate use
   loadDBFromLocal();
@@ -5304,13 +5582,31 @@ async function initApp(){
         fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
       }
     }else{
-      // RESET MODE: block cloud load permanently until next version change
+      // RESET MODE: block cloud load permanently, force-empty everything
       _skipCloudLoad=true;
       localStorage.setItem(DB_STORAGE_KEY+'_skipCloud',DB_VERSION);
+      // Double-safety: force clear all DB arrays again (nothing from cloud can survive)
+      DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
+      DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
+      DB.sops=[];
       try{await authAsAdmin();}catch(e){}
+      // DELETE old Firebase data so auto-sync can NEVER pull it back
+      try{
+        var resetCols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog'];
+        for(var ri=0;ri<resetCols.length;ri++){
+          var rSnap=await fbDB.collection(resetCols[ri]).get();
+          var rBatch=fbDB.batch();
+          rSnap.docs.forEach(function(d){rBatch.delete(d.ref);});
+          if(rSnap.size>0)await rBatch.commit();
+        }
+        try{await fbDB.collection('config').doc('meta').delete();}catch(e){}
+        try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
+        try{await fbDB.collection('deletedItems').get().then(function(s){var b=fbDB.batch();s.docs.forEach(function(d){b.delete(d.ref);});if(s.size>0)return b.commit();});}catch(e){}
+        console.log('[reset] Firebase collections WIPED — old data can never return');
+      }catch(resetErr){console.warn('[reset] Firebase wipe error (non-fatal):',resetErr);}
       try{await saveDB();}catch(e){console.warn('[reset] saveDB error:',e);}
       localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
-      console.log('[reset] Fresh start — cloud load PERMANENTLY blocked until version changes');
+      console.log('[reset] Fresh start — ALL data force-cleared, cloud wiped, cloud load blocked');
     }
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
