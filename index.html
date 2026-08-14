@@ -1638,6 +1638,9 @@ async function loginForceSync(){
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
   try{
     _initDone=false;
+    // Force-clear any cloud-load block — user explicitly wants to sync
+    _skipCloudLoad=false;
+    localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
     const result=await loadDBFromFirestore();
     _initDone=true;
     // Update the Firebase status display
@@ -4446,9 +4449,11 @@ async function doFactoryReset(){
   }
   // 4. Save fresh empty state
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  // 5. Block cloud load permanently for this version
-  _skipCloudLoad=true;
-  localStorage.setItem(DB_STORAGE_KEY+'_skipCloud',DB_VERSION);
+  // 5. Set version so reload triggers clean init (cloud load re-enabled after wipe)
+  // Do NOT set _skipCloudLoad — the version-change reset in initApp will wipe Firebase
+  // and then re-enable cloud loading so employees can be added and login from mobile
+  _skipCloudLoad=false;
+  localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
   localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
   toast('All data deleted! Reloading...','success');
   setTimeout(function(){location.reload();},1500);
@@ -5582,9 +5587,8 @@ async function initApp(){
         fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
       }
     }else{
-      // RESET MODE: block cloud load permanently, force-empty everything
+      // RESET MODE: block cloud load during reset, force-empty everything
       _skipCloudLoad=true;
-      localStorage.setItem(DB_STORAGE_KEY+'_skipCloud',DB_VERSION);
       // Double-safety: force clear all DB arrays again (nothing from cloud can survive)
       DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
       DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
@@ -5606,7 +5610,12 @@ async function initApp(){
       }catch(resetErr){console.warn('[reset] Firebase wipe error (non-fatal):',resetErr);}
       try{await saveDB();}catch(e){console.warn('[reset] saveDB error:',e);}
       localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
-      console.log('[reset] Fresh start — ALL data force-cleared, cloud wiped, cloud load blocked');
+      // CRITICAL: Lift the cloud-load block AFTER wipe is done.
+      // Old data is gone from Firebase now, so future cloud loads are safe.
+      // This allows employees added by admin to be loaded on mobile.
+      _skipCloudLoad=false;
+      localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
+      console.log('[reset] Fresh start — ALL data force-cleared, cloud wiped, cloud load RE-ENABLED');
     }
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
