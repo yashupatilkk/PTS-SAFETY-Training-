@@ -4784,7 +4784,7 @@ function exportFullStatusReport(){
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
-const DB_VERSION="v3-wipe"; // Change this string to force full data reset on all devices
+const DB_VERSION="v5-clean"; // Change this string to force full data reset on all devices
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
@@ -5044,7 +5044,9 @@ function reconcileTrainingsFromResults(){
 }
 
 async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      videos:['VID001','VID002','VID003','VID004','VID005','VID006','VID007','VID008','VID009','VID010','VID011','VID012','VID013','VID014','VID015','VID016','VID017','VID018','VID019','VID020','VID021','VID022','VID023'],      employees:['EMP001','EMP002','EMP003','EMP004','EMP005','EMP006','EMP007','EMP008'],      trainings:['TRN001','TRN002','TRN003','TRN004','TRN005','TRN006'],      testResults:['TST001','TST002','TST003','TST004','TST005'],      certificates:['CERT-2025-001','CERT-2025-002','CERT-2025-003','CERT-2025-004'],      notifications:['N001','N002','N003','N004','N005']    };    const batch=fbDB.batch();    let count=0;    for(const [coll,ids] of Object.entries(sampleIds)){      for(const id of ids){        const ref=fbDB.collection(coll).doc(id);        batch.delete(ref);        count++;      }    }    await batch.commit();    if(count>0)console.log('Cleaned up '+count+' sample docs from cloud');  }catch(e){console.warn('Sample data cleanup error:',e);}}
+let _skipCloudLoad=(localStorage.getItem(DB_STORAGE_KEY+'_skipCloud')===DB_VERSION);
 async function loadDBFromFirestore(){
+  if(_skipCloudLoad){console.log('[loadDBFromFirestore] SKIPPED — reset mode active (persistent)');return {ok:true,loaded:0,failed:[]};}
   let loaded=0;let failed=[];
   try{
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
@@ -5288,26 +5290,27 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
-    // === VERSION CHECK: wipe Firebase BEFORE loading if version changed ===
+    // === VERSION CHECK: fresh start — skip loading old Firebase data ===
     var storedVersion=localStorage.getItem(DB_STORAGE_KEY+'_version');
-    if(storedVersion!==DB_VERSION){
-      console.warn('[initApp] Version mismatch — wiping ALL Firebase data before load');
-      try{await authAsAdmin();}catch(e){}
-      var wipeCols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog','admins'];
-      for(var wi=0;wi<wipeCols.length;wi++){
-        try{var wsnap=await fbDB.collection(wipeCols[wi]).get();var wbatch=fbDB.batch();wsnap.docs.forEach(function(d){wbatch.delete(d.ref);});if(wsnap.size>0)await wbatch.commit();console.log('[reset] Cleared Firebase '+wipeCols[wi]+': '+wsnap.size+' docs');}catch(we){console.warn('[reset] Error clearing '+wipeCols[wi]+':',we.message);}
-      }
-      // Also wipe config/settings so old settings don't persist
-      try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
-      try{await fbDB.collection('config').doc('meta').delete();}catch(e){}
-      localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
-      console.log('[reset] All Firebase data wiped — starting fresh');
+    var needsReset=(storedVersion!==DB_VERSION);
+    if(needsReset){
+      console.warn('[initApp] Version mismatch ("'+storedVersion+'" vs "'+DB_VERSION+'") — SKIPPING Firebase load, starting fresh');
     }
-    // Run sample data cleanup in background (don't block login)
-    cleanupSampleDataFromCloud();
-    const loadResult=await loadDBFromFirestore();
-    if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
-      fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
+    if(!needsReset){
+      // Normal load from Firebase
+      cleanupSampleDataFromCloud();
+      var loadResult=await loadDBFromFirestore();
+      if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
+        fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
+      }
+    }else{
+      // RESET MODE: block cloud load permanently until next version change
+      _skipCloudLoad=true;
+      localStorage.setItem(DB_STORAGE_KEY+'_skipCloud',DB_VERSION);
+      try{await authAsAdmin();}catch(e){}
+      try{await saveDB();}catch(e){console.warn('[reset] saveDB error:',e);}
+      localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+      console.log('[reset] Fresh start — cloud load PERMANENTLY blocked until version changes');
     }
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
