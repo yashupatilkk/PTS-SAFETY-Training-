@@ -2249,82 +2249,47 @@ async function saveEmployee(){
   toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
   // Auto-sync to Google Sheet (Employees sheet)
   queueSheetSync(["Employees"]);
-  // CRITICAL FIX: Write directly to Firestore FIRST, then saveDB separately
-  // Do NOT let _syncBusy block the direct employee write
+  // Cloud sync in BACKGROUND (non-blocking)
   if(firebaseReady){
     (async function(){
+      _syncBusy=true; // Block auto-sync during employee creation
       try{
-        // FIX: Use authAsAdmin() instead of hardcoded 'admin123'
         var adminOk=await authAsAdmin();
         if(!adminOk){
-          console.error('[saveEmployee] FAILED to authenticate as admin — employee will NOT be in cloud!');
-          toast('Cloud sync FAILED: Admin Firebase auth failed! Employee saved locally only. Use "Fix Phone Login" in Settings.','error',10000);
+          toast('Cloud sync failed: Admin auth error. Employee saved locally only.','error',8000);
+          _syncBusy=false;
           return;
         }
-        // Directly write THIS employee to Firebase Firestore immediately
+        // 1. Write employee to Firestore
         var newEmp=DB.employees.find(function(e){return e.id===id;});
         if(newEmp){
-          var safeNewEmp=sanitizeForFirestore(newEmp);
-          console.log('[saveEmployee] Direct Firestore write for '+id+' — keys: '+Object.keys(safeNewEmp).join(', '));
-          var writeOk=false;
-          try{
-            await fbDB.collection('employees').doc(String(id)).set(safeNewEmp,{merge:true});
-            console.log('[saveEmployee] Employee '+id+' saved directly to Firebase Firestore');
-            writeOk=true;
-          }catch(writeErr){
-            // If full object fails, try minimal
-            console.warn('[saveEmployee] Full write failed for '+id+':',writeErr.message,'— trying minimal...');
-            var minimalNew={id:id,name:name,password:empPw,mobile:mobile,status:'active'};
-            try{
-              await fbDB.collection('employees').doc(String(id)).set(minimalNew,{merge:true});
-              console.log('[saveEmployee] Minimal write OK for '+id);
-              writeOk=true;
-            }catch(minErr){
-              console.error('[saveEmployee] Minimal write ALSO failed for '+id+':',minErr);
-              toast('Cloud write failed for '+name+'! Error: '+(writeErr.message||writeErr),'error',8000);
-            }
+          var safeEmp=sanitizeForFirestore(newEmp);
+          try{await fbDB.collection('employees').doc(String(id)).set(safeEmp,{merge:true});}catch(e){
+            console.warn('[saveEmployee] Firestore write error:',e.message);
+            try{await fbDB.collection('employees').doc(String(id)).set({id:id,name:name,password:empPw,mobile:mobile,status:'active'},{merge:true});}catch(e2){}
           }
-          // VERIFY: Confirm employee is actually in cloud after write
-          if(writeOk){
-            try{
-              var verifyDoc=await fbDB.collection('employees').doc(String(id)).get();
-              if(!verifyDoc.exists){
-                console.error('[saveEmployee] VERIFICATION FAILED: '+id+' NOT found in cloud after write!');
-                toast('WARNING: '+name+' may not be in cloud. Use "Fix Phone Login" in Settings.','error',8000);
-                writeOk=false;
-              }else{
-                console.log('[saveEmployee] VERIFIED: '+id+' exists in cloud with name='+verifyDoc.data().name);
-              }
-            }catch(verifyErr){
-              console.warn('[saveEmployee] Verification check error:',verifyErr.message);
-            }
-          }
-          if(!writeOk) return; // Don't create auth if Firestore write failed
         }
-        // Also create Firebase Auth account so employee can login from any device
-        var authEmail=toEmail(id);
+        // 2. Create Firebase Auth account (this signs in the new user briefly)
         try{
-          // Re-auth as admin before creating user
-          await authAsAdmin();
-          await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);
-          console.log('Firebase Auth account created for '+id);
+          await fbAuth.createUserWithEmailAndPassword(toEmail(id),empPw);
+          console.log('[saveEmployee] Auth account created for '+id);
         }catch(authErr){
-          if(authErr.code==='auth/email-already-in-use'){
-            console.log('Firebase Auth account already exists for '+id);
-          }else{
-            console.warn('Firebase Auth create error for '+id+':',authErr.message);
-          }
+          if(authErr.code!=='auth/email-already-in-use')console.warn('[saveEmployee] Auth error:',authErr.message);
         }
-        // Sign back in as admin to restore admin context
-        await authAsAdmin();
-        // Also run full saveDB to sync everything else
-        // This may be queued if _syncBusy, but the employee was already written directly above
+        // 3. ALWAYS restore admin auth
+        try{await authAsAdmin();}catch(e){}
+        // 4. Full sync (clear _syncBusy first so saveDB can proceed)
+        _syncBusy=false;
         await saveDB();
         toast('Employee '+name+' synced to cloud! Phone login ready.','success');
       }catch(fbErr){
-        console.error('Firebase sync error for employee '+id+':',fbErr);
-        toast('Employee saved locally but NOT synced to cloud! Error: '+(fbErr.message||fbErr),'error',6000);
+        console.error('[saveEmployee] Cloud sync error:',fbErr);
+        toast('Employee saved locally. Cloud sync error: '+(fbErr.message||fbErr),'error',5000);
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }finally{
+        _syncBusy=false;
+        // Extra safety: ensure admin auth is restored
+        try{await authAsAdmin();}catch(e){}
       }
     })();
   }else{
