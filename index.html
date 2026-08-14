@@ -536,6 +536,7 @@ select.form-control-sm{background:var(--sur2);}
     <div id="adminNav">
       <div class="nav-section-title">Admin</div>
       <button class="nav-item" data-view="settings" onclick="gotoView('settings')"><span class="mat-ico">settings</span><span>Settings</span></button>
+      <button class="nav-item" data-view="audittrail" onclick="gotoView('audittrail')"><span class="mat-ico">fact_check</span><span>Audit Trail</span></button>
       <button class="nav-item" data-view="adminaccess" onclick="gotoView('adminaccess')"><span class="mat-ico">admin_panel_settings</span><span>Admin Access</span></button>
       <div class="nav-section-title">Statistics</div>
       <button class="nav-item" data-view="dashboard" onclick="gotoView('dashboard')"><span class="mat-ico">monitoring</span><span>Dashboard Stats</span></button>
@@ -593,6 +594,7 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-reports"></div>
     <div class="view" id="view-trainstatus"></div>
     <div class="view" id="view-notifications"></div>
+    <div class="view" id="view-audittrail"></div>
     <div class="view" id="view-adminaccess"></div>
     <div class="view" id="view-settings"></div>
   </div>
@@ -880,6 +882,7 @@ let DB={
   employees:[],
   trainings:[],
   testResults:[],
+  auditLog:[], // {id, date, type:'training_doc'|'corrective_action'|'test_result', empId, empName, training, details, action, actionBy, docName, docLink}
   certificates:[],
   // videos removed — YouTube links are stored directly on training objects
   sops:[
@@ -1412,6 +1415,7 @@ async function seedFirestore(){
     await fbSaveCollection('admins',DB.admins,'username');
     await fbSaveCollection('trainings',DB.trainings,'id');
     await fbSaveCollection('testResults',DB.testResults,'id');
+      if(DB.auditLog&&DB.auditLog.length)fbSaveCollection('auditLog',DB.auditLog,'id');
     await fbSaveCollection('certificates',DB.certificates,'num');
     await fbSaveCollection('notifications',DB.notifications,'id');
     await fbSaveCollection('sops',DB.sops,'id');
@@ -1750,10 +1754,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",audittrail:"Audit Trail",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,audittrail:renderAuditTrail,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   closeSidebar();
 }
@@ -2505,6 +2509,7 @@ function renderTrainings(){
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
             ${t.youtubeLink?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
+            ${t.docName?`<span class="badge" style="position:absolute;bottom:8px;left:8px;background:rgba(62,207,142,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">description</span> Doc</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
           </div>
           <div class="training-body">
@@ -2633,6 +2638,12 @@ function openAddTrnModal(){
         <div class="form-group"><label class="form-label-sm">Certificate</label><select class="form-control-sm" id="nt_cert"><option value="true">Yes</option><option value="false">No</option></select></div>
       </div>
       <div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="nt_desc" rows="2" placeholder="Training description..."></textarea></div>
+      <div class="form-section" style="margin-top:14px;border:2px solid rgba(62,207,142,.3);background:rgba(62,207,142,.04);">
+        <div class="form-section-title" style="color:var(--green);"><span class="mat-ico" style="font-size:14px;">description</span> Training Document (for Audit)</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Upload PPT/PDF given to employees during training. This is shown in Audit Trail for auditors.</div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Document Name</label><input class="form-control-sm" id="nt_docname" placeholder="e.g. Fire Safety Training PPT Aug 2026"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Document Link (Google Drive / any URL)</label><input class="form-control-sm" id="nt_doclink" placeholder="https://drive.google.com/file/d/..."></div>
+      </div>
       </div>
       <div class="form-section" style="margin-top:14px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);">
         <div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> YouTube Video Link *</div>
@@ -2721,11 +2732,16 @@ async function saveTraining(){
   var ytId=extractYoutubeId(ytUrl);
   if(!ytUrl){toast('YouTube video link is required!','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:document.getElementById('nt_docname')?document.getElementById('nt_docname').value.trim():'',docLink:document.getElementById('nt_doclink')?document.getElementById('nt_doclink').value.trim():'',enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
 
   // 1. Add to local array
   DB.trainings.push(t);
   DB.notifications.unshift({id:genId('N'),msg:'New training: '+name,read:false,time:'Just now',icon:'school'});
+  // Audit log for training creation
+  var docN=document.getElementById('nt_docname')?document.getElementById('nt_docname').value.trim():'';
+  var docL=document.getElementById('nt_doclink')?document.getElementById('nt_doclink').value.trim():'';
+  if(!DB.auditLog)DB.auditLog=[];
+  DB.auditLog.push({id:genId('AUD'),date:new Date().toISOString().split('T')[0],type:'training_doc',training:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,details:'Training created'+(docN?' with document: '+docN:' (no document attached)'),docName:docN,docLink:docL,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
   // 2. ALWAYS remove tombstone for this ID (even if Firebase not ready)
   try{removeFromTombstone('trainings',t.id);}catch(e){}
   // 3. Save to localStorage IMMEDIATELY (guaranteed save)
@@ -2781,6 +2797,7 @@ function openTrainingDetail(id){
         <div><span style="color:var(--muted);">Validity</span><div><b>${t.validity}</b></div></div>
         <div><span style="color:var(--muted);">Certificate</span><div><b>${t.cert?"Yes":"No"}</b></div></div>
       </div>
+      ${t.docName?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--green);font-size:22px;">description</span><div style="flex:1;"><div style="font-size:12px;font-weight:700;color:var(--green);">Training Document</div><div style="font-size:12px;">${t.docName}</div></div>${t.docLink?`<a href="${t.docLink}" target="_blank" class="btn btn-sm btn-green"><span class="mat-ico" style="font-size:12px;">open_in_new</span> Open</a>`:''}</div>`:''}
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn btn-amber" onclick="assignEmployees('${t.id}')"><span class="mat-ico">person_add</span> Assign Employees</button>
         <button class="btn btn-outline" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico">quiz</span> Take Test</button>
@@ -3508,6 +3525,9 @@ function submitQuiz(){
   const certNum=qualifiesForCert&&pass?"CERT-"+Date.now().toString(36).toUpperCase():"";
   const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||""};
   DB.testResults.push(result);
+  // Add audit log entry
+  if(!DB.auditLog)DB.auditLog=[];
+  DB.auditLog.push({id:result.id+"_A",date:today,type:"test_result",empId,empName,dept,training:quizState.training,cat:quizState.category,score,pass,result:pass?"PASS":"FAIL",attempt:result.attempt,trainer:trnMatch?.trainer||"",details:pass?"Passed with "+score+"% ("+correct+"/"+total+")":"Failed with "+score+"% ("+correct+"/"+total+")",action:pass?"None required":"Pending corrective action",actionBy:""});
   if(certNum){
     const expiry=new Date();
     const validityYears=trnMatch?.validity?.includes("2")?2:trnMatch?.validity?.includes("6")?0.5:1;
@@ -3558,7 +3578,7 @@ function submitQuiz(){
     })();
       console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
       // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
-      queueSheetSync(["Training Data","Certificates"]);
+      queueSheetSync(["Training Data","Certificates","Audit Trail"]);
     }catch(e){console.warn('Google Sheets auto-sync error:',e);}
   })();
   quizState.active=false;
@@ -3978,6 +3998,153 @@ function renderNotifications(){
 /* ============================================================
    ADMIN ACCESS MANAGEMENT PAGE
 ============================================================ */
+
+/* ============================================================
+   AUDIT TRAIL — Training Documents & Corrective Actions
+   ============================================================ */
+function renderAuditTrail(){
+  if(!isAdmin){document.getElementById('view-audittrail').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>Audit Trail is for administrators only.</p></div>';return;}
+  if(!DB.auditLog)DB.auditLog=[];
+  var logs=DB.auditLog.slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'');});
+  var failedTests=logs.filter(function(l){return l.type==='test_result'&&!l.pass;});
+  var passedTests=logs.filter(function(l){return l.type==='test_result'&&l.pass;});
+  var docLogs=logs.filter(function(l){return l.type==='training_doc';});
+  var actionsTaken=logs.filter(function(l){return l.action&&l.action!=='Pending corrective action'&&l.action!=='None required';});
+  var pendingActions=logs.filter(function(l){return l.action==='Pending corrective action';});
+
+  var filterHtml=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+    <button class="btn btn-sm ${(!window._auditFilter||window._auditFilter==='all')?'btn-amber':'btn-outline'}" onclick="window._auditFilter='all';renderAuditTrail();">All (${logs.length})</button>
+    <button class="btn btn-sm ${window._auditFilter==='failed'?'btn-red':'btn-outline'}" style="${window._auditFilter==='failed'?'':'border-color:var(--red);color:var(--red);'}" onclick="window._auditFilter='failed';renderAuditTrail();">Failures (${failedTests.length})</button>
+    <button class="btn btn-sm ${window._auditFilter==='pending'?'btn-red':'btn-outline'}" style="${window._auditFilter==='pending'?'':'border-color:var(--orange);color:var(--orange);'}" onclick="window._auditFilter='pending';renderAuditTrail();">Pending Actions (${pendingActions.length})</button>
+    <button class="btn btn-sm ${window._auditFilter==='docs'?'btn-green':'btn-outline'}" style="${window._auditFilter==='docs'?'':'border-color:var(--green);color:var(--green);'}" onclick="window._auditFilter='docs';renderAuditTrail();">Documents (${docLogs.length})</button>
+    <button class="btn btn-sm ${window._auditFilter==='actions'?'btn-green':'btn-outline'}" style="${window._auditFilter==='actions'?'':'border-color:var(--purple);color:var(--purple);'}" onclick="window._auditFilter='actions';renderAuditTrail();">Actions Taken (${actionsTaken.length})</button>
+  </div>`;
+
+  var filtered=logs;
+  var filt=window._auditFilter||'all';
+  if(filt==='failed')filtered=failedTests;
+  else if(filt==='pending')filtered=pendingActions;
+  else if(filt==='docs')filtered=docLogs;
+  else if(filt==='actions')filtered=actionsTaken;
+
+  var rows='';
+  filtered.forEach(function(l){
+    var typeBadge='';
+    var actionHtml='';
+    if(l.type==='training_doc'){
+      typeBadge='<span class="badge badge-green">Training Doc</span>';
+      actionHtml=l.docName?`<div style="font-size:11px;margin-top:4px;"><b>Document:</b> ${l.docName}</div>${l.docLink?`<a href="${l.docLink}" target="_blank" style="font-size:11px;color:var(--blue);">Open Document</a>`:''}`:'<div style="font-size:11px;color:var(--muted);">No document attached</div>';
+    }else if(l.type==='test_result'){
+      if(l.pass){
+        typeBadge='<span class="badge badge-green">PASS</span>';
+      }else{
+        typeBadge='<span class="badge" style="background:rgba(232,72,58,.85);color:#fff;">FAIL</span>';
+      }
+      if(!l.pass){
+        var currentAction=l.action||'Pending corrective action';
+        var actionColor=currentAction==='Pending corrective action'?'var(--red)':'var(--green)';
+        actionHtml=`<div style="margin-top:6px;padding:8px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;">
+          <div style="color:var(--muted);margin-bottom:4px;">Corrective Action:</div>
+          <div style="color:${actionColor};font-weight:600;">${currentAction}</div>
+          ${l.actionBy?'<div style="color:var(--muted);margin-top:2px;">By: '+l.actionBy+'</div>':''}
+          <button class="btn btn-sm btn-amber" style="margin-top:6px;" onclick="openCorrectiveAction('${l.id}','${(l.empName||'').replace(/'/g, "\'")}','${(l.training||'').replace(/'/g, "\'")}',${l.score},${l.empId||''})"><span class="mat-ico" style="font-size:11px;">edit</span> ${currentAction==='Pending corrective action'?'Take Action':'Update Action'}</button>
+        </div>`;
+      }else{
+        actionHtml='<div style="font-size:11px;color:var(--muted);margin-top:4px;">No action required</div>';
+      }
+    }
+    rows+=`<tr>
+      <td style="white-space:nowrap;font-size:11px;">${formatDate(l.date)}</td>
+      <td>${typeBadge}</td>
+      <td><b>${l.empName||'—'}</b>${l.empId?'<br><span style="font-size:10px;color:var(--muted);">'+l.empId+'</span>':''}</td>
+      <td>${l.dept||'—'}</td>
+      <td><b>${l.training||'—'}</b>${l.cat?'<br><span style="font-size:10px;color:var(--muted);">'+l.cat+'</span>':''}</td>
+      <td style="font-size:12px;">${l.details||'—'}</td>
+      <td>${l.trainer?'<span style="font-size:11px;">'+l.trainer+'</span>':'—'}</td>
+      <td style="min-width:180px;">'+actionHtml+'</td>
+    </tr>`;
+  });
+
+  if(!rows)rows='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">No audit records found</td></tr>';
+
+  document.getElementById('view-audittrail').innerHTML=
+    '<div class="section-header"><div class="section-title">Audit <span>Trail</span></div></div>'+
+    '<div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:var(--r);padding:14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">'+
+    '<span class="mat-ico" style="color:var(--amber);font-size:22px;">fact_check</span>'+
+    '<div style="flex:1;"><div style="font-size:13px;font-weight:700;">For Auditing Purpose</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:2px;">Shows: training documents given (PPT/PDF), test pass/fail records, and corrective actions taken for failures.</div></div></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;">'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+logs.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Records</div></div>'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--green);">'+passedTests.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Passed</div></div>'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--red);">'+failedTests.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Failed</div></div>'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+pendingActions.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Pending Action</div></div>'+
+    '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--blue);">'+docLogs.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Documents</div></div>'+
+    '</div>'+
+    filterHtml+
+    '<div class="table-wrap" style="max-height:60vh;overflow-y:auto;"><table><thead><tr><th>Date</th><th>Type</th><th>Employee</th><th>Dept</th><th>Training</th><th>Details</th><th>Trainer</th><th>Corrective Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function openCorrectiveAction(logId,empName,training,score,empId){
+  var log=DB.auditLog.find(function(l){return l.id===logId;});
+  if(!log)return;
+  openModal(
+    '<div class="modal-accent"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(232,72,58,.15);"><span class="mat-ico" style="color:var(--red);font-size:22px;">warning</span></div>'+
+    '<div><h2>Corrective Action</h2><span style="font-size:12px;color:var(--muted);">'+empName+' — '+training+' (Score: '+score+'%)</span></div>'+
+    '<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:12px;">'+
+    '<b style="color:var(--red);">Employee failed this test.</b> For audit purposes, record what action was taken.'+
+    '</div>'+
+    '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Select Corrective Action *</label>'+
+    '<select class="form-control-sm" id="ca_action">'+
+    '<option value="Re-training scheduled">Re-training scheduled</option>'+
+    '<option value="Re-test given — Passed">Re-test given — Passed</option>'+
+    '<option value="Re-test given — Still Failed">Re-test given — Still Failed</option>'+
+    '<option value="Verbal warning issued">Verbal warning issued</option>'+
+    '<option value="Written warning issued">Written warning issued</option>'+
+    '<option value="Additional training material provided">Additional training material provided</option>'+
+    '<option value="One-on-one coaching done">One-on-one coaching done</option>'+
+    '<option value="Exemption granted by management">Exemption granted by management</option>'+
+    '<option value="Pending — awaiting management decision">Pending — awaiting management decision</option>'+
+    '<option value="Other">Other (type below)</option>'+
+    '</select></div>'+
+    '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Additional Notes</label>'+
+    '<textarea class="form-control-sm" id="ca_notes" rows="3" placeholder="Add any extra details about the action taken..."></textarea></div>'+
+    '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Action Date</label>'+
+    '<input class="form-control-sm" id="ca_date" type="date" value="'+new Date().toISOString().split('T')[0]+'"></div>'+
+    '<button class="btn btn-amber" style="width:100%;" onclick="saveCorrectiveAction(\''+logId+'\')"><span class="mat-ico">save</span> Save Corrective Action</button>'+
+    '</div>'
+  );
+}
+
+function saveCorrectiveAction(logId){
+  var action=document.getElementById('ca_action').value;
+  var notes=document.getElementById('ca_notes').value.trim();
+  var date=document.getElementById('ca_date').value;
+  if(!action){toast('Please select an action','error');return;}
+  var log=DB.auditLog.find(function(l){return l.id===logId;});
+  if(!log){toast('Audit record not found','error');return;}
+  log.action=action+(notes?' — '+notes:'');
+  log.actionBy=currentUser?currentUser.name||currentUser.username:'Admin';
+  log.actionDate=date;
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  saveDB();
+  queueSheetSync(["Audit Trail"]);
+  closeModal();
+  renderAuditTrail();
+  toast('Corrective action saved for '+log.empName,'success');
+  // Sync to Firebase
+  if(firebaseReady){
+    (async function(){
+      try{
+        await authAsAdmin();
+        await fbDB.collection('auditLog').doc(String(logId)).set({...log},{merge:true});
+      }catch(e){console.warn('Audit sync error:',e);}
+    })();
+  }
+}
+
 function renderAdminAccess(){
   if(!isAdmin){document.getElementById('view-adminaccess').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
   var promoteCount=0, directCount=0;
@@ -4291,6 +4458,13 @@ function buildEquipmentPayload(){
 function buildSopPayload(){
   return DB.sops.map(s=>({id:s.id,title:s.title||s.name||"",category:s.cat||"",version:s.version||"1.0",created:s.created||"",applicableDept:(s.dept||"").toString(),status:s.status||"Active"}));
 }
+function buildAuditPayload(){
+  if(!DB.auditLog||!DB.auditLog.length)return [];
+  return DB.auditLog.slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'');}).map(function(l){
+    var typeLabel=l.type==='training_doc'?'Training Document':l.type==='test_result'?(l.pass?'Test Passed':'Test Failed'):'Other';
+    return {date:l.date||'',type:typeLabel,empId:l.empId||'',empName:l.empName||'',dept:l.dept||'',training:l.training||'',cat:l.cat||'',trainer:l.trainer||'',score:l.score!=null?l.score:'',result:l.result||'',attempt:l.attempt||'',details:l.details||'',docName:l.docName||'',docLink:l.docLink||'',correctiveAction:l.action||'',actionBy:l.actionBy||'',actionDate:l.actionDate||''};
+  });
+}
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
   var json=JSON.stringify({sheet:sheetName,data:payload});
@@ -4364,16 +4538,13 @@ let _sheetSyncRunning=false;
 
 // Queue a sheet sync — call this after ANY data change (debounced automatically)
 function queueSheetSync(sheetNames){
-  // DEBUG: Show why auto-sync might be blocked
-  var debugMsg='isAdmin='+isAdmin+', sync='+(DB.settings.sheetAutoSync!==false?'ON':'OFF')+', url='+(DB.settings.sheetUrl?'YES':'NO');
-  toast('DEBUG: '+debugMsg,'info',4000);
   if(!isAdmin) return; // Only admin can sync
   if(DB.settings.sheetAutoSync===false) return; // Auto-sync OFF (default is ON)
   var url=DB.settings.sheetUrl||"";
   if(!url) return;
   // Store which sheets need syncing (accumulates until timer fires)
   if(!window._pendingSheetSyncs) window._pendingSheetSyncs=new Set();
-  if(!sheetNames) sheetNames=["Training Data","Employees","Trainings","Certificates","Equipment","SOPs"];
+  if(!sheetNames) sheetNames=["Training Data","Employees","Trainings","Certificates","Equipment","SOPs","Audit Trail"];
   sheetNames.forEach(function(s){window._pendingSheetSyncs.add(s);});
   // Debounce: reset timer on each call
   if(_sheetSyncTimer) clearTimeout(_sheetSyncTimer);
@@ -4410,6 +4581,9 @@ async function executeSheetSync(){
     }
     if(sheetsToSync.includes("SOPs")){
       var p=buildSopPayload();if(p.length>0){await pushToSheet(url,p,"SOPs");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Audit Trail")){
+      var p=buildAuditPayload();if(p.length>0){await pushToSheet(url,p,"Audit Trail");totalSent+=p.length;}
     }
     _lastSheetSync=Date.now();
     console.log('[Sheet Auto-Sync] Done: '+totalSent+' records across '+sheetsToSync.length+' sheets');
@@ -4610,6 +4784,7 @@ function exportFullStatusReport(){
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
+const DB_VERSION="v3-wipe"; // Change this string to force full data reset on all devices
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
@@ -4952,11 +5127,25 @@ async function loadDBFromFirestore(){
 function loadDB(){
   // Load tombstone list first
   loadTombstones();
+  // === FORCE FULL DATA RESET ===
+  // If stored version doesn't match DB_VERSION, wipe everything and start fresh
+  var storedVersion=localStorage.getItem(DB_STORAGE_KEY+'_version');
+  if(storedVersion!==DB_VERSION){
+    console.warn('[loadDB] Version mismatch (stored:'+storedVersion+' vs current:'+DB_VERSION+') — wiping ALL data for fresh start');
+    localStorage.removeItem(DB_STORAGE_KEY);
+    localStorage.removeItem(DB_STORAGE_KEY+'_tombstones');
+    localStorage.removeItem('mep_user');
+    // Note: Firebase wipe is handled in initApp() AFTER firebaseReady=true,
+    // so it can actually delete cloud data before loadDBFromFirestore() runs
+    // DO NOT set version here — initApp() sets it AFTER Firebase wipe completes
+  }
   // Synchronous: load from localStorage for immediate use
   loadDBFromLocal();
   // CRITICAL: ALWAYS use the correct Google Sheet URL (old localStorage may have wrong URL)
   DB.settings.sheetUrl="https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec";
   DB.settings.sheetAutoSync=true;
+  // Ensure auditLog exists (new field — old localStorage won't have it)
+  if(!DB.auditLog)DB.auditLog=[];
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
@@ -5099,6 +5288,21 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
+    // === VERSION CHECK: wipe Firebase BEFORE loading if version changed ===
+    var storedVersion=localStorage.getItem(DB_STORAGE_KEY+'_version');
+    if(storedVersion!==DB_VERSION){
+      console.warn('[initApp] Version mismatch — wiping ALL Firebase data before load');
+      try{await authAsAdmin();}catch(e){}
+      var wipeCols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog','admins'];
+      for(var wi=0;wi<wipeCols.length;wi++){
+        try{var wsnap=await fbDB.collection(wipeCols[wi]).get();var wbatch=fbDB.batch();wsnap.docs.forEach(function(d){wbatch.delete(d.ref);});if(wsnap.size>0)await wbatch.commit();console.log('[reset] Cleared Firebase '+wipeCols[wi]+': '+wsnap.size+' docs');}catch(we){console.warn('[reset] Error clearing '+wipeCols[wi]+':',we.message);}
+      }
+      // Also wipe config/settings so old settings don't persist
+      try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
+      try{await fbDB.collection('config').doc('meta').delete();}catch(e){}
+      localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+      console.log('[reset] All Firebase data wiped — starting fresh');
+    }
     // Run sample data cleanup in background (don't block login)
     cleanupSampleDataFromCloud();
     const loadResult=await loadDBFromFirestore();
@@ -5147,8 +5351,7 @@ async function initApp(){
         console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
       }catch(e){console.error('[bg]',e);}
     })();
-    // Auth persistence + session check (needed for auto-login)
-    try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
+    // REMOVED Firebase Auth auto-login (was logging employees as admin)
     var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
     return;
   }
@@ -5187,25 +5390,8 @@ async function initApp(){
   DB.settings.theme=t;
   document.getElementById("themeBtn").querySelector(".mat-ico").textContent=t==="dark"?"dark_mode":"light_mode";
 
-  // Try Firebase Auth persistence first
-  try{
-    if(firebaseReady){
-      await new Promise(r=>{const unsub=fbAuth.onAuthStateChanged(r);setTimeout(unsub,3000);});
-      const fbUser=fbAuth.currentUser;
-      if(fbUser){
-        const uid=fbUser.email.split('@')[0].toUpperCase();
-        let found=false;
-        if(uid==='ADMIN'){
-          const admin=DB.admins.find(a=>a.username==='admin');
-          if(admin){currentUser={...admin,type:"admin"};isAdmin=true;found=true;}
-        }else{
-          const emp=DB.employees.find(e=>e.id===uid);
-          if(emp){currentUser={...emp,type:"employee"};isAdmin=false;found=true;}
-        }
-        if(found){startApp();return;}
-      }
-    }
-  }catch(e){console.warn('Auth persistence check error:',e);}
+  // REMOVED: Firebase Auth auto-login block (was causing employees to auto-login as admin)
+  // authAsAdmin() still works for cloud sync when admin manually logs in
 
   // Fallback: check localStorage session
   const saved=localStorage.getItem("mep_user");
