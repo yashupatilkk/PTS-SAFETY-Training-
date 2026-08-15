@@ -2642,7 +2642,7 @@ function renderTrainings(){
           <div class="training-body">
             <div class="training-title">${t.name}</div>
             <div class="training-meta">
-              <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
+              <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}${t.trainerDesignation?' ('+t.trainerDesignation+')':''}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
               <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration}</span>
             </div>
@@ -2699,7 +2699,7 @@ function renderEmpTrainings(){
           <div class="training-body">
             <div class="training-title">${t.name}</div>
             <div class="training-meta">
-              <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
+              <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}${t.trainerDesignation?' ('+t.trainerDesignation+')':''}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
               <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration}</span>
             </div>
@@ -2761,7 +2761,22 @@ function openAddTrnModal(){
         <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Training Name *</label><input class="form-control-sm" id="nt_name" placeholder="e.g. Fire Safety Induction"></div>
         <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="nt_dept"><option>All</option>${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="nt_trainer">${DB.settings.trainerList.map(t=>`<option>${t}</option>`).join("")}</select></div>
+        <div class="form-group" style="grid-column:1/-1;">
+        <label class="form-label-sm">Trainer Name *</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input class="form-control-sm" id="nt_trainer" list="trainer_datalist" placeholder="Select or type trainer name" style="flex:1;" required>
+          <datalist id="trainer_datalist">${DB.settings.trainerList.map(t=>`<option value="${typeof t==='object'?t.name:t}">${typeof t==='object'?t.name+(t.designation?' ('+t.designation+')':''):t}</option>`).join("")}</datalist>
+          <button type="button" class="btn btn-sm btn-amber" onclick="addTrainerInline()" title="Add new trainer"><span class="mat-ico" style="font-size:16px;">person_add</span></button>
+        </div>
+      </div>
+      <div class="form-group" style="grid-column:1/-1;">
+        <label class="form-label-sm">Trainer Designation *</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input class="form-control-sm" id="nt_trainer_desig" list="trainer_desig_datalist" placeholder="e.g. Safety Officer, EHS Manager" style="flex:1;" required>
+          <datalist id="trainer_desig_datalist"><option value="Safety Officer"><option value="EHS Manager"><option value="Safety Supervisor"><option value="External Trainer"><option value="OEM Trainer"><option value="Site Engineer"><option value="HSE Officer"><option value="Training Coordinator"><option value="Project Manager"><option value="QA/QC Manager"></datalist>
+          <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="addTrainerDesigInline()" title="Add new designation"><span class="mat-ico" style="font-size:16px;">add</span></button>
+        </div>
+      </div>
         <div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="nt_date" type="date" value="${today}"></div>
         <div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="nt_dur" placeholder="e.g. 30 min, 2 hrs"></div>
         <div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="nt_pass" type="number" value="75" min="0" max="100"></div>
@@ -2851,7 +2866,7 @@ function getCustomQuestions(){
 }
 
 // === AUTO-GENERATE TRAINING DOCUMENT (PDF) ===
-function autoGenerateTrainingDoc(name,cat,dept,trainer,date,duration,passing,desc,ytUrl){
+function autoGenerateTrainingDoc(name,cat,dept,trainer,date,duration,passing,desc,ytUrl,trainerDesignation){
   try{
     var jsPDF=window.jspdf.jsPDF;
     var doc=new jsPDF();
@@ -2879,7 +2894,7 @@ function autoGenerateTrainingDoc(name,cat,dept,trainer,date,duration,passing,des
     doc.setFontSize(10);
     doc.setFont('helvetica','normal');
     var info=[
-      ['Category',cat||'General'],['Department',dept||'All'],['Trainer',trainer||'N/A'],
+      ['Category',cat||'General'],['Department',dept||'All'],['Trainer',trainer||'N/A'],['Trainer Designation',trainerDesignation||'N/A'],
       ['Date',date||'-'],['Duration',duration||'4 hrs'],['Passing Marks',passing+'%'],
       ['Valid For','1 Year']
     ];
@@ -2995,7 +3010,7 @@ async function saveTraining(){
     var trnDur=document.getElementById('nt_dur').value||'4 hrs';
     var trnPass=parseInt(document.getElementById('nt_pass').value)||75;
     var trnDesc=document.getElementById('nt_desc').value;
-    var autoDoc=await autoGenerateTrainingDoc(name,cat,dept,trainer,trnDate,trnDur,trnPass,trnDesc,ytUrl);
+    var trainerDesig=(document.getElementById('nt_trainer_desig')||{}).value||'';var autoDoc=await autoGenerateTrainingDoc(name,cat,dept,trainer,trnDate,trnDur,trnPass,trnDesc,ytUrl,trainerDesig);
     if(autoDoc){
       docN=autoDoc.name;
       docL=autoDoc.data;
@@ -3003,7 +3018,7 @@ async function saveTraining(){
       console.log('[saveTraining] Auto-generated audit document: '+autoDoc.name);
     }
   }
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:docN,docLink:docL,docData:docData,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,trainerDesignation:(document.getElementById('nt_trainer_desig')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:docN,docLink:docL,docData:docData,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
 
   // 1. Add to local array
   DB.trainings.push(t);
@@ -3060,7 +3075,7 @@ function openTrainingDetail(id){
       <a href="${t.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--red);margin-bottom:14px;"><span class="mat-ico" style="font-size:16px;">open_in_new</span> Open in YouTube</a>
       `:""}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:12.5px;">
-        <div><span style="color:var(--muted);">Trainer</span><div><b>${t.trainer}</b></div></div>
+        <div><span style="color:var(--muted);">Trainer</span><div><b>${t.trainer}</b></div>${t.trainerDesignation?`<div style="font-size:10.5px;color:var(--amber);font-weight:600;">${t.trainerDesignation}</div>`:""}</div>
         <div><span style="color:var(--muted);">Date</span><div><b>${formatDate(t.date)}</b></div></div>
         <div><span style="color:var(--muted);">Duration</span><div><b>${t.duration}</b></div></div>
         <div><span style="color:var(--muted);">Passing Marks</span><div><b>${t.passing}%</b></div></div>
@@ -3803,7 +3818,7 @@ function submitQuiz(){
     const expiry=new Date();
     const validityYears=trnMatch?.validity?.includes("2")?2:trnMatch?.validity?.includes("6")?0.5:1;
     expiry.setFullYear(expiry.getFullYear()+Math.floor(validityYears));
-    DB.certificates.push({num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
+    DB.certificates.push({num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",trainerDesignation:trnMatch?.trainerDesignation||"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
     DB.notifications.unshift({id:genId("N"),msg:`Certificate ${certNum} auto-generated for ${empName} — ${quizState.training} (Score: ${score}%)`,time:"Just now",read:false,icon:"workspace_premium"});
   }
   if(trnMatch){
@@ -4041,7 +4056,7 @@ function downloadCertificate(certNum){
   doc.setDrawColor(125,133,144);doc.setLineWidth(0.5);
   doc.line(45,158,105,158);doc.line(W/2-30,158,W/2+30,158);doc.line(W-105,158,W-45,158);
   doc.setFontSize(8);doc.setTextColor(125,133,144);
-  doc.text("Trainer: "+cert.trainer,75,162,{align:"center"});
+  doc.text("Trainer: "+cert.trainer+(cert.trainerDesignation?" ("+cert.trainerDesignation+")":""),75,162,{align:"center"});
   doc.text("Safety Manager",W/2,162,{align:"center"});
   doc.text("Authorized Signatory",W-75,162,{align:"center"});
   doc.setFontSize(8);doc.setTextColor(100,108,116);
@@ -4239,7 +4254,7 @@ function exportAnalyticsExcel(){
 }
 function exportTrnReport(){
   const ws=XLSX.utils.json_to_sheet(DB.trainings.map(t=>({
-    "ID":t.id,"Name":t.name,"Category":t.cat,"Dept":t.dept,"Trainer":t.trainer,"Date":t.date,"Duration":t.duration,"Enrolled":t.enrolled?.length||0,"Completed":t.completed?.length||0,"Pass Marks":t.passing+"%"
+    "ID":t.id,"Name":t.name,"Category":t.cat,"Dept":t.dept,"Trainer":t.trainer,"Trainer Designation":t.trainerDesignation||"","Date":t.date,"Duration":t.duration,"Enrolled":t.enrolled?.length||0,"Completed":t.completed?.length||0,"Pass Marks":t.passing+"%"
   })));
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Trainings");
   XLSX.writeFile(wb,"trainings_report.xlsx");toast("Training report exported","success");
@@ -4537,7 +4552,7 @@ function previewAutoDoc(){
   var pass=document.getElementById('nt_pass')?parseInt(document.getElementById('nt_pass').value)||75:75;
   var desc=document.getElementById('nt_desc')?document.getElementById('nt_desc').value:'';
   var ytUrl=document.getElementById('nt_yturl')?document.getElementById('nt_yturl').value.trim():'';
-  autoGenerateTrainingDoc(name,cat,dept,trainer,date,dur,pass,desc,ytUrl).then(function(result){
+  var trainerDesig=document.getElementById("nt_trainer_desig")?document.getElementById("nt_trainer_desig").value:"";autoGenerateTrainingDoc(name,cat,dept,trainer,date,dur,pass,desc,ytUrl,trainerDesig).then(function(result){
     if(!result){toast('Failed to generate preview','error');return;}
     var previewEl=document.getElementById('nt_docpreview');
     if(previewEl){
@@ -4691,10 +4706,10 @@ function renderSettings(){
       <div class="form-section" style="grid-column:1/-1;">
         <div class="form-section-title"><span class="mat-ico">person</span> Trainer List</div>
         <div id="trainerList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-          ${s.trainerList.map((t,i)=>`<div style="display:flex;align-items:center;gap:6px;background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:5px 10px;font-size:12px;">
-            ${t}
+          ${s.trainerList.map((t,i)=>{var tName=typeof t==='object'?t.name:t;var tDesig=typeof t==='object'?(t.designation||''):'';return`<div style="display:flex;align-items:center;gap:6px;background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:5px 10px;font-size:12px;">
+            <span style="font-weight:600;">${tName}</span>${tDesig?`<span style="color:var(--amber);font-size:10.5px;">${tDesig}</span>`:''}
             ${isAdmin?`<button onclick="removeTrainer(${i})" style="color:var(--red);"><span class="mat-ico" style="font-size:13px;">close</span></button>`:""}
-          </div>`).join("")}
+          </div>`;}).join("")}
         </div>
                 ${isAdmin?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
           <div style="padding:12px 14px;border-radius:10px;border:2px solid var(--amber);background:rgba(255,176,32,.06);">
@@ -4703,8 +4718,8 @@ function renderSettings(){
             <button style="padding:10px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.02em;" onclick="freshStartSite()"><span class="mat-ico" style="font-size:16px;vertical-align:middle;">restart_alt</span> Fresh Start Site</button>
           </div>
           <button style="padding:8px 14px;border-radius:8px;border:1px solid var(--red);background:rgba(232,72,58,.08);color:var(--red);font-size:12px;font-weight:600;cursor:pointer;align-self:flex-start;" onclick="resetDBToDefault()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">warning</span> Nuclear Reset (Delete Everything)</button>
-          <div style="display:flex;gap:8px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>
-        </div>`:`<div style="display:flex;gap:8px;margin-bottom:10px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>`}"
+          <div style="display:flex;gap:8px;flex-wrap:wrap;"><input class="form-control-sm" id="newTrainer" placeholder="Trainer name" style="flex:1;min-width:120px;"><input class="form-control-sm" id="newTrainerDesig" placeholder="Designation" style="flex:1;min-width:120px;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>
+        </div>`:`<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;"><input class="form-control-sm" id="newTrainer" placeholder="Trainer name" style="flex:1;"><input class="form-control-sm" id="newTrainerDesig" placeholder="Designation" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>`}"
       </div>
       ${isAdmin?`
       <div class="form-section" style="grid-column:1/-1;">
@@ -4814,8 +4829,11 @@ function saveSettings(){
   if(autoSyncEl) DB.settings.sheetAutoSync=autoSyncEl.checked;
   toast("Settings saved","success");saveDB();
 }
-function addTrainer(){const v=document.getElementById("newTrainer")?.value.trim();if(!v)return;DB.settings.trainerList.push(v);document.getElementById("newTrainer").value="";renderSettings();saveDB();toast("Trainer added","success");}
+function addTrainer(){const v=document.getElementById('newTrainer')?.value.trim();if(!v)return;const d=(document.getElementById('newTrainerDesig')||{}).value?.trim()||'';if(d){DB.settings.trainerList.push({name:v,designation:d});}else{DB.settings.trainerList.push(v);}document.getElementById('newTrainer').value='';var de=document.getElementById('newTrainerDesig');if(de)de.value='';renderSettings();saveDB();toast('Trainer: '+v+(d?' ('+d+')':'')+' added','success');}
+function addTrainerWithDesig(){addTrainer();}
 function removeTrainer(i){DB.settings.trainerList.splice(i,1);renderSettings();saveDB();}
+function addTrainerInline(){const v=prompt('Enter new trainer name:');if(!v||!v.trim())return;const name=v.trim();if(!DB.settings.trainerList.find(t=>(typeof t==='object'?t.name:t)===name)){DB.settings.trainerList.push(name);}var sel=document.getElementById('nt_trainer');if(sel)sel.value=name;var dl=document.getElementById('trainer_datalist');if(dl){var opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}toast('Trainer "'+name+'" added','success');saveDB();}
+function addTrainerDesigInline(){const v=prompt('Enter new trainer designation:');if(!v||!v.trim())return;const desig=v.trim();var dl=document.getElementById('trainer_desig_datalist');if(dl){var exists=false;for(var i=0;i<dl.options.length;i++){if(dl.options[i].value.toLowerCase()===desig.toLowerCase()){exists=true;break;}}if(!exists){var opt=document.createElement('option');opt.value=desig;dl.appendChild(opt);}}var inp=document.getElementById('nt_trainer_desig');if(inp)inp.value=desig;toast('Designation "'+desig+'" added','success');}
 function changeAdminPw(username){const pw=prompt(`New password for ${username}:`);if(pw){const a=DB.admins.find(x=>x.username===username);if(a){a.password=pw;toast("Password changed","success");saveDB();}}}
 function addAdminModal(){
   openModal(`
