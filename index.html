@@ -2751,8 +2751,10 @@ function renderEmpTrainings(){
   },800);
 }
 function openAddTrnModal(){
+  try{
   customQCount=0;
   const today=new Date().toISOString().split('T')[0];
+  if(!Array.isArray(DB.settings.trainerList))DB.settings.trainerList=["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"];
   openModal(`
     <div class="modal-accent"></div>
     <div class="modal-head"><div class="modal-ico" style="background:rgba(139,109,232,.15)"><span class="mat-ico" style="color:var(--purple);font-size:22px;">school</span></div><h2>Create New Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
@@ -2818,6 +2820,7 @@ function openAddTrnModal(){
       <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
     </div>
   `,"740px");
+  }catch(e){console.error("[openAddTrnModal]",e);toast("Error opening form: "+e.message,"error",5000);}
 }
 let customQCount=0;
 function previewTrnVideo(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById('trnVideoPreview');const frame=document.getElementById('trnVideoFrame');if(ytId&&wrap&&frame){wrap.style.display='block';frame.src='https://www.youtube.com/embed/'+ytId+'?rel=0';}else if(wrap){wrap.style.display='none';}}
@@ -2980,7 +2983,7 @@ async function saveTraining(){
   if(btn){btn.disabled=true;btn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Saving...';}
   try{
   var name=document.getElementById('nt_name').value.trim();
-  if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
+  var trainerVal=(document.getElementById('nt_trainer')||{}).value||'';if(trainerVal==='__add_new__'){trainerVal=DB.settings.trainerList.length?(typeof DB.settings.trainerList[0]==='object'?DB.settings.trainerList[0].name:DB.settings.trainerList[0]):'';}var desigVal=(document.getElementById('nt_trainer_desig')||{}).value||'';if(desigVal==='__add_new__')desigVal='';if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var cat=document.getElementById('nt_cat').value;
   var customQs=getCustomQuestions();
   if(customQs.length){
@@ -3015,7 +3018,7 @@ async function saveTraining(){
       console.log('[saveTraining] Auto-generated audit document: '+autoDoc.name);
     }
   }
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,trainerDesignation:(document.getElementById('nt_trainer_desig')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:docN,docLink:docL,docData:docData,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:trainerVal,trainerDesignation:desigVal,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,docName:docN,docLink:docL,docData:docData,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
 
   // 1. Add to local array
   DB.trainings.push(t);
