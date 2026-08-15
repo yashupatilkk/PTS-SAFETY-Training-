@@ -2761,7 +2761,7 @@ function openAddTrnModal(){
     <div class="modal-body">
       <div class="form-section"><div class="form-grid">
         <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Training Name *</label><input class="form-control-sm" id="nt_name" placeholder="e.g. Fire Safety Induction"></div>
-        <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
+        <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat" onchange="handleCatSelectChange()">${getAllCategories().map(c=>`<option>${c}</option>`).join("")}<option value="__add_new__">+ Add New Category</option></select></div>
         <div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="nt_dept"><option>All</option>${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}</select></div>
         <div class="form-group" style="grid-column:1/-1;">
         <label class="form-label-sm">Trainer Name *</label>
@@ -2983,8 +2983,8 @@ async function saveTraining(){
   if(btn){btn.disabled=true;btn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Saving...';}
   try{
   var name=document.getElementById('nt_name').value.trim();
-  var trainerVal=(document.getElementById('nt_trainer')||{}).value||'';if(trainerVal==='__add_new__'){trainerVal=DB.settings.trainerList.length?(typeof DB.settings.trainerList[0]==='object'?DB.settings.trainerList[0].name:DB.settings.trainerList[0]):'';}var desigVal=(document.getElementById('nt_trainer_desig')||{}).value||'';if(desigVal==='__add_new__')desigVal='';if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
-  var cat=document.getElementById('nt_cat').value;
+  var trainerVal=(document.getElementById('nt_trainer')||{}).value||'';if(trainerVal==='__add_new__'){trainerVal=DB.settings.trainerList.length?(typeof DB.settings.trainerList[0]==='object'?DB.settings.trainerList[0].name:DB.settings.trainerList[0]):'';}var desigVal=(document.getElementById('nt_trainer_desig')||{}).value||'';if(desigVal==='__add_new__')desigVal='';var catVal=(document.getElementById("nt_cat")||{}).value||"";if(catVal==="__add_new__")catVal=getAllCategories()[0]||"";if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
+  var cat=catVal||document.getElementById('nt_cat').value;
   var customQs=getCustomQuestions();
   if(customQs.length){
     if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
@@ -4704,7 +4704,7 @@ function renderSettings(){
         <div class="form-group"><label class="form-label-sm">Language</label><select class="form-control-sm"><option>English</option><option>Hindi</option></select></div>
       </div>
       <div class="form-section" style="grid-column:1/-1;">
-        <div class="form-section-title"><span class="mat-ico">person</span> Trainer List</div>
+        <div class="form-section" style="grid-column:1/-1;"><div class="form-section-title"><span class="mat-ico">category</span> Training Categories</div><div id="categoryList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div><div style="display:flex;gap:8px;margin-bottom:10px;"><input class="form-control-sm" id="newCategory" placeholder="New category name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addCategoryFromSettings()"><span class="mat-ico">add</span> Add Category</button></div></div><div class="form-section" style="grid-column:1/-1;"><div class="form-section-title"><span class="mat-ico">person</span> Trainer List</div>
         <div id="trainerList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
           ${s.trainerList.map((t,i)=>{var tName=typeof t==='object'?t.name:t;var tDesig=typeof t==='object'?(t.designation||''):'';return`<div style="display:flex;align-items:center;gap:6px;background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:5px 10px;font-size:12px;">
             <span style="font-weight:600;">${tName}</span>${tDesig?`<span style="color:var(--amber);font-size:10.5px;">${tDesig}</span>`:''}
@@ -4820,6 +4820,7 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
     </div>
   `;
 }
+renderCategoryList();
 function saveSettings(){
   DB.settings.companyName=document.getElementById("st_company")?.value||DB.settings.companyName;
   DB.settings.companyLogo=document.getElementById("st_logo")?.value||DB.settings.companyLogo;
@@ -4832,6 +4833,16 @@ function saveSettings(){
 function addTrainer(){const v=document.getElementById('newTrainer')?.value.trim();if(!v)return;const d=(document.getElementById('newTrainerDesig')||{}).value?.trim()||'';if(d){DB.settings.trainerList.push({name:v,designation:d});}else{DB.settings.trainerList.push(v);}document.getElementById('newTrainer').value='';var de=document.getElementById('newTrainerDesig');if(de)de.value='';renderSettings();saveDB();toast('Trainer: '+v+(d?' ('+d+')':'')+' added','success');}
 function addTrainerWithDesig(){addTrainer();}
 function removeTrainer(i){DB.settings.trainerList.splice(i,1);renderSettings();saveDB();}
+function getAllCategories(){
+  var defaults=["Fire Fighting","Electrical Safety","LOTO","Confined Space","Work at Height","Chemical Handling","PPE Usage","Emergency Evacuation","First Aid","STP Operation","WTP Operation","Chiller Operation","Cooling Tower","AHU Maintenance","FCU Maintenance","DG Operation","Transformer Safety","UPS Operation","Pump Room","Fire Pump Operation","Hydrant System","Access Control","Lift Safety","Energy Conservation","BMS","Customer Service","Soft Skills","Housekeeping","Waste Management","Water Quality","Environmental Safety","HIRA","JSA","Permit To Work","Incident Reporting","Near Miss"];
+  var custom=DB.settings.trainingCategories||[];
+  var merged=defaults.concat(custom.filter(function(c){return defaults.indexOf(c)<0;}));
+  return merged;
+}
+function addCategoryFromSettings(){var v=document.getElementById("newCategory");if(!v)return;var cat=v.value.trim();if(!cat)return;if(!DB.settings.trainingCategories)DB.settings.trainingCategories=[];if(DB.settings.trainingCategories.indexOf(cat)<0&&getAllCategories().indexOf(cat)<0){DB.settings.trainingCategories.push(cat);}v.value="";renderSettings();saveDB();toast("Category: "+cat+" added","success");}
+function handleCatSelectChange(){var sel=document.getElementById("nt_cat");if(sel&&sel.value==="__add_new__"){var v=prompt("Enter new training category:");if(!v||!v.trim())return;v=v.trim();if(!DB.settings.trainingCategories)DB.settings.trainingCategories=[];if(DB.settings.trainingCategories.indexOf(v)<0&&getAllCategories().indexOf(v)<0){DB.settings.trainingCategories.push(v);}var opt=document.createElement("option");opt.value=v;opt.textContent=v;sel.insertBefore(opt,sel.querySelector('option[value="__add_new__"]'));sel.value=v;toast("Category: "+v+" added","success");saveDB();}}
+function renderCategoryList(){var el=document.getElementById("categoryList");if(!el)return;var cats=getAllCategories();var custom=DB.settings.trainingCategories||[];el.innerHTML=cats.map(function(c){var isC=custom.indexOf(c)>=0;return '<div style="display:flex;align-items:center;gap:6px;background:'+(isC?'rgba(139,109,232,.1)':'var(--sur2)')+';border:1px solid '+(isC?'rgba(139,109,232,.4)':'var(--bdr)')+';border-radius:8px;padding:5px 10px;font-size:12px;"><span style="font-weight:'+(isC?'600':'400')+';">'+c+'</span>'+(isC&&isAdmin?'<button onclick="removeCategory('+custom.indexOf(c)+')" style="color:var(--red);"><span class="mat-ico" style="font-size:13px;">close</span></button>':'')+'</div>';}).join("");}
+function removeCategory(i){DB.settings.trainingCategories.splice(i,1);renderSettings();saveDB();}
 function handleTrainerSelectChange(){var sel=document.getElementById('nt_trainer');if(sel&&sel.value==='__add_new__'){addTrainerInline();}}
 function handleDesigSelectChange(){var sel=document.getElementById('nt_trainer_desig');if(sel&&sel.value==='__add_new__'){addTrainerDesigInline();}}
 function addTrainerInline(){
