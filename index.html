@@ -1436,7 +1436,7 @@ async function seedFirestore(){
 ============================================================ */
 let currentUser=null,isAdmin=false,currentView="dashboard";
 let quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0};
-let equip_filter="All",equip_search="",emp_search="",trn_search="",sop_search="";
+let equip_filter="All",equip_search="",emp_search="",emp_page=1,EMP_PER_PAGE=25,trn_search="",sop_search="";
 let charts={};
 
 /* ============================================================
@@ -2083,57 +2083,64 @@ function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];
 ============================================================ */
 function renderEmployees(){
   if(!isAdmin){renderEmpEmployee();return;}
-  const filtered=DB.employees.filter(e=>{
-    const q=emp_search.toLowerCase();
-    return!q||e.name.toLowerCase().includes(q)||e.id.toLowerCase().includes(q)||e.dept.toLowerCase().includes(q)||e.desig.toLowerCase().includes(q);
+  var q=emp_search.toLowerCase();
+  var filtered=DB.employees.filter(function(e){
+    return !q||e.name.toLowerCase().includes(q)||e.id.toLowerCase().includes(q)||e.dept.toLowerCase().includes(q)||e.desig.toLowerCase().includes(q);
   });
-  document.getElementById("view-employees").innerHTML=`
-    <div class="section-header">
-      <div class="section-title">Employee <span>Management</span></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-outline" onclick="exportEmpExcel()"><span class="mat-ico">download</span> Export Excel</button>
-        <button class="btn btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="forceSyncAllEmployees()" title="Sync all employees to Firebase cloud + create login accounts"><span class="mat-ico">phonelink_setup</span> Fix Phone Login</button>
-        <button class="btn btn-amber" onclick="openAddEmpModal()"><span class="mat-ico">add</span> Add Employee</button>
-      </div>
-    </div>
-    <div class="filter-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-      <div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee..." oninput="emp_search=this.value;renderEmployees()" value="${emp_search}"></div>
-      <select class="form-control-sm" style="width:auto;" onchange="emp_search=this.value;renderEmployees()">
-        <option value="">All Departments</option>
-        ${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}
-      </select>
-      <span style="font-size:12px;color:var(--muted);">Showing ${filtered.length} of ${DB.employees.length}</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Employee</th><th>Dept</th><th>Designation</th><th>Shift</th><th>Mobile</th><th>Status</th><th>Tests Passed</th><th>Actions</th></tr></thead>
-        <tbody>${filtered.map(e=>{
-          const passed=DB.testResults.filter(r=>r.empId===e.id&&r.pass).length;
-          const certs=DB.certificates.filter(c=>c.empId===e.id).length;
-          return`<tr>
-            <td><div style="display:flex;align-items:center;gap:8px;">
-              <div class="avatar" style="background:${avatarColor(e.name)}">${avatarInitials(e.name)}</div>
-              <div><div class="emp-name">${e.name}</div><div class="emp-id">${e.id}</div></div>
-            </div></td>
-            <td><span class="badge badge-info">${e.dept}</span></td>
-            <td style="font-size:12px;">${e.desig}</td>
-            <td style="font-size:11.5px;color:var(--muted);">${e.shift}</td>
-            <td class="mono" style="font-size:11.5px;">${e.mobile}</td>
-            <td><span class="badge badge-${e.status==="active"?"active":"danger"}">${e.status}</span></td>
-            <td style="text-align:center;"><span class="badge badge-amber">${passed} passed</span> <span class="badge badge-purple">${certs} certs</span></td>
-            <td><div style="display:flex;gap:4px;">
-              <button class="btn btn-sm btn-outline" onclick="editEmp('${e.id}')"><span class="mat-ico" style="font-size:13px;">edit</span></button>
-              <button class="btn btn-sm btn-outline" onclick="viewEmpHistory('${e.id}')"><span class="mat-ico" style="font-size:13px;">history</span></button>
-              <button class="btn btn-sm btn-outline" onclick="resetPassword('${e.id}')"><span class="mat-ico" style="font-size:13px;">lock_reset</span></button>
-              <button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="pushEmpToCloud('${e.id}')" title="Push to Cloud"><span class="mat-ico" style="font-size:13px;">cloud_upload</span></button>
-              <button class="btn btn-sm btn-outline" style="border-color:var(--purple);color:var(--purple);" onclick="giveAdminAccess('${e.id}')" title="Promote to Admin"><span class="mat-ico" style="font-size:13px;">admin_panel_settings</span></button>
-              <button class="btn btn-sm btn-red" onclick="deleteEmp('${e.id}')"><span class="mat-ico" style="font-size:13px;">delete</span></button>
-            </div></td>
-          </tr>`;
-        }).join("")}</tbody>
-      </table>
-    </div>
-  `;
+  // Pagination
+  var page=emp_page||1;var per=EMP_PER_PAGE||25;
+  var totalPages=Math.ceil(filtered.length/per)||1;
+  if(page>totalPages)page=totalPages;emp_page=page;
+  var paged=filtered.slice((page-1)*per,page*per);
+  // Build page buttons HTML (no nested backticks)
+  var pageBtns='';
+  var ps=Math.max(1,page-3),pe=Math.min(totalPages,ps+6);ps=Math.max(1,pe-6);
+  for(var pi=ps;pi<=pe;pi++){
+    pageBtns+='<button class="btn btn-sm '+(pi===page?'btn-amber':'btn-outline')+'" onclick="emp_page='+pi+';renderEmployees()">'+pi+'</button>';
+  }
+  var rowsHtml=paged.map(function(e){
+    var passed=DB.testResults.filter(function(r){return r.empId===e.id&&r.pass;}).length;
+    var certs=DB.certificates.filter(function(c){return c.empId===e.id;}).length;
+    return '<tr>'+
+      '<td><div style="display:flex;align-items:center;gap:8px;"><div class="avatar" style="background:'+avatarColor(e.name)+'">'+avatarInitials(e.name)+'</div><div><div class="emp-name">'+e.name+'</div><div class="emp-id">'+e.id+'</div></div></div></td>'+
+      '<td><span class="badge badge-info">'+e.dept+'</span></td>'+
+      '<td style="font-size:12px;">'+e.desig+'</td>'+
+      '<td style="font-size:11.5px;color:var(--muted);">'+e.shift+'</td>'+
+      '<td class="mono" style="font-size:11.5px;">'+e.mobile+'</td>'+
+      '<td><span class="badge badge-'+(e.status==="active"?"active":"danger")+'">'+e.status+'</span>'+(function(){var assignedTrns=DB.trainings.filter(function(t){return(t.enrolled||[]).includes(e.id);});var completed=0;var expired=0;var pending=0;assignedTrns.forEach(function(t){var res=DB.testResults.filter(function(r){return r.empId===e.id&&r.training===t.name&&r.pass;});if(res.length>0){var last=res.sort(function(a,b){return b.date.localeCompare(a.date);})[0];var hrs=(Date.now()-new Date(last.date).getTime())/(1000*60*60);if(hrs>=24)expired++;else completed++;}else{pending++;}});if(!assignedTrns.length)return '';var html='<div style="margin-top:4px;font-size:10px;line-height:1.5;">';if(completed)html+='<span style="color:var(--green);">✅ '+completed+'</span> ';if(expired)html+='<span style="color:var(--orange);">⏳ '+expired+'</span> ';if(pending)html+='<span style="color:var(--red);">❌ '+pending+'</span>';html+='</div>';return html;})()+'</td>'+
+      '<td style="text-align:center;"><span class="badge badge-amber">'+passed+' passed</span> <span class="badge badge-purple">'+certs+' certs</span></td>'+
+      '<td><div style="display:flex;gap:4px;">'+
+        '<button class="btn btn-sm btn-outline" onclick="editEmp(\'+e.id+\')"><span class="mat-ico" style="font-size:13px;">edit</span></button>'+
+        '<button class="btn btn-sm btn-outline" onclick="viewEmpHistory(\'+e.id+\')"><span class="mat-ico" style="font-size:13px;">history</span></button>'+
+        '<button class="btn btn-sm btn-outline" onclick="resetPassword(\'+e.id+\')"><span class="mat-ico" style="font-size:13px;">lock_reset</span></button>'+
+        '<button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="pushEmpToCloud(\'+e.id+\')" title="Push to Cloud"><span class="mat-ico" style="font-size:13px;">cloud_upload</span></button>'+
+        '<button class="btn btn-sm btn-outline" style="border-color:var(--purple);color:var(--purple);" onclick="giveAdminAccess(\'+e.id+\')" title="Promote to Admin"><span class="mat-ico" style="font-size:13px;">admin_panel_settings</span></button>'+
+        '<button class="btn btn-sm btn-red" onclick="deleteEmp(\'+e.id+\')"><span class="mat-ico" style="font-size:13px;">delete</span></button>'+
+      '</div></td>'+
+    '</tr>';
+  }).join('');
+  var pagHtml=filtered.length>per?'<div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:8px;"><div style="font-size:12px;color:var(--muted);">Page '+page+' of '+totalPages+' ('+filtered.length+' employees)</div><div style="display:flex;gap:4px;"><button class="btn btn-sm btn-outline" onclick="emp_page=1;renderEmployees()" '+(page===1?'disabled style="opacity:.4;"':'')+'>First</button><button class="btn btn-sm btn-outline" onclick="emp_page=Math.max(1,emp_page-1);renderEmployees()" '+(page===1?'disabled style="opacity:.4;"':'')+'>Prev</button>'+pageBtns+'<button class="btn btn-sm btn-outline" onclick="emp_page=Math.min('+totalPages+',emp_page+1);renderEmployees()" '+(page>=totalPages?'disabled style="opacity:.4;"':'')+'>Next</button><button class="btn btn-sm btn-outline" onclick="emp_page='+totalPages+';renderEmployees()" '+(page>=totalPages?'disabled style="opacity:.4;"':'')+'>Last</button></div></div>':'';
+  var deptOpts=DEPARTMENTS.map(function(d){return '<option>'+d+'</option>';}).join('');
+  document.getElementById("view-employees").innerHTML=
+    '<div class="section-header">'+
+      '<div class="section-title">Employee <span>Management</span></div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+        '<button class="btn btn-outline" onclick="exportEmpExcel()"><span class="mat-ico">download</span> Export Excel</button>'+
+        '<button class="btn btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="forceSyncAllEmployees()" title="Sync all employees to Firebase cloud + create login accounts"><span class="mat-ico">phonelink_setup</span> Fix Phone Login</button>'+
+        '<button class="btn btn-amber" onclick="openAddEmpModal()"><span class="mat-ico">add</span> Add Employee</button>'+
+        '<button class="btn btn-outline" style="border-color:var(--green);color:var(--green);" onclick="openBulkAddEmpModal()"><span class="mat-ico">playlist_add</span> Bulk Add (100+)</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="filter-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">'+
+      '<div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee..." oninput="emp_search=this.value;emp_page=1;renderEmployees()" value="'+emp_search.replace(/"/g,'&quot;')+'"></div>'+
+      '<select class="form-control-sm" style="width:auto;" onchange="emp_search=this.value;emp_page=1;renderEmployees()"><option value="">All Departments</option>'+deptOpts+'</select>'+
+      '<span style="font-size:12px;color:var(--muted);">Showing '+paged.length+' of '+filtered.length+'</span>'+
+    '</div>'+
+    '<div class="table-wrap"><table>'+
+      '<thead><tr><th>Employee</th><th>Dept</th><th>Designation</th><th>Shift</th><th>Mobile</th><th>Training Status</th><th>Tests Passed</th><th>Actions</th></tr></thead>'+
+      '<tbody>'+rowsHtml+'</tbody>'+
+    '</table></div>'+
+    pagHtml;
 }
 function renderEmpEmployee(){
   const e=DB.employees.find(x=>x.id===currentUser.id);
@@ -2163,14 +2170,16 @@ function renderEmpEmployee(){
     </div>
     <div class="section-title" style="margin-bottom:12px;">My <span>Test History</span></div>
     <div class="table-wrap">
-      <table><thead><tr><th>Training</th><th>Score</th><th>Correct</th><th>Wrong</th><th>Result</th><th>Date</th><th>Certificate</th></tr></thead>
-      <tbody>${myResults.length?myResults.map(r=>`<tr>
+      <table><thead><tr><th>Training</th><th>Score</th><th>Correct</th><th>Wrong</th><th>Result</th><th>Status</th><th>Date</th><th>Answers</th><th>Certificate</th></tr></thead>
+      <tbody>${myResults.length?myResults.map(r=>{var hrs=r.date&&r.time?((Date.now()-new Date(r.date+"T"+r.time).getTime())/(1000*60*60)):((Date.now()-new Date(r.date).getTime())/(1000*60*60));var expired=hrs>=24;return`<tr>
         <td>${r.training}</td><td><b style="color:${r.score>=70?"var(--green)":"var(--red)"}">${r.score}%</b></td>
         <td style="color:var(--green);">${r.correct}</td><td style="color:var(--red);">${r.wrong}</td>
         <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
-        <td>${formatDate(r.date)}</td>
+        <td>${r.pass?`<span class="badge badge-${expired?"warning":"active"}" style="font-size:9px;">${expired?"⏳ Expired":"✅ Valid"}</span>`:"—"}</td>
+        <td>${formatDate(r.date)}${r.time?" "+r.time:""}</td>
+        <td>${r.questionDetails?`<button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);padding:3px 6px;" onclick="viewAnswerDetails('${r.id}')"><span class="mat-ico" style="font-size:11px;">fact_check</span></button>`:"—"}</td>
         <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico">download</span> Certificate</button>`:"—"}</td>
-      </tr>`).join(""):"<tr><td colspan='7' style='text-align:center;color:var(--muted);padding:20px;'>No test history yet</td></tr>"}</tbody></table>
+      </tr>`;}).join(""):"<tr><td colspan='9' style='text-align:center;color:var(--muted);padding:20px;'>No test history yet</td></tr>"}</tbody></table>
     </div>
   `;
 }
@@ -2192,6 +2201,152 @@ async function pushEmpToCloud(empId){
     toast('Failed to push: '+(err.message||err),'error',6000);
   }
 }
+
+function openBulkAddEmpModal(){
+  // Auto-suggest next ID
+  var maxNum=0;
+  DB.employees.forEach(function(e){var m=e.id.match(/\d+/);if(m)maxNum=Math.max(maxNum,parseInt(m[0]));});
+  var nextId='EMP'+String(maxNum+1).padStart(3,'0');
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head"><div class="modal-ico" style="background:rgba(62,207,142,.15)"><span class="mat-ico" style="color:var(--green);font-size:22px;">playlist_add</span></div><h2>Bulk Add Employees</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
+    <div class="modal-body">
+      <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:14px;font-size:12px;display:flex;align-items:center;gap:10px;">
+        <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
+        <div><b>Paste employee data below</b> — one per line. Format: <code style="background:var(--sur3);padding:2px 6px;border-radius:4px;">ID, Name, Mobile, Department, Designation, Shift</code><br>
+        Example: <code style="background:var(--sur3);padding:2px 6px;border-radius:4px;">EMP021, Ravi Kumar, 9876543210, MEP, Technician, Day</code><br>
+        Department and Shift have defaults. Only <b>ID, Name, Mobile</b> are mandatory. Next auto-ID: <b>${nextId}</b></div>
+      </div>
+      <div class="form-section"><div class="form-section-title"><span class="mat-ico">settings</span> Default Settings (applied to all)</div>
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label-sm">Default Department</label><select class="form-control-sm" id="bulk_dept">${DEPARTMENTS.map(d=>'<option>'+d+'</option>').join('')}</select></div>
+          <div class="form-group"><label class="form-label-sm">Default Shift</label><select class="form-control-sm" id="bulk_shift"><option>Day</option><option>Night</option><option>Morning</option><option>Rotating</option></select></div>
+          <div class="form-group"><label class="form-label-sm">Default Designation</label><input class="form-control-sm" id="bulk_desig" placeholder="Technician" value="Technician"></div>
+          <div class="form-group"><label class="form-label-sm">Default Password</label><input class="form-control-sm" id="bulk_pw" value="emp123"></div>
+          <div class="form-group"><label class="form-label-sm">Starting ID Number</label><input class="form-control-sm" id="bulk_start" type="number" value="${maxNum+1}" min="1"></div>
+          <div class="form-group"><label class="form-label-sm">ID Prefix</label><input class="form-control-sm" id="bulk_prefix" value="EMP" placeholder="EMP"></div>
+        </div>
+      </div>
+      <div class="form-section" style="margin-top:12px;"><div class="form-section-title"><span class="mat-ico">list</span> Employee List (one per line)</div>
+        <textarea id="bulk_list" rows="12" style="width:100%;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;font-size:12px;color:var(--txt);font-family:'Inter',sans-serif;resize:vertical;" placeholder="Paste here:
+EMP021, Ravi Kumar, 9876543210, MEP, Technician, Day
+EMP022, Amit Sharma, 9876543211, HVAC, Fitter, Night
+EMP023, Suresh Yadav, 9876543212
+
+OR just names (auto-generates ID & mobile):
+Ravi Kumar
+Amit Sharma
+Suresh Yadav"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+          <span style="font-size:11px;color:var(--muted);">Quick template:</span>
+          <button class="btn btn-sm btn-outline" onclick="document.getElementById('bulk_list').value='1, Worker 1, 9000000001
+2, Worker 2, 9000000002
+3, Worker 3, 9000000003
+4, Worker 4, 9000000004
+5, Worker 5, 9000000005';">5 Sample</button>
+          <button class="btn btn-sm btn-outline" onclick="document.getElementById('bulk_list').value=Array.from({length:20},(_,i)=>(i+1)+', Employee '+(i+1)+', 9000000'+String(1000+i).slice(-4)).join('\n');">20 Sample</button>
+          <button class="btn btn-sm btn-outline" onclick="document.getElementById('bulk_list').value=Array.from({length:50},(_,i)=>(i+1)+', Employee '+(i+1)+', 9000000'+String(1000+i).slice(-4)).join('\n');">50 Sample</button>
+          <button class="btn btn-sm btn-outline" onclick="document.getElementById('bulk_list').value=Array.from({length:100},(_,i)=>(i+1)+', Employee '+(i+1)+', 90000'+String(10000+i).slice(-5)).join('\n');">100 Sample</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-amber" id="bulkSaveBtn" onclick="saveBulkEmployees()"><span class="mat-ico">playlist_add</span> Add All Employees</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  `,"860px");
+}
+async function saveBulkEmployees(){
+  var btn=document.getElementById('bulkSaveBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Adding...';}
+  var raw=document.getElementById('bulk_list').value.trim();
+  if(!raw){toast('Paste employee data first','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">playlist_add</span> Add All Employees';}return;}
+  var defDept=document.getElementById('bulk_dept').value;
+  var defShift=document.getElementById('bulk_shift').value;
+  var defDesig=document.getElementById('bulk_desig').value||'Technician';
+  var defPw=document.getElementById('bulk_pw').value||'emp123';
+  var startNum=parseInt(document.getElementById('bulk_start').value)||1;
+  var prefix=document.getElementById('bulk_prefix').value||'EMP';
+  var lines=raw.split('\n').map(l=>l.trim()).filter(l=>l);
+  var added=0,skipped=0,errors=0;
+  var today=new Date().toISOString().split('T')[0];
+  var autoNum=startNum;
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i];
+    var parts=line.split(',').map(p=>p.trim());
+    var id,name,mobile,dept,desig,shift;
+    if(parts.length>=3&&parts[0].match(/^[A-Za-z]/)){
+      // Format: ID, Name, Mobile, Dept, Desig, Shift
+      id=parts[0].toUpperCase();
+      name=parts[1];
+      mobile=parts[2];
+      dept=parts[3]||defDept;
+      desig=parts[4]||defDesig;
+      shift=parts[5]||defShift;
+    }else if(parts.length>=2&&!parts[0].match(/^\d+$/)&&parts[1].match(/\d/)){
+      // Format: Name, Mobile
+      id=prefix+String(autoNum).padStart(3,'0');
+      name=parts[0];
+      mobile=parts[1];
+      dept=defDept;desig=defDesig;shift=defShift;
+      autoNum++;
+    }else if(parts.length>=2&&parts[0].match(/^\d+$/)){
+      // Format: Number, Name, Mobile
+      id=prefix+String(parseInt(parts[0])).padStart(3,'0');
+      name=parts[1];
+      mobile=parts[2]||('90000'+String(10000+parseInt(parts[0])).slice(-5));
+      dept=parts[3]||defDept;desig=parts[4]||defDesig;shift=parts[5]||defShift;
+    }else{
+      // Just a name
+      id=prefix+String(autoNum).padStart(3,'0');
+      name=line;
+      mobile='90000'+String(10000+autoNum).slice(-5);
+      dept=defDept;desig=defDesig;shift=defShift;
+      autoNum++;
+    }
+    if(!id||!name||!mobile){errors++;continue;}
+    if(DB.employees.find(function(e){return e.id===id;})){skipped++;continue;}
+    DB.employees.push({id:id,name:name,dept:dept,desig:desig,shift:shift,mobile:mobile,email:'',status:'active',joining:today,location:'Site',password:defPw,company:DB.settings.companyName,photo:'',_localAddedAt:Date.now()});
+    try{removeFromTombstone('employees',id);}catch(e){}
+    added++;
+  }
+  // Save locally
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  closeModal();
+  renderEmployees();updateBadges();
+  toast('Added '+added+' employees'+(skipped?' ('+skipped+' duplicates skipped)':'')+(errors?' ('+errors+' errors)':'')+'. Total: '+DB.employees.length,'success',5000);
+  // Background cloud sync
+  if(firebaseReady&&added>0){
+    (async function(){
+      _syncBusy=true;
+      try{
+        await authAsAdmin();
+        var batch=fbDB.batch();
+        var count=0;
+        DB.employees.forEach(function(emp){
+          if(emp._localAddedAt&&Date.now()-emp._localAddedAt<60000){
+            batch.set(fbDB.collection('employees').doc(String(emp.id)),sanitizeForFirestore(emp),{merge:true});
+            count++;
+            // Create auth account
+            fbAuth.createUserWithEmailAndPassword(toEmail(emp.id),emp.password||'emp123').catch(function(){});
+          }
+        });
+        if(count>0)await batch.commit();
+        await authAsAdmin();
+        _syncBusy=false;
+        await saveDB();
+        toast(count+' employees synced to cloud!','success');
+      }catch(e){
+        console.error('Bulk cloud sync error:',e);
+        _syncBusy=false;
+        toast('Saved locally. Cloud sync: '+(e.message||e),'error',5000);
+      }
+    })();
+  }
+  queueSheetSync(["Employees"]);
+  if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">playlist_add</span> Add All Employees';}
+}
+
 function openAddEmpModal(){
   openModal(`
     <div class="modal-accent"></div>
@@ -2522,11 +2677,14 @@ function renderEmpTrainings(){
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
         const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
         const myPassRes=myRes.filter(r=>r.pass);
-        const done=myPassRes.length>0;
+        const lastAttempt=myRes.length?myRes.sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
+        const hoursSinceLast=lastAttempt?(Date.now()-new Date(lastAttempt.date+"T"+(lastAttempt.time||"00:00")).getTime())/(1000*60*60):999;
+        const isExpired24h=hoursSinceLast>=24;
+        const done=myPassRes.length>0&&!isExpired24h;
         const bestRes=myRes.length?myRes.sort((a,b)=>b.score-a.score)[0]:null;
         const ytEmbedId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
         const hasVideo=!!ytEmbedId;
-        const alreadyTested=myRes.length>0;
+        const alreadyTested=myRes.length>0&&!isExpired24h;
         const videoProgress=((t.videoProgress||{})[empId])||0;
         const videoCompleted=videoProgress>=90;
         const canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
@@ -2535,7 +2693,7 @@ function renderEmpTrainings(){
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
             ${hasVideo?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
-            ${done?`<span class="badge badge-active" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">check_circle</span> ${bestRes.score}%</span>`:hasVideo?`<span class="badge badge-${videoCompleted?"active":"warning"}" style="position:absolute;bottom:8px;right:8px;">${videoCompleted?"✅ Video Done":"⏳ "+videoProgress+"%"}</span>`:""}
+            ${done?`<span class="badge badge-active" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">check_circle</span> ${bestRes.score}%</span>`:myPassRes.length>0&&isExpired24h?`<span class="badge badge-warning" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">schedule</span> Expired</span>`:hasVideo?`<span class="badge badge-${videoCompleted?"active":"warning"}" style="position:absolute;bottom:8px;right:8px;">${videoCompleted?"✅ Video Done":"⏳ "+videoProgress+"%"}</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
           </div>
           <div class="training-body">
@@ -2566,10 +2724,10 @@ function renderEmpTrainings(){
             </div>
             `:""}
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:6px;">
-              <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed ("+bestRes.score+"%)":alreadyTested?"❌ Failed ("+bestRes.score+"%)":"⏳ Pending"}</span>
+              <span class="badge badge-${done?"active":myPassRes.length>0&&isExpired24h?"warning":"warning"}">${done?"✅ Completed ("+bestRes.score+"%)":myPassRes.length>0&&isExpired24h?"⏳ Expired — Retake Now":alreadyTested&&!done?"❌ Failed ("+bestRes.score+"%)":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
             </div>
-            ${alreadyTested?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Your score: <b style="color:${bestRes.pass?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}</div>`:""}
+            ${myRes.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Last score: <b style="color:${bestRes.pass?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}${isExpired24h&&myPassRes.length>0?" · <span style=\"color:var(--orange);\">Status expired after 24hrs</span>":""}</div>`:``}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
               ${canTakeTest?`
                 <button id="trnVidTestBtn_${t.id}" class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')" ${!videoCompleted?"disabled style=\"opacity:0.5;cursor:not-allowed;\"":videoCompleted?"style=\"animation:pulseGlow 1.5s ease-in-out infinite;\"":""}><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
@@ -3634,8 +3792,9 @@ function submitQuiz(){
   const empName=currentUser.name||currentUser.username||"Admin";
   const dept=currentUser.dept||"Admin";
   const today=new Date().toISOString().split("T")[0];
+  const nowTime=new Date().toTimeString().slice(0,5);
   const certNum=qualifiesForCert&&pass?"CERT-"+Date.now().toString(36).toUpperCase():"";
-  const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||""};
+  const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,time:nowTime,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||"",answers:[...quizState.answers],questionDetails:quizState.questions.map(q=>({q:q.q,o:q.o,a:q.a}))};
   DB.testResults.push(result);
   // Add audit log entry
   if(!DB.auditLog)DB.auditLog=[];
@@ -3728,7 +3887,7 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">block</span> One-time test completed — no retakes allowed</div>`}
+        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${quizState.training||""}')" style="border-color:var(--amber);color:var(--amber);"><span class="mat-ico">refresh</span> Retake Test</button><div style="padding:4px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;color:var(--muted);">Test expires after 24hrs</div>`}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
     </div>
@@ -3736,6 +3895,72 @@ function submitQuiz(){
   if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
   else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
+}
+
+
+function viewAnswerDetails(resultId){
+  const r=DB.testResults.find(x=>x.id===resultId);
+  if(!r){toast('Result not found','error');return;}
+  const qs=r.questionDetails||[];
+  const ans=r.answers||[];
+  if(!qs.length){toast('Question details not available (old test format)','warning');return;}
+  let html=`<div class="modal-accent"></div>
+    <div class="modal-head">
+      <div class="modal-ico" style="background:rgba(62,207,142,.15)"><span class="mat-ico" style="color:var(--green);font-size:22px;">fact_check</span></div>
+      <h2>Answer Details</h2>
+      <button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto;">`;
+  html+=`<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:12px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);">
+    <div><span style="color:var(--muted);font-size:11px;">Employee</span><div style="font-weight:700;">${r.empName} (${r.empId})</div></div>
+    <div><span style="color:var(--muted);font-size:11px;">Training</span><div style="font-weight:700;">${r.training}</div></div>
+    <div><span style="color:var(--muted);font-size:11px;">Date</span><div style="font-weight:700;">${formatDate(r.date)}</div></div>
+    <div><span style="color:var(--muted);font-size:11px;">Score</span><div style="font-weight:700;font-size:18px;color:${r.pass?'var(--green)':'var(--red)'};">${r.score}%</div></div>
+    <div><span style="color:var(--muted);font-size:11px;">Result</span><div><span class="badge badge-${r.pass?'active':'danger'}">${r.pass?'PASS':'FAIL'}</span></div></div>
+  </div>`;
+  html+=`<div style="display:flex;gap:12px;margin-bottom:14px;">
+    <div style="flex:1;text-align:center;padding:10px;background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);">
+      <div style="font-size:24px;font-weight:700;color:var(--green);">${r.correct}</div><div style="font-size:10px;color:var(--muted);">CORRECT</div>
+    </div>
+    <div style="flex:1;text-align:center;padding:10px;background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);">
+      <div style="font-size:24px;font-weight:700;color:var(--red);">${r.wrong}</div><div style="font-size:10px;color:var(--muted);">WRONG</div>
+    </div>
+    <div style="flex:1;text-align:center;padding:10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);">
+      <div style="font-size:24px;font-weight:700;color:var(--muted);">${ans.filter(a=>a<0).length}</div><div style="font-size:10px;color:var(--muted);">SKIPPED</div>
+    </div>
+  </div>`;
+  html+=`<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:10px;">Question-by-Question Breakdown</div>`;
+  qs.forEach((q,i)=>{
+    const userAns=ans[i];
+    const isCorrect=userAns===q.a;
+    const isSkipped=userAns===undefined||userAns===null||userAns<0;
+    const borderColor=isSkipped?'var(--bdr)':isCorrect?'rgba(62,207,142,.3)':'rgba(232,72,58,.3)';
+    const bgColor=isSkipped?'var(--sur2)':isCorrect?'rgba(62,207,142,.04)':'rgba(232,72,58,.04)';
+    const statusIcon=isSkipped?'⏳':isCorrect?'✅':'❌';
+    const statusColor=isSkipped?'var(--muted)':isCorrect?'var(--green)':'var(--red)';
+    html+=`<div style="margin-bottom:10px;padding:12px;border-radius:var(--r-sm);background:${bgColor};border:1px solid ${borderColor};">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div style="font-size:12.5px;font-weight:600;flex:1;">Q${i+1}. ${q.q}</div>
+        <span style="font-size:16px;flex-shrink:0;margin-left:8px;">${statusIcon}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;">`;
+    q.o.forEach((opt,oi)=>{
+      const isThisCorrect=oi===q.a;
+      const isThisUser=userAns===oi;
+      let optStyle='padding:5px 8px;border-radius:6px;border:1px solid var(--bdr);';
+      if(isThisCorrect)optStyle+='background:rgba(62,207,142,.1);border-color:rgba(62,207,142,.4);color:var(--green);font-weight:600;';
+      if(isThisUser&&!isThisCorrect)optStyle+='background:rgba(232,72,58,.1);border-color:rgba(232,72,58,.4);color:var(--red);text-decoration:line-through;';
+      if(isThisUser&&isThisCorrect)optStyle+='background:rgba(62,207,142,.15);border-color:var(--green);color:var(--green);font-weight:700;';
+      const label=['A','B','C','D'][oi];
+      const icon=isThisCorrect?' ✅':isThisUser?' ❌':'';
+      html+=`<div style="${optStyle}"><span style="color:var(--muted);margin-right:4px;">${label}.</span>${opt}${icon}</div>`;
+    });
+    html+=`</div>`;
+    if(isSkipped)html+=`<div style="margin-top:6px;font-size:11px;color:var(--muted);font-style:italic;">⏳ Skipped — No answer selected</div>`;
+    html+=`</div>`;
+  });
+  html+=`</div>`;
+  openModal(html,'900px');
 }
 
 /* ============================================================
@@ -4875,7 +5100,7 @@ function renderTrainStatus(){
       const completedDate=passResult?passResult.date:((trn.completedDates||{})[empId]||"");
       const result=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
       const cert=DB.certificates.find(c=>c.empId===empId&&c.training===trn.name)||null;
-      rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:""});
+      rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:"",hoursSinceLast:completedDate?((Date.now()-new Date(completedDate).getTime())/(1000*60*60)):999,resultId:result?result.id:null});
     });
   });
   DB.testResults.forEach(r=>{
@@ -4889,7 +5114,7 @@ function renderTrainStatus(){
   let filtered=rows.filter(r=>{
     const q=ts_search.toLowerCase();
     const matchSearch=!q||r.empName.toLowerCase().includes(q)||r.empId.toLowerCase().includes(q)||r.trnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);
-    const matchResult=ts_filter_result==="All"||(ts_filter_result==="Pass"&&r.pass===true)||(ts_filter_result==="Fail"&&r.pass===false)||(ts_filter_result==="Pending"&&r.score===null);
+    const matchResult=ts_filter_result==="All"||(ts_filter_result==="Pass"&&r.pass===true)||(ts_filter_result==="Fail"&&r.pass===false)||(ts_filter_result==="Pending"&&(r.score===null||(r.pass===true&&r.hoursSinceLast>=24)));
     const matchCert=ts_filter_cert==="All"||(ts_filter_cert==="Required"&&r.certRequired)||(ts_filter_cert==="Not Required"&&!r.certRequired);
     return matchSearch&&matchResult&&matchCert;
   });
@@ -4903,7 +5128,7 @@ function renderTrainStatus(){
   });
   const passCount=filtered.filter(r=>r.pass===true).length;
   const failCount=filtered.filter(r=>r.pass===false).length;
-  const pendingCount=filtered.filter(r=>r.score===null).length;
+  const pendingCount=filtered.filter(r=>r.score===null||(r.pass===true&&r.hoursSinceLast>=24)).length;
   const certCount=filtered.filter(r=>r.certNo).length;
   document.getElementById("view-trainstatus").innerHTML=`
     <div class="section-header">
@@ -4979,13 +5204,14 @@ function renderTrainStatus(){
               <td style="text-align:center;color:var(--green);font-weight:600;">${r.correct!==null?r.correct:"—"}</td>
               <td style="text-align:center;color:var(--red);font-weight:600;">${r.wrong!==null?r.wrong:"—"}</td>
               <td style="text-align:center;font-size:12px;">${r.attempts||0}</td>
-              <td style="text-align:center;">${r.score===null?`<span class="badge badge-warning">⏳ Pending</span>`:r.pass?`<span class="badge badge-active">✅ PASS</span>`:`<span class="badge badge-danger">❌ FAIL</span>`}</td>
+              <td style="text-align:center;">${r.score===null?`<span class="badge badge-warning">⏳ Pending</span>`:r.pass&&r.hoursSinceLast<24?`<span class="badge badge-active">✅ Completed</span>`:r.pass&&r.hoursSinceLast>=24?`<span class="badge badge-warning" style="background:rgba(240,136,62,.15);color:var(--orange);border:1px solid rgba(240,136,62,.3);">⏳ Expired</span>`:`<span class="badge badge-danger">❌ FAIL</span>`}</td>
               <td style="font-weight:600;font-size:12px;white-space:nowrap;">${r.completedDate?formatDate(r.completedDate):"—"}</td>
               <td>${r.certNo?`<span class="mono" style="font-size:9.5px;color:var(--purple);">${r.certNo}</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`}</td>
               <td style="font-size:11px;white-space:nowrap;">${r.certExpiry?formatDate(r.certExpiry):"—"}</td>
               <td><div style="display:flex;gap:4px;">
+                ${r.resultId?`<button class="btn btn-sm btn-outline" style="padding:4px 8px;border-color:var(--green);color:var(--green);" onclick="viewAnswerDetails('${r.resultId}')" title="View Question & Answer Details"><span class="mat-ico" style="font-size:11px;">fact_check</span></button>`:""}
                 ${r.certNo?`<button class="btn btn-sm btn-amber" style="padding:4px 8px;" onclick="downloadCertificate('${r.certNo}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`:""}
-                ${r.score===null?`<button class="btn btn-sm btn-outline" style="padding:4px 8px;" onclick="startQuiz('${r.trnCat.replace(/'/g,"\\'")}','${r.trnName.replace(/'/g,"\\'").replace(/"/g,"&quot;")}')"><span class="mat-ico" style="font-size:11px;">quiz</span></button>`:""}
+                ${r.score===null||(r.pass&&r.hoursSinceLast>=24)?`<button class="btn btn-sm btn-outline" style="padding:4px 8px;" onclick="startQuiz('${r.trnCat.replace(/'/g,"\\'")}','${r.trnName.replace(/'/g,"\\'").replace(/"/g,"&quot;")}')"><span class="mat-ico" style="font-size:11px;">${r.pass&&r.hoursSinceLast>=24?"refresh":"quiz"}</span></button>`:""}
               </div></td>
             </tr>`;
           }).join(""):`<tr><td colspan="17" style="text-align:center;padding:40px;color:var(--muted);"><span class="mat-ico" style="font-size:36px;display:block;margin-bottom:8px;opacity:.3;">fact_check</span>No training records found.</td></tr>`}
@@ -5552,35 +5778,50 @@ async function initApp(){
         fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
       }
     }else{
-      // RESET MODE: block cloud load during reset, force-empty everything
+      // RESET MODE: Check if another device already did the reset
       _skipCloudLoad=true;
-      // Double-safety: force clear all DB arrays again (nothing from cloud can survive)
-      DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
-      DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
-      DB.sops=[];
       try{await authAsAdmin();}catch(e){}
-      // DELETE old Firebase data so auto-sync can NEVER pull it back
+      var resetAlreadyDone=false;
       try{
-        var resetCols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog'];
-        for(var ri=0;ri<resetCols.length;ri++){
-          var rSnap=await fbDB.collection(resetCols[ri]).get();
-          var rBatch=fbDB.batch();
-          rSnap.docs.forEach(function(d){rBatch.delete(d.ref);});
-          if(rSnap.size>0)await rBatch.commit();
+        var metaDoc=await fbDB.collection('config').doc('meta').get();
+        if(metaDoc.exists && metaDoc.data().resetVersion===DB_VERSION){
+          resetAlreadyDone=true;
+          console.log('[reset] Another device already wiped Firebase for '+DB_VERSION+' — skipping wipe, loading from cloud');
         }
-        try{await fbDB.collection('config').doc('meta').delete();}catch(e){}
-        try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
-        try{await fbDB.collection('deletedItems').get().then(function(s){var b=fbDB.batch();s.docs.forEach(function(d){b.delete(d.ref);});if(s.size>0)return b.commit();});}catch(e){}
-        console.log('[reset] Firebase collections WIPED — old data can never return');
-      }catch(resetErr){console.warn('[reset] Firebase wipe error (non-fatal):',resetErr);}
-      try{await saveDB();}catch(e){console.warn('[reset] saveDB error:',e);}
+      }catch(checkErr){console.warn('[reset] Meta check error:',checkErr.message);}
+      if(!resetAlreadyDone){
+        // FIRST DEVICE: wipe Firebase clean
+        DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
+        DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
+        DB.sops=[];
+        try{
+          var resetCols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog'];
+          for(var ri=0;ri<resetCols.length;ri++){
+            var rSnap=await fbDB.collection(resetCols[ri]).get();
+            var rBatch=fbDB.batch();
+            rSnap.docs.forEach(function(d){rBatch.delete(d.ref);});
+            if(rSnap.size>0)await rBatch.commit();
+          }
+          try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
+          try{await fbDB.collection('deletedItems').get().then(function(s){var b=fbDB.batch();s.docs.forEach(function(d){b.delete(d.ref);});if(s.size>0)return b.commit();});}catch(e){}
+          console.log('[reset] Firebase collections WIPED — old data can never return');
+        }catch(resetErr){console.warn('[reset] Firebase wipe error (non-fatal):',resetErr);}
+        try{await saveDB();}catch(e){console.warn('[reset] saveDB error:',e);}
+        // Mark reset as done in Firebase so other devices skip the wipe
+        try{await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString()});}catch(e){}
+        console.log('[reset] Fresh start — Firebase wiped, reset marked in cloud');
+      }else{
+        // OTHER DEVICES: reset already done by another device — just load from cloud
+        console.log('[reset] Loading from cloud (reset already done by another device)...');
+        _skipCloudLoad=false;
+        var loadResult=await loadDBFromFirestore();
+        if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
+          fbLoadError='Failed to load: '+loadResult.failed.join(', ');
+        }
+      }
       localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
-      // CRITICAL: Lift the cloud-load block AFTER wipe is done.
-      // Old data is gone from Firebase now, so future cloud loads are safe.
-      // This allows employees added by admin to be loaded on mobile.
       _skipCloudLoad=false;
       localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
-      console.log('[reset] Fresh start — ALL data force-cleared, cloud wiped, cloud load RE-ENABLED');
     }
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
