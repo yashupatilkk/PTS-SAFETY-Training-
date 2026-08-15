@@ -2764,17 +2764,14 @@ function openAddTrnModal(){
         <div class="form-group" style="grid-column:1/-1;">
         <label class="form-label-sm">Trainer Name *</label>
         <div style="display:flex;gap:6px;align-items:center;">
-          <input class="form-control-sm" id="nt_trainer" list="trainer_datalist" placeholder="Select or type trainer name" style="flex:1;" required>
-          <datalist id="trainer_datalist">${DB.settings.trainerList.map(t=>`<option value="${typeof t==='object'?t.name:t}">${typeof t==='object'?t.name+(t.designation?' ('+t.designation+')':''):t}</option>`).join("")}</datalist>
-          <button type="button" class="btn btn-sm btn-amber" onclick="addTrainerInline()" title="Add new trainer"><span class="mat-ico" style="font-size:16px;">person_add</span></button>
+          <select class="form-control-sm" id="nt_trainer" style="flex:1;" onchange="handleTrainerSelectChange()">${DB.settings.trainerList.map(t=>{var tn=typeof t==='object'?t.name:t;return '<option value="'+tn+'">'+tn+(typeof t==='object'&&t.designation?' ('+t.designation+')':'')+'</option>';}).join("")}<option value="__add_new__">+ Add New Trainer</option></select>
+          <button type="button" class="btn btn-sm btn-amber" onclick="addTrainerFromDropdown()" title="Add new trainer"><span class="mat-ico" style="font-size:16px;">person_add</span></button>
         </div>
       </div>
       <div class="form-group" style="grid-column:1/-1;">
-        <label class="form-label-sm">Trainer Designation *</label>
+        <label class="form-label-sm">Trainer Designation</label>
         <div style="display:flex;gap:6px;align-items:center;">
-          <input class="form-control-sm" id="nt_trainer_desig" list="trainer_desig_datalist" placeholder="e.g. Safety Officer, EHS Manager" style="flex:1;" required>
-          <datalist id="trainer_desig_datalist"><option value="Safety Officer"><option value="EHS Manager"><option value="Safety Supervisor"><option value="External Trainer"><option value="OEM Trainer"><option value="Site Engineer"><option value="HSE Officer"><option value="Training Coordinator"><option value="Project Manager"><option value="QA/QC Manager"></datalist>
-          <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="addTrainerDesigInline()" title="Add new designation"><span class="mat-ico" style="font-size:16px;">add</span></button>
+          <select class="form-control-sm" id="nt_trainer_desig" style="flex:1;" onchange="handleDesigSelectChange()"><option value="">-- Select --</option><option>Safety Officer</option><option>EHS Manager</option><option>Safety Supervisor</option><option>External Trainer</option><option>OEM Trainer</option><option>Site Engineer</option><option>HSE Officer</option><option>Training Coordinator</option><option>Project Manager</option><option>QA/QC Manager</option><option value="__add_new__">+ Add New</option></select>
         </div>
       </div>
         <div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="nt_date" type="date" value="${today}"></div>
@@ -4832,8 +4829,30 @@ function saveSettings(){
 function addTrainer(){const v=document.getElementById('newTrainer')?.value.trim();if(!v)return;const d=(document.getElementById('newTrainerDesig')||{}).value?.trim()||'';if(d){DB.settings.trainerList.push({name:v,designation:d});}else{DB.settings.trainerList.push(v);}document.getElementById('newTrainer').value='';var de=document.getElementById('newTrainerDesig');if(de)de.value='';renderSettings();saveDB();toast('Trainer: '+v+(d?' ('+d+')':'')+' added','success');}
 function addTrainerWithDesig(){addTrainer();}
 function removeTrainer(i){DB.settings.trainerList.splice(i,1);renderSettings();saveDB();}
-function addTrainerInline(){const v=prompt('Enter new trainer name:');if(!v||!v.trim())return;const name=v.trim();if(!DB.settings.trainerList.find(t=>(typeof t==='object'?t.name:t)===name)){DB.settings.trainerList.push(name);}var sel=document.getElementById('nt_trainer');if(sel)sel.value=name;var dl=document.getElementById('trainer_datalist');if(dl){var opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}toast('Trainer "'+name+'" added','success');saveDB();}
-function addTrainerDesigInline(){const v=prompt('Enter new trainer designation:');if(!v||!v.trim())return;const desig=v.trim();var dl=document.getElementById('trainer_desig_datalist');if(dl){var exists=false;for(var i=0;i<dl.options.length;i++){if(dl.options[i].value.toLowerCase()===desig.toLowerCase()){exists=true;break;}}if(!exists){var opt=document.createElement('option');opt.value=desig;dl.appendChild(opt);}}var inp=document.getElementById('nt_trainer_desig');if(inp)inp.value=desig;toast('Designation "'+desig+'" added','success');}
+function handleTrainerSelectChange(){var sel=document.getElementById('nt_trainer');if(sel&&sel.value==='__add_new__'){addTrainerInline();}}
+function handleDesigSelectChange(){var sel=document.getElementById('nt_trainer_desig');if(sel&&sel.value==='__add_new__'){addTrainerDesigInline();}}
+function addTrainerInline(){
+  var name=prompt('Enter new trainer name:');
+  if(!name||!name.trim())return;
+  name=name.trim();
+  var desig=prompt('Enter designation (or leave empty):','')||'';
+  desig=desig.trim();
+  if(desig){DB.settings.trainerList.push({name:name,designation:desig});}
+  else{DB.settings.trainerList.push(name);}
+  var sel=document.getElementById('nt_trainer');
+  if(sel){var opt=document.createElement('option');opt.value=name;opt.textContent=name+(desig?' ('+desig+')':'');sel.insertBefore(opt,sel.querySelector('option[value="__add_new__"]'));sel.value=name;}
+  toast('Trainer: '+name+(desig?' ('+desig+')':'')+' added','success');
+  saveDB();
+}
+function addTrainerDesigInline(){
+  var v=prompt('Enter new designation:');
+  if(!v||!v.trim())return;
+  v=v.trim();
+  var sel=document.getElementById('nt_trainer_desig');
+  if(sel){var opt=document.createElement('option');opt.value=v;opt.textContent=v;sel.insertBefore(opt,sel.querySelector('option[value="__add_new__"]'));sel.value=v;}
+  toast('Designation: '+v+' added','success');
+}
+function addTrainerFromDropdown(){addTrainerInline();}
 function changeAdminPw(username){const pw=prompt(`New password for ${username}:`);if(pw){const a=DB.admins.find(x=>x.username===username);if(a){a.password=pw;toast("Password changed","success");saveDB();}}}
 function addAdminModal(){
   openModal(`
@@ -5867,20 +5886,32 @@ async function initApp(){
     document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
     document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
     if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
-    // Background sync
+    // Background sync — PUSH local to cloud AND PULL cloud to local
     (async function(){
       try{
         var bgAdminOk=await authAsAdmin();
-        if(!bgAdminOk){console.error('[bg] Admin auth failed — cannot push missing employees');return;}
-        var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
-        var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
-        if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');
-        var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we){await authAsAdmin();}}}
+        if(!bgAdminOk){console.error('[bg] Admin auth failed');return;}
+        var cs=await fbDB.collection('employees').get();
+        var cloudEmps=cs.docs.map(function(d){return d.data();});
+        var cloudIds=new Set(cloudEmps.map(function(e){return e.id;}));
+        var localIds=new Set(DB.employees.map(function(e){return e.id;}));
+        // PULL: Add cloud employees not in local
+        var pulled=0;
+        cloudEmps.forEach(function(ce){
+          if(ce.id&&!localIds.has(ce.id)){DB.employees.push(ce);pulled++;}
+        });
+        // PUSH: Add local employees not in cloud
+        var miss=DB.employees.filter(function(e){return e&&e.id&&!cloudIds.has(e.id);});
+        var pok=0;
+        for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we){await authAsAdmin();}}
+        // Create auth accounts for all employees
         var af=0;for(var ai=0;ai<DB.employees.length;ai++){var ae=DB.employees[ai];if(!ae||!ae.id)continue;try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(ae.id),ae.password||'emp123');af++;}catch(ae2){}}
         await authAsAdmin();
-        var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
-        if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+fs.size+'/'+DB.employees.length+' employees'+(pok>0?' (fixed '+pok+' missing)':'')+(af>0?' + '+af+' login(s) fixed':'');}
-        console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
+        if(pulled>0){try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}}
+        // Show clean status message
+        var stEl=document.getElementById('loginFbStatus');
+        if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees ready';}
+        console.log('[bg] Done. Local:'+DB.employees.length+' Pushed:'+pok+' Pulled:'+pulled+' Auth:'+af);
       }catch(e){console.error('[bg]',e);}
     })();
     // REMOVED Firebase Auth auto-login (was logging employees as admin)
