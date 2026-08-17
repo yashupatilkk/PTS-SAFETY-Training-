@@ -3868,9 +3868,30 @@ function submitQuiz(){
       f.appendChild(inp);document.body.appendChild(f);f.submit();
       setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);
     })();
-      console.log('Auto-synced test result to Google Sheet:',r.training,r.empName,r.score+'%');
-      // Also queue full Training Data + Certificates sync (debounced, 2 sec delay)
-      queueSheetSync(["Training Data","Certificates","Audit Trail"]);
+      // Also push Q&A details (each question as a row) immediately
+      (function(){
+        var qs=r.questionDetails||[];
+        var ans=r.answers||[];
+        if(qs.length){
+          var qnaRows=qs.map(function(q,i){
+            var empAns=ans[i]!=null&&ans[i]>=0?q.o[ans[i]]:'';
+            var correctAns=q.o[q.a]||'';
+            var status=ans[i]<0?'Skipped':(ans[i]===q.a?'Right':'Wrong');
+            return{date:r.date||'',time:r.time||'',empId:r.empId||'',empName:r.empName||'',dept:r.dept||'',training:r.training||'',cat:r.cat||'',attempt:r.attempt||1,score:r.score+'%',qNo:i+1,question:q.q||'',empAnswer:empAns,correctAnswer:correctAns,status:status};
+          });
+          var f2=document.createElement('form');
+          f2.method='POST';f2.action=sheetUrl;f2.target='_gsq_qna_'+Date.now();
+          f2.style.display='none';
+          var inp2=document.createElement('input');
+          inp2.type='hidden';inp2.name='json';
+          inp2.value=JSON.stringify({sheet:'Q&A Details',data:qnaRows});
+          f2.appendChild(inp2);document.body.appendChild(f2);f2.submit();
+          setTimeout(function(){try{document.body.removeChild(f2);}catch(e){}},5000);
+        }
+      })();
+      console.log('Auto-synced test result + Q&A to Google Sheet:',r.training,r.empName,r.score+'%');
+      // Also queue full sync (debounced, 2 sec delay)
+      queueSheetSync(["Training Data","Q&A Details","Certificates","Audit Trail"]);
     }catch(e){console.warn('Google Sheets auto-sync error:',e);}
   })();
   quizState.active=false;
@@ -4983,6 +5004,29 @@ function buildEquipmentPayload(){
 function buildSopPayload(){
   return DB.sops.map(s=>({id:s.id,title:s.title||s.name||"",category:s.cat||"",version:s.version||"1.0",created:s.created||"",applicableDept:(s.dept||"").toString(),status:s.status||"Active"}));
 }
+function buildQnAPayload(){
+  var rows=[];
+  DB.testResults.forEach(function(r){
+    var qs=r.questionDetails||[];
+    var ans=r.answers||[];
+    if(!qs.length)return;
+    qs.forEach(function(q,i){
+      var empAns=ans[i]!=null&&ans[i]>=0?q.o[ans[i]]:'';
+      var correctAns=q.o[q.a]||'';
+      var status=ans[i]<0?'Skipped':(ans[i]===q.a?'Right':'Wrong');
+      rows.push({
+        date:r.date||'',time:r.time||'',
+        empId:r.empId||'',empName:r.empName||'',dept:r.dept||'',
+        training:r.training||'',cat:r.cat||'',
+        attempt:r.attempt||1,score:r.score+'%',
+        qNo:i+1,question:q.q||'',
+        empAnswer:empAns,correctAnswer:correctAns,
+        status:status
+      });
+    });
+  });
+  return rows;
+}
 function buildAuditPayload(){
   if(!DB.auditLog||!DB.auditLog.length)return [];
   return DB.auditLog.slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'');}).map(function(l){
@@ -5069,7 +5113,7 @@ function queueSheetSync(sheetNames){
   if(!url) return;
   // Store which sheets need syncing (accumulates until timer fires)
   if(!window._pendingSheetSyncs) window._pendingSheetSyncs=new Set();
-  if(!sheetNames) sheetNames=["Training Data","Employees","Trainings","Certificates","Equipment","SOPs","Audit Trail"];
+  if(!sheetNames) sheetNames=["Training Data","Q&A Details","Employees","Trainings","Certificates","Equipment","SOPs","Audit Trail"];
   sheetNames.forEach(function(s){window._pendingSheetSyncs.add(s);});
   // Debounce: reset timer on each call
   if(_sheetSyncTimer) clearTimeout(_sheetSyncTimer);
@@ -5109,6 +5153,9 @@ async function executeSheetSync(){
     }
     if(sheetsToSync.includes("Audit Trail")){
       var p=buildAuditPayload();if(p.length>0){await pushToSheet(url,p,"Audit Trail");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Q&A Details")){
+      var p=buildQnAPayload();if(p.length>0){await pushToSheet(url,p,"Q&A Details");totalSent+=p.length;}
     }
     _lastSheetSync=Date.now();
     console.log('[Sheet Auto-Sync] Done: '+totalSent+' records across '+sheetsToSync.length+' sheets');
@@ -6002,3 +6049,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
