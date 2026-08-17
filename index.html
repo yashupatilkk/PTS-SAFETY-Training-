@@ -1004,6 +1004,7 @@ async function forceSyncToCloud(){
   toast('Syncing all data to cloud...','info',2000);
   updateSyncUI('syncing');
   try{
+    await authAsAdmin();
     const results=await Promise.all([
       fbSaveCollection('employees',DB.employees,'id'),
       fbSaveCollection('admins',DB.admins,'username'),
@@ -1339,6 +1340,8 @@ function startAutoSync(){
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
+      // Ensure authenticated before any cloud read/write (employees are not Firebase Auth users)
+      await authAsAdmin();
       // CRITICAL: Pull tombstones from cloud FIRST before pushing anything
       // This prevents pushing back items that were deleted by admin on another device
       const newTombstones=await loadTombstonesFromCloud();
@@ -1394,6 +1397,7 @@ function startAutoSync(){
   document.addEventListener('visibilitychange',async function(){
     if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&!_skipCloudLoad&&(Date.now()-_lastDeleteTime)>10000){
       try{
+        await authAsAdmin();
         await loadDBFromFirestore();
         // Save to localStorage only (don't push back to cloud — cloud is source of truth)
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
@@ -3832,6 +3836,8 @@ function submitQuiz(){
   if(firebaseReady){
     (async function(){
       try{
+        // CRITICAL: Authenticate as admin before writing — employees are NOT Firebase Auth users
+        await authAsAdmin();
         const r=DB.testResults[DB.testResults.length-1];
         if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
         if(certNum){
@@ -5414,7 +5420,7 @@ function updateSyncUI(status){
     wrap.style.borderColor='var(--bdr)';
   }
 }
-function saveDB(){
+async function saveDB(){
   // Step 1: Always save current in-memory DB to localStorage first (source of truth)
   try{
     const data=JSON.parse(JSON.stringify(DB));
@@ -5454,6 +5460,9 @@ function saveDB(){
     if(cleanEmployees.length!==DB.employees.length){
       console.error('saveDB: WARNING! cleanEmployees('+cleanEmployees.length+') != DB.employees('+DB.employees.length+'). Filtered IDs:',DB.employees.map(function(e){return e.id;}).filter(function(id){return _deletedIds.employees?.includes(id);}));
     }
+    // Ensure Firebase Auth before any write — employees are NOT authenticated via Firebase Auth
+    // authAsAdmin() has a fast path when already authenticated, so this is cheap for admin
+    await authAsAdmin();
     if(_syncBusy){
       _pendingSave=true;
       console.log('saveDB: sync busy, queuing pending save');
@@ -5993,4 +6002,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
