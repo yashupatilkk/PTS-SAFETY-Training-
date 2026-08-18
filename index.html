@@ -4573,12 +4573,19 @@ function renderAuditTrail(){
 
   if(!rows)rows='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px;">No audit records found</td></tr>';
 
+  // Check for missing audit records from existing test results
+  var missingCount=0;
+  DB.testResults.forEach(function(r){
+    if(!DB.auditLog.find(function(l){return l.id===r.id+'_A';})){missingCount++;}
+  });
+  var backfillBtn=missingCount>0?'<button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" onclick="backfillAuditFromResults()"><span class="mat-ico" style="font-size:13px;">add_circle</span> Import '+missingCount+' Missing Test Record(s)</button>':'';
+
   document.getElementById('view-audittrail').innerHTML=
     '<div class="section-header"><div class="section-title">Audit <span>Trail</span></div></div>'+
     '<div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:var(--r);padding:14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">'+
     '<span class="mat-ico" style="color:var(--amber);font-size:22px;">fact_check</span>'+
     '<div style="flex:1;"><div style="font-size:13px;font-weight:700;">For Auditing Purpose</div>'+
-    '<div style="font-size:11px;color:var(--muted);margin-top:2px;">Shows: training documents given (PPT/PDF), test pass/fail records, and corrective actions taken for failures.</div></div></div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:2px;">Shows: training documents given (PPT/PDF), test pass/fail records, and corrective actions taken for failures.</div></div>'+backfillBtn+'</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;">'+
     '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+logs.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Records</div></div>'+
     '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--green);">'+passedTests.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Passed</div></div>'+
@@ -4590,9 +4597,50 @@ function renderAuditTrail(){
     '<div class="table-wrap" style="max-height:60vh;overflow-y:auto;"><table><thead><tr><th>Date</th><th>Type</th><th>Employee</th><th>Dept</th><th>Training</th><th>Details</th><th>Trainer</th><th>Corrective Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
+function backfillAuditFromResults(){
+  if(!confirm('This will create audit records for all test results that are missing from the Audit Trail (pass + fail). Continue?'))return;
+  var added=0;
+  DB.testResults.forEach(function(r){
+    if(DB.auditLog.find(function(l){return l.id===r.id+'_A';}))return;
+    var trn=DB.trainings.find(function(t){return t.name===r.training;});
+    DB.auditLog.push({
+      id:r.id+'_A',
+      date:r.date||'',
+      type:'test_result',
+      empId:r.empId||'',
+      empName:r.empName||'',
+      dept:r.dept||'',
+      training:r.training||'',
+      cat:r.cat||'',
+      score:r.score,
+      pass:r.pass,
+      result:r.pass?'PASS':'FAIL',
+      attempt:r.attempt||1,
+      trainer:trn?trn.trainer:(r.trainer||''),
+      details:r.pass?'Passed with '+r.score+'% ('+r.correct+'/'+r.total+')':'Failed with '+r.score+'% ('+r.correct+'/'+r.total+')',
+      action:r.pass?'None required':'Pending corrective action',
+      actionBy:'',
+      actionDate:'',
+      _backfilled:true
+    });
+    added++;
+  });
+  if(added>0){
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    saveDB();
+    queueSheetSync(['Audit Trail']);
+    toast('Imported '+added+' test record(s) into Audit Trail!','success',4000);
+    renderAuditTrail();
+  }else{
+    toast('All test results already have audit records.','info');
+  }
+}
+
 function openCorrectiveAction(logId,empName,training,score,empId){
   var log=DB.auditLog.find(function(l){return l.id===logId;});
   if(!log)return;
+  var otherTrns=DB.trainings.filter(function(t){return t.name!==training&&t.name&&t.id;});
+  var trnOptions=otherTrns.length?otherTrns.map(function(t){return '<option value="'+t.id+'">'+t.name+' ('+t.cat+')</option>';}).join(''):'';
   openModal(
     '<div class="modal-accent"></div>'+
     '<div class="modal-head"><div class="modal-ico" style="background:rgba(232,72,58,.15);"><span class="mat-ico" style="color:var(--red);font-size:22px;">warning</span></div>'+
@@ -4600,10 +4648,10 @@ function openCorrectiveAction(logId,empName,training,score,empId){
     '<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
     '<div class="modal-body">'+
     '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:12px;">'+
-    '<b style="color:var(--red);">Employee failed this test.</b> For audit purposes, record what action was taken.'+
+    '<b style="color:var(--red);">Employee failed this test.</b> Record what action was taken & optionally assign to another training.'+
     '</div>'+
     '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Select Corrective Action *</label>'+
-    '<select class="form-control-sm" id="ca_action">'+
+    '<select class="form-control-sm" id="ca_action" onchange="toggleRetraining()">'+
     '<option value="Re-training scheduled">Re-training scheduled</option>'+
     '<option value="Re-test given — Passed">Re-test given — Passed</option>'+
     '<option value="Re-test given — Still Failed">Re-test given — Still Failed</option>'+
@@ -4615,6 +4663,14 @@ function openCorrectiveAction(logId,empName,training,score,empId){
     '<option value="Pending — awaiting management decision">Pending — awaiting management decision</option>'+
     '<option value="Other">Other (type below)</option>'+
     '</select></div>'+
+    '<div id="retrainingSection" style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--amber);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">school</span> Assign to Other Training</div>'+
+    (trnOptions?
+    '<div class="form-group" style="margin-bottom:8px;"><label class="form-label-sm">Select Training *</label>'+
+    '<select class="form-control-sm" id="ca_reassign_trn"><option value="">-- Choose training --</option>'+trnOptions+'</select></div>':
+    '<div style="font-size:12px;color:var(--muted);">No other trainings available. Create one in Training Management first.</div>')+
+    '<div style="font-size:10px;color:var(--muted);margin-top:4px;">Employee will be enrolled in the selected training automatically.</div>'+
+    '</div>'+
     '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Additional Notes</label>'+
     '<textarea class="form-control-sm" id="ca_notes" rows="3" placeholder="Add any extra details about the action taken..."></textarea></div>'+
     '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Action Date</label>'+
@@ -4623,15 +4679,39 @@ function openCorrectiveAction(logId,empName,training,score,empId){
     '</div>'
   );
 }
+function toggleRetraining(){
+  var sel=document.getElementById('ca_action');
+  var sec=document.getElementById('retrainingSection');
+  if(!sel||!sec)return;
+  var show=sel.value==='Re-training scheduled'||sel.value==='Additional training material provided';
+  sec.style.display=show?'block':'none';
+}
 
 function saveCorrectiveAction(logId){
   var action=document.getElementById('ca_action').value;
   var notes=document.getElementById('ca_notes').value.trim();
   var date=document.getElementById('ca_date').value;
+  var reassignTrnId=(document.getElementById('ca_reassign_trn')||{}).value||'';
   if(!action){toast('Please select an action','error');return;}
   var log=DB.auditLog.find(function(l){return l.id===logId;});
   if(!log){toast('Audit record not found','error');return;}
-  log.action=action+(notes?' — '+notes:'');
+  // Handle training reassignment
+  var reassignMsg='';
+  if(reassignTrnId&&log.empId){
+    var targetTrn=DB.trainings.find(function(t){return t.id===reassignTrnId;});
+    if(targetTrn){
+      if(!targetTrn.enrolled)targetTrn.enrolled=[];
+      if(!targetTrn.enrolled.includes(log.empId)){
+        targetTrn.enrolled.push(log.empId);
+        reassignMsg=' — Assigned to '+targetTrn.name;
+        // Add a separate audit log entry for the reassignment
+        DB.auditLog.push({id:genId('AUD'),date:date||new Date().toISOString().split('T')[0],type:'corrective_action',empId:log.empId,empName:log.empName,dept:log.dept,training:log.training,cat:log.cat,details:'Reassigned from "'+log.training+'" to "'+targetTrn.name+'" (corrective action for failed test)',action:'Assigned to '+targetTrn.name,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
+      }else{
+        reassignMsg=' — Already enrolled in '+targetTrn.name;
+      }
+    }
+  }
+  log.action=action+(notes?' — '+notes:'')+reassignMsg;
   log.actionBy=currentUser?currentUser.name||currentUser.username:'Admin';
   log.actionDate=date;
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
@@ -4639,8 +4719,10 @@ function saveCorrectiveAction(logId){
   queueSheetSync(["Audit Trail"]);
   closeModal();
   renderAuditTrail();
-  toast('Corrective action saved for '+log.empName,'success');
-  // Sync to Firebase
+  var msg='Corrective action saved for '+log.empName;
+  if(reassignMsg)msg+=reassignMsg;
+  toast(msg,'success');
+  // Sync audit log to Firebase
   if(firebaseReady){
     (async function(){
       try{
