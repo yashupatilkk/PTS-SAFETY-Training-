@@ -3090,28 +3090,32 @@ function openTrainingDetail(id){
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
         <button class="btn btn-amber" onclick="assignEmployees('${t.id}')"><span class="mat-ico">person_add</span> Assign Employees</button>
         <button class="btn btn-outline" onclick="startQuiz('${t.cat}','${t.name}')"><span class="mat-ico">quiz</span> Take Test</button>
+        <button class="btn btn-outline" style="border-color:var(--red);color:var(--red);" onclick="reassignFailedEmployees('${t.id}')"><span class="mat-ico" style="font-size:14px;">swap_horiz</span> Reassign Failed</button>
         ${t.youtubeLink?`<button class="btn btn-outline" style="border-color:var(--red);color:var(--red);" onclick="removeVideoFromTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">smart_display</span> Remove Video</button>`:""}
         <button class="btn btn-red" onclick="deleteTraining('${t.id}')"><span class="mat-ico">delete</span> Delete</button>
       </div>
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table>
-        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th></tr></thead>
+        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th><th>Action</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
           const bestResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
           const anyResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
           const doneFromResult=!!bestResult;
           const done=doneFromResult||(t.completed||[]).includes(e.id);
+          const hasFailed=anyResult&&!anyResult.pass&&!bestResult;
           const completedDate=bestResult?bestResult.date:((t.completedDates||{})[e.id]||"");
           const result=bestResult||anyResult;
           const cert=DB.certificates.find(c=>c.empId===e.id&&c.training===t.name);
+          var statusBadge=done?'<span class="badge badge-active">✅ Completed</span>':hasFailed?'<span class="badge badge-danger">❌ Failed</span>':'<span class="badge badge-warning">⏳ Pending</span>';
           return`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${e.id}</td>
             <td><b>${e.name}</b></td>
             <td><span class="badge badge-info">${e.dept}</span></td>
-            <td><span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span></td>
+            <td>${statusBadge}</td>
             <td style="font-weight:600;">${completedDate?formatDate(completedDate):"—"}</td>
             <td>${result?`<b style="color:${result.pass?"var(--green)":"var(--red)"}">${result.score}%</b>`:"—"}</td>
             <td>${cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${cert.num}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`:"—"}</td>
+            <td>${hasFailed?`<button class="btn btn-sm btn-outline" style="border-color:var(--red);color:var(--red);" onclick="reassignSingleEmployee('${e.id}','${t.id}')"><span class="mat-ico" style="font-size:12px;">swap_horiz</span> Reassign</button>`:""}</td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
     </div>
@@ -3169,6 +3173,129 @@ function confirmAssignAllDept(trnId){
   t.enrolled=[...new Set([...t.enrolled,...toAssign.map(e=>e.id)])];
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
   updateBadges();renderTrainings();saveDB();
+}
+function reassignFailedEmployees(sourceTrnId){
+  var srcTrn=DB.trainings.find(function(t){return t.id===sourceTrnId;});
+  if(!srcTrn)return;
+  // Find all failed employees (took test but never passed)
+  var failedEmpIds=[];
+  (srcTrn.enrolled||[]).forEach(function(empId){
+    var anyResult=DB.testResults.find(function(r){return r.empId===empId&&r.training===srcTrn.name;});
+    var bestPass=DB.testResults.find(function(r){return r.empId===empId&&r.training===srcTrn.name&&r.pass;});
+    if(anyResult&&!bestPass)failedEmpIds.push(empId);
+  });
+  if(!failedEmpIds.length){toast('No failed employees in this training!','info');return;}
+  // Build list of OTHER trainings (exclude current one)
+  var otherTrns=DB.trainings.filter(function(t){return t.id!==sourceTrnId&&t.name&&t.id;});
+  if(!otherTrns.length){toast('No other trainings available to reassign.','error');return;}
+  var failedNames=failedEmpIds.map(function(id){var e=DB.employees.find(function(x){return x.id===id;});return e?e.name+' ('+id+')':id;}).join(', ');
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head"><h2>Reassign Failed Employees</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
+    <div class="modal-body">
+      <div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.25);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:12px;">
+        <div style="font-weight:700;color:var(--red);margin-bottom:6px;">❌ ${failedEmpIds.length} Failed Employee(s)</div>
+        <div style="color:var(--muted);line-height:1.6;">${failedNames}</div>
+      </div>
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">From: ${srcTrn.name}</div>
+      <div style="font-weight:700;font-size:12px;margin-bottom:8px;">Assign to which training?</div>
+      <select id="reassignTargetTrn" class="form-control-sm" style="width:100%;margin-bottom:14px;">
+        ${otherTrns.map(function(t){var alreadyEnrolled=failedEmpIds.filter(function(id){return(t.enrolled||[]).includes(id);}).length;return '<option value="'+t.id+'">'+t.name+' ('+t.cat+')'+(alreadyEnrolled?' — '+alreadyEnrolled+' already enrolled':'')+'</option>';}).join('')}
+      </select>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <input type="checkbox" id="reassignKeep" checked style="accent-color:var(--amber);width:16px;height:16px;">
+        <label for="reassignKeep" style="font-size:12px;">Keep them enrolled in <b>${srcTrn.name}</b> also</label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-amber" onclick="confirmReassignFailed('${sourceTrnId}')"><span class="mat-ico">swap_horiz</span> Reassign ${failedEmpIds.length} Employee(s)</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  `,"550px");
+}
+function confirmReassignFailed(sourceTrnId){
+  var srcTrn=DB.trainings.find(function(t){return t.id===sourceTrnId;});
+  if(!srcTrn)return;
+  var targetId=document.getElementById('reassignTargetTrn').value;
+  var keepSource=document.getElementById('reassignKeep').checked;
+  var targetTrn=DB.trainings.find(function(t){return t.id===targetId;});
+  if(!targetTrn){toast('Select a training','error');return;}
+  // Find failed employees
+  var failedEmpIds=[];
+  (srcTrn.enrolled||[]).forEach(function(empId){
+    var anyResult=DB.testResults.find(function(r){return r.empId===empId&&r.training===srcTrn.name;});
+    var bestPass=DB.testResults.find(function(r){return r.empId===empId&&r.training===srcTrn.name&&r.pass;});
+    if(anyResult&&!bestPass)failedEmpIds.push(empId);
+  });
+  if(!failedEmpIds.length)return;
+  // Assign to target training
+  if(!targetTrn.enrolled)targetTrn.enrolled=[];
+  var added=0;
+  failedEmpIds.forEach(function(empId){
+    if(!targetTrn.enrolled.includes(empId)){targetTrn.enrolled.push(empId);added++;}
+  });
+  // Optionally remove from source training
+  var removed=0;
+  if(!keepSource){
+    failedEmpIds.forEach(function(empId){
+      var idx=srcTrn.enrolled.indexOf(empId);
+      if(idx>-1){srcTrn.enrolled.splice(idx,1);removed++;}
+    });
+  }
+  // Add audit log entry
+  if(!DB.auditLog)DB.auditLog=[];
+  var today=new Date().toISOString().split('T')[0];
+  failedEmpIds.forEach(function(empId){
+    var emp=DB.employees.find(function(e){return e.id===empId;});
+    DB.auditLog.push({id:genId('AUD'),date:today,type:'corrective_action',empId:empId,empName:emp?emp.name:empId,dept:emp?emp.dept:'',training:srcTrn.name,cat:srcTrn.cat,details:'Reassigned from "'+srcTrn.name+'" to "'+targetTrn.name+'" (failed test)',action:'Reassigned to '+targetTrn.name,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
+  });
+  closeModal();
+  toast('✅ '+added+' failed employee(s) reassigned to "'+targetTrn.name+'"'+(removed?' (removed from "'+srcTrn.name+'")':' (kept in both)'),'success',5000);
+  DB.notifications.unshift({id:genId('N'),msg:failedEmpIds.length+' failed employee(s) reassigned from "'+srcTrn.name+'" to "'+targetTrn.name+'"',time:'Just now',read:false,icon:'swap_horiz'});
+  updateBadges();renderTrainings();saveDB();
+}
+function reassignSingleEmployee(empId,sourceTrnId){
+  var srcTrn=DB.trainings.find(function(t){return t.id===sourceTrnId;});
+  if(!srcTrn)return;
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  var otherTrns=DB.trainings.filter(function(t){return t.id!==sourceTrnId&&t.name&&t.id;});
+  if(!otherTrns.length){toast('No other trainings available.','error');return;}
+  openModal(`
+    <div class="modal-accent"></div>
+    <div class="modal-head"><h2>Reassign ${emp?emp.name:empId}</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
+    <div class="modal-body">
+      <div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.25);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;font-size:12px;">
+        <span style="color:var(--red);font-weight:700;">❌ Failed in:</span> <b>${srcTrn.name}</b>
+      </div>
+      <div style="font-weight:700;font-size:12px;margin-bottom:8px;">Assign to which training?</div>
+      <select id="reassignSingleTarget" class="form-control-sm" style="width:100%;margin-bottom:14px;">
+        ${otherTrns.map(function(t){var alreadyEnrolled=(t.enrolled||[]).includes(empId);return '<option value="'+t.id+'">'+t.name+' ('+t.cat+')'+(alreadyEnrolled?' — already enrolled':'')+'</option>';}).join('')}
+      </select>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-amber" onclick="confirmReassignSingle('${empId}','${sourceTrnId}')"><span class="mat-ico">swap_horiz</span> Reassign</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  `,"450px");
+}
+function confirmReassignSingle(empId,sourceTrnId){
+  var targetId=document.getElementById('reassignSingleTarget').value;
+  var srcTrn=DB.trainings.find(function(t){return t.id===sourceTrnId;});
+  var targetTrn=DB.trainings.find(function(t){return t.id===targetId;});
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  if(!targetTrn||!srcTrn)return;
+  if(!targetTrn.enrolled)targetTrn.enrolled=[];
+  if(!targetTrn.enrolled.includes(empId)){targetTrn.enrolled.push(empId);}
+  // Audit log
+  if(!DB.auditLog)DB.auditLog=[];
+  var today=new Date().toISOString().split('T')[0];
+  DB.auditLog.push({id:genId('AUD'),date:today,type:'corrective_action',empId:empId,empName:emp?emp.name:empId,dept:emp?emp.dept:'',training:srcTrn.name,cat:srcTrn.cat,details:'Reassigned from "'+srcTrn.name+'" to "'+targetTrn.name+'" (failed test)',action:'Reassigned to '+targetTrn.name,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
+  closeModal();
+  toast('✅ '+(emp?emp.name:empId)+' reassigned to "'+targetTrn.name+'"','success',4000);
+  DB.notifications.unshift({id:genId('N'),msg:(emp?emp.name:empId)+' reassigned from "'+srcTrn.name+'" to "'+targetTrn.name+'"',time:'Just now',read:false,icon:'swap_horiz'});
+  updateBadges();renderTrainings();saveDB();
+  // Re-open the training detail to show updated status
+  openTrainingDetail(sourceTrnId);
 }
 async function deleteTraining(id){
   if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
@@ -5526,6 +5653,7 @@ async function saveDB(){
       fbSaveCollection('testResults',cleanTestResults,'id'),
       fbSaveCollection('certificates',cleanCerts,'num'),
       fbSaveCollection('notifications',DB.notifications,'id'),
+      fbSaveCollection('auditLog',DB.auditLog||[],'id'),
       fbSaveCollection('sops',cleanSops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
@@ -5575,6 +5703,7 @@ function loadDBFromLocal(){
     if(saved.certificates&&Array.isArray(saved.certificates))DB.certificates=saved.certificates;
     if(saved.sops&&Array.isArray(saved.sops))DB.sops=saved.sops;
     if(saved.notifications&&Array.isArray(saved.notifications))DB.notifications=saved.notifications;
+    if(saved.auditLog&&Array.isArray(saved.auditLog))DB.auditLog=saved.auditLog;
     if(saved.settings&&typeof saved.settings==="object")Object.assign(DB.settings,saved.settings);
     if(saved.admins&&Array.isArray(saved.admins)&&saved.admins.length>0){
       DB.admins=saved.admins;
@@ -5662,6 +5791,7 @@ async function loadDBFromFirestore(){
         DB.sops=[...cloudSops,...localOnly];
       }],
       ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
+      ['auditLog','id',d=>{if(d.size>0)DB.auditLog=d.docs.map(x=>x.data());}],
       ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
       ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
       ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}]
