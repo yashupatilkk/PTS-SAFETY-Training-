@@ -4537,7 +4537,11 @@ function renderAuditTrail(){
   filtered.forEach(function(l){
     var typeBadge='';
     var actionHtml='';
-    if(l.type==='training_doc'){
+    var detailsHtml='';
+    if(l.type==='corrective_action'){
+      typeBadge='<span class="badge" style="background:rgba(139,109,232,.85);color:#fff;">ACTION</span>';
+      detailsHtml='<div style="font-size:11px;">'+(l.details||l.action||'—')+'</div>'+(l.actionDate?'<div style="font-size:10px;color:var(--muted);">'+l.actionDate+'</div>':'')+(l.actionBy?'<div style="font-size:10px;color:var(--muted);">By: '+l.actionBy+'</div>':'');
+    }else if(l.type==='training_doc'){
       typeBadge='<span class="badge badge-green">Training Doc</span>';
       actionHtml=l.docName?`<div style="font-size:11px;margin-top:4px;"><b>Document:</b> ${l.docName} <button style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;padding:0;text-decoration:underline;" onclick="downloadAuditDoc('${l.id}')">${l.docLink&&l.docLink.startsWith('data:')?'Download':'Open'}</button></div>`:'<div style="font-size:11px;color:var(--muted);">No document attached</div>';
     }else if(l.type==='test_result'){
@@ -4553,10 +4557,19 @@ function renderAuditTrail(){
           <div style="color:var(--muted);margin-bottom:4px;">Corrective Action:</div>
           <div style="color:${actionColor};font-weight:600;">${currentAction}</div>
           ${l.actionBy?'<div style="color:var(--muted);margin-top:2px;">By: '+l.actionBy+'</div>':''}
-          <button class="btn btn-sm btn-amber" style="margin-top:6px;" onclick="openCorrectiveAction('${l.id}','${(l.empName||'').replace(/'/g, "\'")}','${(l.training||'').replace(/'/g, "\'")}',${l.score},${l.empId||''})"><span class="mat-ico" style="font-size:11px;">edit</span> ${currentAction==='Pending corrective action'?'Take Action':'Update Action'}</button>
+          <button class="btn btn-sm btn-amber ca-take-action" style="margin-top:6px;" data-log-id="${l.id}" data-emp-name="${l.empName||''}" data-training="${l.training||''}" data-score="${l.score||0}" data-emp-id="${l.empId||''}"><span class="mat-ico" style="font-size:11px;">edit</span> ${currentAction==='Pending corrective action'?'Take Action':'Update Action'}</button>
         </div>`;
+        var _trnStats=DB.testResults.filter(function(r){return r.training===l.training;});
+        var _passC=_trnStats.filter(function(r){return r.pass;}).length;
+        var _failC=_trnStats.filter(function(r){return !r.pass;}).length;
+        detailsHtml='<div style="font-weight:600;color:var(--red);font-size:11px;">'+l.details+'</div>'+
+          '<div style="font-size:10px;color:var(--muted);margin-top:3px;">Training Stats: '+_passC+' passed / '+_failC+' failed out of '+_trnStats.length+' total</div>'+
+          (l.retestDeadline?'<div style="font-size:10px;color:var(--blue);margin-top:2px;">Re-test deadline: '+l.retestDeadline+(l.retestTime?' '+l.retestTime:'')+'</div>':'')+
+          (l.materialLink||l.videoLink?'<div style="margin-top:3px;">'+(l.materialLink?'<a href="'+l.materialLink+'" target="_blank" style="color:var(--blue);font-size:10px;">Material Link</a> ':'')+(l.videoLink?'<a href="'+l.videoLink+'" target="_blank" style="color:var(--red);font-size:10px;">Video Link</a> ':'')+'</div>':'');
+
       }else{
         actionHtml='<div style="font-size:11px;color:var(--muted);margin-top:4px;">No action required</div>';
+        detailsHtml='<div style="font-weight:600;color:var(--green);font-size:11px;">'+l.details+'</div>';
       }
     }
     rows+=`<tr>
@@ -4565,7 +4578,7 @@ function renderAuditTrail(){
       <td><b>${l.empName||'—'}</b>${l.empId?'<br><span style="font-size:10px;color:var(--muted);">'+l.empId+'</span>':''}</td>
       <td>${l.dept||'—'}</td>
       <td><b>${l.training||'—'}</b>${l.cat?'<br><span style="font-size:10px;color:var(--muted);">'+l.cat+'</span>':''}</td>
-      <td style="font-size:12px;">${l.details||'—'}</td>
+      <td style="font-size:11px;max-width:220px;">${detailsHtml||l.details||'—'}</td>
       <td>${l.trainer?'<span style="font-size:11px;">'+l.trainer+'</span>':'—'}</td>
       <td style="min-width:180px;">${actionHtml}</td>
     </tr>`;
@@ -4598,6 +4611,23 @@ function renderAuditTrail(){
     '</div>'+
     filterHtml+
     '<div class="table-wrap" style="max-height:60vh;overflow-y:auto;"><table><thead><tr><th>Date</th><th>Type</th><th>Employee</th><th>Dept</th><th>Training</th><th>Details</th><th>Trainer</th><th>Corrective Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  // Event delegation for Take Action buttons (avoids inline onclick issues)
+  setTimeout(function(){
+    var caBtns=document.querySelectorAll('.ca-take-action');
+    for(var bi=0;bi<caBtns.length;bi++){(function(btn){
+      btn.onclick=function(e){
+        e.preventDefault();e.stopPropagation();
+        console.log('CA clicked:',btn.getAttribute('data-log-id'),btn.getAttribute('data-emp-name'));
+        openCorrectiveAction(
+          btn.getAttribute('data-log-id'),
+          btn.getAttribute('data-emp-name'),
+          btn.getAttribute('data-training'),
+          parseInt(btn.getAttribute('data-score'))||0,
+          btn.getAttribute('data-emp-id')
+        );
+      };
+    })(caBtns[bi]);}
+  },50);
 }
 
 function backfillAuditFromResults(){
@@ -4640,34 +4670,53 @@ function backfillAuditFromResults(){
 }
 
 function openCorrectiveAction(logId,empName,training,score,empId){
+  console.log('openCorrectiveAction called:',logId,empName,training,score,empId);
   var log=DB.auditLog.find(function(l){return l.id===logId;});
-  if(!log)return;
-  // Get training stats for this training
+  if(!log){console.warn('Audit log not found for id:',logId);return;}
+  window._caContext={logId:logId,empId:empId||log.empId,empName:empName||log.empName,training:training||log.training,score:score||log.score};
   var allResultsForTrn=DB.testResults.filter(function(r){return r.training===training;});
   var passCount=allResultsForTrn.filter(function(r){return r.pass;}).length;
   var failCount=allResultsForTrn.filter(function(r){return !r.pass;}).length;
   var avgScore=allResultsForTrn.length?Math.round(allResultsForTrn.reduce(function(s,r){return s+r.score;},0)/allResultsForTrn.length):0;
-  // Build existing training options
+  var empResults=DB.testResults.filter(function(r){return r.empId===(empId||log.empId)&&r.training===training;});
+  var empPassCount=empResults.filter(function(r){return r.pass;}).length;
+  var empFailCount=empResults.filter(function(r){return !r.pass;}).length;
+  var empBest=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
   var otherTrns=DB.trainings.filter(function(t){return t.name!==training&&t.name&&t.id;});
   var trnOptions=otherTrns.map(function(t){return '<option value="'+t.id+'">'+t.name+' ('+t.cat+')</option>';}).join('');
-  // Build category options
   var catOptions=TRAINING_CATS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
-  // Trainer list
   var trainerList=DB.settings.trainerList||[];
   var trainerOpts=trainerList.map(function(t){var nm=typeof t==='object'?t.name:t;return '<option value="'+nm+'">'+nm+'</option>';}).join('');
-  openModal(
+  var todayStr=new Date().toISOString().split('T')[0];
+  var trnMatch=DB.trainings.find(function(t){return t.name===training;});
+  var currentVideo=trnMatch?trnMatch.youtubeLink||'':'';
+
+  var modalHtml =
     '<div class="modal-accent"></div>'+
-    '<div class="modal-head"><div class="modal-ico" style="background:rgba(232,72,58,.15);"><span class="mat-ico" style="color:var(--red);font-size:22px;">warning</span></div>'+
+    '<div class="modal-head">'+
+    '<div class="modal-ico" style="background:rgba(232,72,58,.15);"><span class="mat-ico" style="color:var(--red);font-size:22px;">warning</span></div>'+
     '<div><h2>Corrective Action</h2><span style="font-size:12px;color:var(--muted);">'+empName+' — '+training+' (Score: '+score+'%)</span></div>'+
     '<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
     '<div class="modal-body" style="max-height:70vh;overflow-y:auto;">'+
-    // Stats bar
-    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">'+
+
+    // Stats bar - Training level
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">'+
     '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--amber);">'+allResultsForTrn.length+'</div><div style="font-size:10px;color:var(--muted);">Total</div></div>'+
     '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--green);">'+passCount+'</div><div style="font-size:10px;color:var(--muted);">Passed</div></div>'+
     '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--red);">'+failCount+'</div><div style="font-size:10px;color:var(--muted);">Failed</div></div>'+
     '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--blue);">'+avgScore+'%</div><div style="font-size:10px;color:var(--muted);">Avg Score</div></div>'+
     '</div>'+
+
+    // Employee stats bar
+    '<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px;margin-bottom:12px;">'+
+    '<div style="font-weight:700;font-size:11px;color:var(--amber);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;vertical-align:middle;">person</span> '+empName+' - Performance</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">'+
+    '<div style="text-align:center;"><div style="font-size:15px;font-weight:700;">'+empResults.length+'</div><div style="font-size:9px;color:var(--muted);">Attempts</div></div>'+
+    '<div style="text-align:center;"><div style="font-size:15px;font-weight:700;color:var(--green);">'+empPassCount+'</div><div style="font-size:9px;color:var(--muted);">Passed</div></div>'+
+    '<div style="text-align:center;"><div style="font-size:15px;font-weight:700;color:var(--red);">'+empFailCount+'</div><div style="font-size:9px;color:var(--muted);">Failed</div></div>'+
+    '<div style="text-align:center;"><div style="font-size:15px;font-weight:700;color:var(--blue);">'+empBest+'%</div><div style="font-size:9px;color:var(--muted);">Best Score</div></div>'+
+    '</div></div>'+
+
     // Action type
     '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Corrective Action *</label>'+
     '<select class="form-control-sm" id="ca_action" onchange="caActionChanged()">'+
@@ -4682,16 +4731,28 @@ function openCorrectiveAction(logId,empName,training,score,empId){
     '<option value="Pending — awaiting management decision">Pending — awaiting management decision</option>'+
     '<option value="Other">Other (type below)</option>'+
     '</select></div>'+
-    // TAB: Assign to existing training
-    '<div id="ca_section_assign" style="background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;">'+
-    '<div style="font-weight:700;font-size:12px;color:var(--green);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">school</span> Option 1: Assign to Existing Training</div>'+
+
+    // Section: Schedule Re-Test with Deadline
+    '<div id="ca_section_retest" style="background:rgba(62,160,232,.06);border:1px solid rgba(62,160,232,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;display:none;">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--blue);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">schedule</span> Schedule Re-Test</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
+    '<div class="form-group"><label class="form-label-sm">Re-Test Deadline *</label><input class="form-control-sm" id="ca_retest_deadline" type="date" value="'+todayStr+'" min="'+todayStr+'"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Re-Test Time (optional)</label><input class="form-control-sm" id="ca_retest_time" type="time" value="10:00"></div>'+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--muted);">Employee will be notified about the re-test schedule.</div>'+
+    '</div>'+
+
+    // Section: Assign to existing training
+    '<div id="ca_section_assign" style="background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;display:none;">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--green);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">school</span> Assign to Existing Training</div>'+
     '<div class="form-group" style="margin-bottom:8px;"><label class="form-label-sm">Select Training</label>'+
     '<select class="form-control-sm" id="ca_reassign_trn"><option value="">-- Choose existing training --</option>'+trnOptions+'</select></div>'+
     '<div style="font-size:10px;color:var(--muted);">Employee will be enrolled automatically.</div>'+
     '</div>'+
-    // TAB: Create new training with video + test
-    '<div id="ca_section_newtrn" style="background:rgba(139,109,232,.06);border:1px solid rgba(139,109,232,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;">'+
-    '<div style="font-weight:700;font-size:12px;color:var(--purple);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">add_circle</span> Option 2: Create New Training (with Video + Test)</div>'+
+
+    // Section: Create new training
+    '<div id="ca_section_newtrn" style="background:rgba(139,109,232,.06);border:1px solid rgba(139,109,232,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;display:none;">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--purple);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">add_circle</span> Create New Training (with Video + Test)</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
     '<div class="form-group"><label class="form-label-sm">Training Name *</label><input class="form-control-sm" id="ca_new_name" placeholder="e.g. Fire Safety Refresher"></div>'+
     '<div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="ca_new_cat"><option value="">Select</option>'+catOptions+'</select></div>'+
@@ -4708,31 +4769,56 @@ function openCorrectiveAction(logId,empName,training,score,empId){
     '</div>'+
     '<div style="font-size:10px;color:var(--muted);">A new training will be created and '+empName+' will be enrolled automatically.</div>'+
     '</div>'+
-    // Feedback / notes
+
+    // Section: Training Material Link
+    '<div id="ca_section_material" style="background:rgba(240,136,62,.06);border:1px solid rgba(240,136,62,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;display:none;">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--orange);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">attach_file</span> Training Material / Video Link</div>'+
+    '<div class="form-group" style="margin-bottom:8px;"><label class="form-label-sm">Training Material Link (PDF/PPT URL)</label><input class="form-control-sm" id="ca_material_link" placeholder="https://drive.google.com/... or any URL"></div>'+
+    '<div class="form-group" style="margin-bottom:8px;"><label class="form-label-sm">Video Link (YouTube/SharePoint/etc.)</label><input class="form-control-sm" id="ca_video_link" placeholder="https://youtube.com/watch?v=...">'+(currentVideo?'<div style="font-size:10px;color:var(--green);margin-top:4px;">Current: <a href="'+currentVideo+'" target="_blank" style="color:var(--blue);">'+currentVideo+'</a></div>':'')+'</div>'+
+    '</div>'+
+
+    // Section: Send Message to Employee
+    '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;">'+
+    '<div style="font-weight:700;font-size:12px;color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">send</span> Send Message to Employee</div>'+
+    '<div class="form-group" style="margin-bottom:8px;"><label class="form-label-sm">Message to '+empName+'</label>'+
+    '<textarea class="form-control-sm" id="ca_message" rows="3" placeholder="Type your message to the employee about this corrective action..."></textarea></div>'+
+    '<div style="font-size:10px;color:var(--muted);">This message will be saved as a notification for '+empName+' ('+(empId||log.empId)+').</div>'+
+    '</div>'+
+
+    // Notes & Date
     '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Feedback / Additional Notes</label>'+
-    '<textarea class="form-control-sm" id="ca_notes" rows="3" placeholder="Describe the corrective action taken, feedback given to employee, observations..."></textarea></div>'+
+    '<textarea class="form-control-sm" id="ca_notes" rows="2" placeholder="Describe the corrective action taken, feedback given to employee..."></textarea></div>'+
     '<div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Action Date</label>'+
-    '<input class="form-control-sm" id="ca_date" type="date" value="'+new Date().toISOString().split('T')[0]+'"></div>'+
-    '<button class="btn btn-amber" style="width:100%;" onclick="saveCorrectiveAction(\''+logId+'\')"><span class="mat-ico">save</span> Save Corrective Action</button>'+
-    '</div>',
-    '650px'
-  );
+    '<input class="form-control-sm" id="ca_date" type="date" value="'+todayStr+'"></div>'+
+    '<button class="btn btn-amber" style="width:100%;" onclick="saveCorrectiveAction()"><span class="mat-ico">save</span> Save Corrective Action</button>'+
+    '</div>';
+
+  openModal(modalHtml, '700px');
   caActionChanged();
 }
+
 function caActionChanged(){
   var sel=document.getElementById('ca_action');
-  var secAssign=document.getElementById('ca_section_assign');
-  var secNew=document.getElementById('ca_section_newtrn');
   if(!sel)return;
-  var show=sel.value==='Re-training scheduled'||sel.value==='Additional training material provided';
-  if(secAssign)secAssign.style.display=show?'block':'none';
-  if(secNew)secNew.style.display=show?'block':'none';
+  var v=sel.value;
+  var showAssign=(v==='Re-training scheduled'||v==='Additional training material provided');
+  var showNewTrn=showAssign;
+  var showRetest=(v==='Re-test given — Passed'||v==='Re-test given — Still Failed'||v==='Re-training scheduled');
+  var showMaterial=(v==='Additional training material provided'||v==='Re-training scheduled'||v==='One-on-one coaching done');
+  var s1=document.getElementById('ca_section_assign');if(s1)s1.style.display=showAssign?'block':'none';
+  var s2=document.getElementById('ca_section_newtrn');if(s2)s2.style.display=showNewTrn?'block':'none';
+  var s3=document.getElementById('ca_section_retest');if(s3)s3.style.display=showRetest?'block':'none';
+  var s4=document.getElementById('ca_section_material');if(s4)s4.style.display=showMaterial?'block':'none';
 }
 
-function saveCorrectiveAction(logId){
-  var action=document.getElementById('ca_action').value;
-  var notes=document.getElementById('ca_notes').value.trim();
-  var date=document.getElementById('ca_date').value;
+function saveCorrectiveAction(){
+  var ctx=window._caContext;
+  if(!ctx){toast('Context lost. Please try again.','error');return;}
+  var logId=ctx.logId;
+  var action=(document.getElementById('ca_action')||{}).value||'';
+  var notes=(document.getElementById('ca_notes')||{}).value||'';
+  notes=notes.trim();
+  var date=(document.getElementById('ca_date')||{}).value||new Date().toISOString().split('T')[0];
   var reassignTrnId=(document.getElementById('ca_reassign_trn')||{}).value||'';
   var newName=(document.getElementById('ca_new_name')||{}).value||'';
   var newCat=(document.getElementById('ca_new_cat')||{}).value||'';
@@ -4741,10 +4827,19 @@ function saveCorrectiveAction(logId){
   var newValid=(document.getElementById('ca_new_valid')||{}).value||'1 Year';
   var newVideo=(document.getElementById('ca_new_video')||{}).value||'';
   var newTest=(document.getElementById('ca_new_test')||{}).checked;
+  var materialLink=(document.getElementById('ca_material_link')||{}).value||'';
+  var videoLink=(document.getElementById('ca_video_link')||{}).value||'';
+  var message=(document.getElementById('ca_message')||{}).value||'';
+  var retestDeadline=(document.getElementById('ca_retest_deadline')||{}).value||'';
+  var retestTime=(document.getElementById('ca_retest_time')||{}).value||'';
+
   if(!action){toast('Please select an action','error');return;}
   var log=DB.auditLog.find(function(l){return l.id===logId;});
   if(!log){toast('Audit record not found','error');return;}
-  var reassignMsg='';
+
+  var extraMsgs=[];
+  var todayStr=new Date().toISOString().split('T')[0];
+
   // Option 1: Assign to existing training
   if(reassignTrnId&&log.empId){
     var targetTrn=DB.trainings.find(function(t){return t.id===reassignTrnId;});
@@ -4752,38 +4847,64 @@ function saveCorrectiveAction(logId){
       if(!targetTrn.enrolled)targetTrn.enrolled=[];
       if(!targetTrn.enrolled.includes(log.empId)){
         targetTrn.enrolled.push(log.empId);
-        reassignMsg='Assigned to '+targetTrn.name;
-        DB.auditLog.push({id:genId('AUD'),date:date||new Date().toISOString().split('T')[0],type:'corrective_action',empId:log.empId,empName:log.empName,dept:log.dept,training:log.training,cat:log.cat,details:'Reassigned to '+targetTrn.name+' (corrective action)',action:'Assigned to '+targetTrn.name,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
-      }else{reassignMsg='Already enrolled in '+targetTrn.name;}
+        extraMsgs.push('Assigned to '+targetTrn.name);
+        DB.auditLog.push({id:genId('AUD'),date:date,type:'corrective_action',empId:log.empId,empName:log.empName,dept:log.dept,training:log.training,cat:log.cat,details:'Reassigned to '+targetTrn.name+' (corrective action)',action:'Assigned to '+targetTrn.name,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
+      }else{extraMsgs.push('Already enrolled in '+targetTrn.name);}
     }
   }
+
   // Option 2: Create new training with video + test
   if(newName&&newCat&&log.empId){
     var newTrnId=genId('TRN');
-    var today=new Date().toISOString().split('T')[0];
-    var newTrn={id:newTrnId,name:newName,cat:newCat,trainer:newTrainer||'Safety Officer',date:today,duration:newDur||'30 min',passing:70,validity:newValid||'1 Year',cert:true,questions:[],enrolled:[log.empId],completed:[],completedDates:{}};
+    var newTrn={id:newTrnId,name:newName,cat:newCat,trainer:newTrainer||'Safety Officer',date:todayStr,duration:newDur||'30 min',passing:70,validity:newValid||'1 Year',cert:true,questions:[],enrolled:[log.empId],completed:[],completedDates:{}};
     if(newVideo){newTrn.youtubeLink=newVideo;}
     if(!newTest){newTrn.cert=false;}
     DB.trainings.push(newTrn);
-    reassignMsg=reassignMsg?reassignMsg+' + Created new: '+newName:'Created new training: '+newName+(newVideo?' (with video)':'')+(newTest?' (with test)':'');
-    DB.auditLog.push({id:genId('AUD'),date:date||today,type:'corrective_action',empId:log.empId,empName:log.empName,dept:log.dept,training:log.training,cat:log.cat,details:'New training created: '+newName+' ('+newCat+')'+(newVideo?' with video':'')+(newTest?' with test':'')+' — '+log.empName+' enrolled',action:'Created & assigned to '+newName,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
+    var trnDesc='Created new training: '+newName+(newVideo?' (with video)':'')+(newTest?' (with test)':'');
+    extraMsgs.push(trnDesc);
+    DB.auditLog.push({id:genId('AUD'),date:date,type:'corrective_action',empId:log.empId,empName:log.empName,dept:log.dept,training:log.training,cat:log.cat,details:trnDesc+' — '+log.empName+' enrolled',action:'Created & assigned to '+newName,actionBy:currentUser?currentUser.name||currentUser.username:'Admin'});
     DB.notifications.unshift({id:genId('N'),msg:'New training "'+newName+'" created as corrective action for '+log.empName,time:'Just now',read:false,icon:'add_circle'});
   }
-  log.action=action+(notes?' — '+notes:'')+(reassignMsg?' — '+reassignMsg:'');
+
+  // Send message to employee
+  if(message&&log.empId){
+    DB.notifications.unshift({id:genId('N'),msg:'Message from Admin to '+log.empName+': '+message,time:'Just now',read:false,icon:'mail',forEmpId:log.empId});
+    extraMsgs.push('Message sent to '+log.empName);
+  }
+
+  // Schedule re-test notification
+  if(retestDeadline&&log.empId){
+    var retestMsg='Re-test scheduled for '+training;
+    if(retestTime)retestMsg+=' at '+retestTime;
+    retestMsg+=' — Deadline: '+retestDeadline;
+    DB.notifications.unshift({id:genId('N'),msg:retestMsg,time:'Just now',read:false,icon:'schedule',forEmpId:log.empId});
+    extraMsgs.push('Re-test scheduled: '+retestDeadline+(retestTime?' '+retestTime:''));
+  }
+
+  // Save training material & video link on the log
+  if(materialLink){log.materialLink=materialLink;extraMsgs.push('Material link saved');}
+  if(videoLink){log.videoLink=videoLink;extraMsgs.push('Video link saved');}
+
+  // Update the audit log entry
+  var extraStr=extraMsgs.length?' — '+extraMsgs.join(' | '):'';
+  log.action=action+(notes?' — '+notes:'')+extraStr;
   log.actionBy=currentUser?currentUser.name||currentUser.username:'Admin';
   log.actionDate=date;
+  if(retestDeadline){log.retestDeadline=retestDeadline;log.retestTime=retestTime||'';}
+
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   saveDB();
   queueSheetSync(['Audit Trail']);
   closeModal();
   renderAuditTrail();
-  toast('Corrective action saved for '+log.empName+(reassignMsg?' — '+reassignMsg:''),'success',5000);
+  toast('Corrective action saved for '+log.empName+(extraStr?' — '+extraStr:''),'success',5000);
   if(firebaseReady){
     (async function(){
       try{await authAsAdmin();await fbDB.collection('auditLog').doc(String(logId)).set({...log},{merge:true});}catch(e){console.warn('Audit sync error:',e);}
     })();
   }
 }
+
 
 function renderAdminAccess(){
   if(!isAdmin){document.getElementById('view-adminaccess').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
