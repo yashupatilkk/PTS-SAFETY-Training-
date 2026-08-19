@@ -884,6 +884,7 @@ let DB={
   testResults:[],
   auditLog:[], // {id, date, type:'training_doc'|'corrective_action'|'test_result', empId, empName, training, details, action, actionBy, docName, docLink}
   certificates:[],
+  feedbackForms:[],
   // videos removed — YouTube links are stored directly on training objects
   sops:[
     {id:"SOP001",title:"Fire Extinguisher Inspection & Maintenance",cat:"Fire Fighting",version:"v2.1",updated:"2025-06-01",pages:8,file:"",desc:"Comprehensive guide for monthly inspection, annual servicing, and replacement of all fire extinguisher types (ABC, CO2, Foam, Water) as per IS 2878 / IS 15683.",keyPoints:["Check pressure gauge in green zone","Inspect nozzle and hose for blockage","Verify weight of extinguisher","Check safety pin and tamper seal","Record inspection in logbook","Replace expired extinguishers immediately"],hazards:"Accidental discharge; pressurized cylinder; asphyxiation risk (CO2 type)",reviewedBy:"Safety Officer",emergency:"Call Fire Emergency: Ext 101"},
@@ -1011,6 +1012,7 @@ async function forceSyncToCloud(){
       fbSaveCollection('trainings',DB.trainings,'id'),
       fbSaveCollection('testResults',DB.testResults,'id'),
       fbSaveCollection('certificates',DB.certificates,'num'),
+      fbSaveCollection('feedbackForms',DB.feedbackForms,'id'),
       fbSaveCollection('notifications',DB.notifications,'id'),
       fbSaveCollection('sops',DB.sops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
@@ -4021,6 +4023,10 @@ function submitQuiz(){
       queueSheetSync(["Training Data","Q&A Details","Certificates","Audit Trail"]);
     }catch(e){console.warn('Google Sheets auto-sync error:',e);}
   })();
+  // Store feedback context so the feedback button in result screen can use it
+  if(pass){
+    var _quizFbCtx={empName:empName,empId:empId,dept:dept,desig:currentUser.desig||"",trnName:quizState.training,trnCat:quizState.category,trainer:trnMatch?trnMatch.trainer||"":"",completedDate:today,score:score};
+  }
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
@@ -4056,6 +4062,7 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
+        ${pass?`<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> Fill Training Feedback Form</button>`:""}
         ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${quizState.training||""}')" style="border-color:var(--amber);color:var(--amber);"><span class="mat-ico">refresh</span> Retake Test</button><div style="padding:4px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;color:var(--muted);">Test expires after 24hrs</div>`}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
@@ -4064,6 +4071,14 @@ function submitQuiz(){
   if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
   else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
+  // Bind feedback button click
+  var fbBtn=document.getElementById("openFeedbackFromQuiz");
+  if(fbBtn&&typeof _quizFbCtx!=="undefined"&&_quizFbCtx){
+    fbBtn.onclick=function(e){
+      e.preventDefault();e.stopPropagation();
+      openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);
+    };
+  }
 }
 
 
@@ -4906,6 +4921,225 @@ function saveCorrectiveAction(){
 }
 
 
+
+// ============================================================
+// FEEDBACK FORM - IMSP 29 F05 Training Feedback Form
+// ============================================================
+
+var _fbContext = {};
+var _fbRatings = {};
+
+function openFeedbackForm(empName,empId,dept,desig,trnName,trnCat,trainer,completedDate,score){
+  console.log('openFeedbackForm:',empName,trnName,trainer);
+  _fbContext = {empName:empName,empId:empId,dept:dept,desig:desig,trnName:trnName,trnCat:trnCat,trainer:trainer,completedDate:completedDate,score:score};
+  _fbRatings = {};
+  var todayStr = new Date().toISOString().split('T')[0];
+
+  var questions = [
+    'The training met my expectations.',
+    'I will be able to apply the knowledge learned.',
+    'The training objectives for each topic were identified and followed.',
+    'The content was organized and easy to follow.',
+    'The materials distributed were pertinent and useful.',
+    'The trainer was knowledgeable.',
+    'The quality of instruction was good.',
+    'The trainer met the training objectives.',
+    'Class participation and interaction were encouraged.',
+    'Adequate time was provided for questions and discussion.'
+  ];
+
+  var qRows = '';
+  questions.forEach(function(q, idx){
+    qRows += '<tr>'+
+      '<td style="padding:10px 8px;font-size:12px;border-bottom:1px solid var(--bdr);">'+(idx+1)+'. '+q+'</td>'+
+      '<td style="text-align:center;padding:8px;border-bottom:1px solid var(--bdr);"><label style="cursor:pointer;"><input type="radio" name="fb_q'+idx+'" value="5" style="accent-color:var(--green);width:16px;height:16px;"><br><span style="font-size:9px;color:var(--muted);">Strongly<br>Agree</span></label></td>'+
+      '<td style="text-align:center;padding:8px;border-bottom:1px solid var(--bdr);"><label style="cursor:pointer;"><input type="radio" name="fb_q'+idx+'" value="4" style="accent-color:var(--blue);width:16px;height:16px;"><br><span style="font-size:9px;color:var(--muted);">Agree</span></label></td>'+
+      '<td style="text-align:center;padding:8px;border-bottom:1px solid var(--bdr);"><label style="cursor:pointer;"><input type="radio" name="fb_q'+idx+'" value="3" style="accent-color:var(--amber);width:16px;height:16px;"><br><span style="font-size:9px;color:var(--muted);">Neutral</span></label></td>'+
+      '<td style="text-align:center;padding:8px;border-bottom:1px solid var(--bdr);"><label style="cursor:pointer;"><input type="radio" name="fb_q'+idx+'" value="2" style="accent-color:var(--orange);width:16px;height:16px;"><br><span style="font-size:9px;color:var(--muted);">Disagree</span></label></td>'+
+      '<td style="text-align:center;padding:8px;border-bottom:1px solid var(--bdr);"><label style="cursor:pointer;"><input type="radio" name="fb_q'+idx+'" value="1" style="accent-color:var(--red);width:16px;height:16px;"><br><span style="font-size:9px;color:var(--muted);">Strongly<br>Disagree</span></label></td>'+
+    '</tr>';
+  });
+
+  var modalHtml =
+    '<div class="modal-accent"></div>'+
+    '<div class="modal-head">'+
+    '<div class="modal-ico" style="background:rgba(62,160,232,.15);"><span class="mat-ico" style="color:var(--blue);font-size:22px;">rate_review</span></div>'+
+    '<div><h2>Training Feedback Form</h2><span style="font-size:11px;color:var(--muted);">IMSP 29 F05</span></div>'+
+    '<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body" style="max-height:75vh;overflow-y:auto;">'+
+
+    // Company header
+    '<div style="text-align:center;margin-bottom:14px;padding:10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);">'+
+    '<div style="font-weight:700;font-size:14px;">Prestige Office Management Private Limited</div>'+
+    '<div style="font-size:11px;color:var(--muted);">Integrated Management System</div>'+
+    '<div style="font-weight:600;font-size:13px;color:var(--amber);margin-top:4px;">Training Feedback Form</div>'+
+    '<div style="font-size:10px;color:var(--muted);">Document Number: IMSP 29 F05 | Rev.02</div>'+
+    '</div>'+
+
+    // Employee Information section
+    '<div style="font-weight:700;font-size:12px;color:var(--amber);margin-bottom:8px;padding:6px 10px;background:rgba(255,176,32,.08);border-radius:var(--r-sm);border-left:3px solid var(--amber);">EMPLOYEE INFORMATION</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">'+
+    '<div class="form-group"><label class="form-label-sm">Name</label><input class="form-control-sm" id="fb_name" value="'+empName+'" readonly style="background:var(--sur2);"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Employee ID</label><input class="form-control-sm" id="fb_empid" value="'+empId+'" readonly style="background:var(--sur2);"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Department</label><input class="form-control-sm" id="fb_dept" value="'+dept+'" readonly style="background:var(--sur2);"></div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">'+
+    '<div class="form-group"><label class="form-label-sm">Job Title / Designation</label><input class="form-control-sm" id="fb_desig" value="'+desig+'" readonly style="background:var(--sur2);"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Date</label><input class="form-control-sm" id="fb_date" type="date" value="'+(completedDate||todayStr)+'" readonly style="background:var(--sur2);"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="fb_manager" placeholder="Enter manager name"></div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">'+
+    '<div class="form-group"><label class="form-label-sm">Training Course</label><input class="form-control-sm" id="fb_training" value="'+trnName+'" readonly style="background:var(--sur2);"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Trainer</label><input class="form-control-sm" id="fb_trainer" value="'+trainer+'" readonly style="background:var(--sur2);"></div>'+
+    '</div>'+
+
+    // Rating questions
+    '<div style="font-weight:700;font-size:12px;color:var(--amber);margin-bottom:8px;padding:6px 10px;background:rgba(255,176,32,.08);border-radius:var(--r-sm);border-left:3px solid var(--amber);">Please indicate your impressions of the items listed below.</div>'+
+    '<div style="overflow-x:auto;margin-bottom:14px;">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:11px;">'+
+    '<thead><tr style="background:var(--sur2);">'+
+    '<th style="text-align:left;padding:8px;border-bottom:2px solid var(--bdr);min-width:200px;">Statement</th>'+
+    '<th style="padding:8px;border-bottom:2px solid var(--bdr);width:80px;">Strongly Agree</th>'+
+    '<th style="padding:8px;border-bottom:2px solid var(--bdr);width:60px;">Agree</th>'+
+    '<th style="padding:8px;border-bottom:2px solid var(--bdr);width:60px;">Neutral</th>'+
+    '<th style="padding:8px;border-bottom:2px solid var(--bdr);width:60px;">Disagree</th>'+
+    '<th style="padding:8px;border-bottom:2px solid var(--bdr);width:80px;">Strongly Disagree</th>'+
+    '</tr></thead><tbody>'+
+    qRows+
+    '</tbody></table></div>'+
+
+    // Overall rating
+    '<div style="font-weight:700;font-size:12px;margin-bottom:8px;">How do you rate the training overall?</div>'+
+    '<div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;">'+
+    '<label style="cursor:pointer;display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;"><input type="radio" name="fb_overall" value="5" style="accent-color:var(--green);width:16px;height:16px;"> Excellent</label>'+
+    '<label style="cursor:pointer;display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;"><input type="radio" name="fb_overall" value="4" style="accent-color:var(--blue);width:16px;height:16px;"> Good</label>'+
+    '<label style="cursor:pointer;display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;"><input type="radio" name="fb_overall" value="3" style="accent-color:var(--amber);width:16px;height:16px;"> Average</label>'+
+    '<label style="cursor:pointer;display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;"><input type="radio" name="fb_overall" value="2" style="accent-color:var(--orange);width:16px;height:16px;"> Poor</label>'+
+    '<label style="cursor:pointer;display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;"><input type="radio" name="fb_overall" value="1" style="accent-color:var(--red);width:16px;height:16px;"> Very Poor</label>'+
+    '</div>'+
+
+    // Open-ended questions
+    '<div class="form-group" style="margin-bottom:10px;"><label class="form-label-sm">What did you enjoy most about the training?</label>'+
+    '<textarea class="form-control-sm" id="fb_enjoyed" rows="2" placeholder="Share what you found most valuable..."></textarea></div>'+
+    '<div class="form-group" style="margin-bottom:10px;"><label class="form-label-sm">Suggestions for improvement</label>'+
+    '<textarea class="form-control-sm" id="fb_suggestions" rows="2" placeholder="Any suggestions to improve this training..."></textarea></div>'+
+    '<div class="form-group" style="margin-bottom:14px;"><label class="form-label-sm">Additional Comments</label>'+
+    '<textarea class="form-control-sm" id="fb_comments" rows="2" placeholder="Any other comments..."></textarea></div>'+
+
+    // Submit
+    '<button class="btn btn-amber" style="width:100%;padding:12px;" onclick="saveFeedbackForm()"><span class="mat-ico">save</span> Save Feedback Form & Sync to Sheet</button>'+
+    '</div>';
+
+  openModal(modalHtml, '900px');
+}
+
+function saveFeedbackForm(){
+  var ctx = _fbContext;
+  if(!ctx || !ctx.empId){toast('Feedback context lost. Please try again.','error');return;}
+
+  // Validate
+  var manager = (document.getElementById('fb_manager')||{}).value || '';
+  if(!manager.trim()){toast('Please enter the Manager name','error');document.getElementById('fb_manager').focus();return;}
+
+  // Collect ratings
+  var ratings = [];
+  var allAnswered = true;
+  for(var i = 0; i < 10; i++){
+    var sel = document.querySelector('input[name="fb_q'+i+'"]:checked');
+    if(!sel){allAnswered = false;}
+    ratings.push(sel ? parseInt(sel.value) : 0);
+  }
+  if(!allAnswered){
+    if(!confirm('Some rating questions are not answered. Continue anyway?')) return;
+  }
+
+  var overallSel = document.querySelector('input[name="fb_overall"]:checked');
+  var overall = overallSel ? parseInt(overallSel.value) : 0;
+
+  var enjoyed = (document.getElementById('fb_enjoyed')||{}).value || '';
+  var suggestions = (document.getElementById('fb_suggestions')||{}).value || '';
+  var comments = (document.getElementById('fb_comments')||{}).value || '';
+  var date = (document.getElementById('fb_date')||{}).value || new Date().toISOString().split('T')[0];
+
+  var avgRating = ratings.filter(function(r){return r > 0;}).length ?
+    Math.round(ratings.filter(function(r){return r > 0;}).reduce(function(s,r){return s+r;},0) / ratings.filter(function(r){return r > 0;}).length * 10) / 10 : 0;
+
+  // Save to DB
+  var feedback = {
+    id: genId('FB'),
+    date: date,
+    empId: ctx.empId,
+    empName: ctx.empName,
+    dept: ctx.dept,
+    desig: ctx.desig,
+    manager: manager.trim(),
+    training: ctx.trnName,
+    cat: ctx.trnCat,
+    trainer: ctx.trainer,
+    score: ctx.score,
+    completedDate: ctx.completedDate,
+    ratings: ratings,
+    overall: overall,
+    avgRating: avgRating,
+    enjoyed: enjoyed.trim(),
+    suggestions: suggestions.trim(),
+    comments: comments.trim(),
+    savedBy: currentUser ? (currentUser.name || currentUser.username) : 'Admin',
+    savedAt: new Date().toISOString()
+  };
+
+  if(!DB.feedbackForms) DB.feedbackForms = [];
+  DB.feedbackForms.push(feedback);
+
+  // Save to localStorage and Firebase
+  try{localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  saveDB();
+
+  // Sync to Google Sheets
+  queueSheetSync(['Feedback Forms']);
+
+  closeModal();
+  toast('Feedback form saved for ' + ctx.empName + ' — ' + ctx.trnName, 'success', 5000);
+}
+
+function buildFeedbackPayload(){
+  var rows = [];
+  (DB.feedbackForms || []).forEach(function(fb){
+    var r = fb.ratings || [];
+    rows.push({
+      date: fb.date || '',
+      empId: fb.empId || '',
+      empName: fb.empName || '',
+      department: fb.dept || '',
+      jobTitle: fb.desig || '',
+      manager: fb.manager || '',
+      trainingCourse: fb.training || '',
+      category: fb.cat || '',
+      trainer: fb.trainer || '',
+      testScore: fb.score ? fb.score + '%' : '',
+      completedDate: fb.completedDate || '',
+      q1_metExpectations: r[0] || '',
+      q2_applyKnowledge: r[1] || '',
+      q3_objectivesFollowed: r[2] || '',
+      q4_organizedContent: r[3] || '',
+      q5_usefulMaterials: r[4] || '',
+      q6_knowledgeableTrainer: r[5] || '',
+      q7_qualityInstruction: r[6] || '',
+      q8_trainerMetObjectives: r[7] || '',
+      q8_participationEncouraged: r[8] || '',
+      q10_timeForQuestions: r[9] || '',
+      overallRating: fb.overall || '',
+      avgRating: fb.avgRating || '',
+      enjoyedMost: fb.enjoyed || '',
+      suggestions: fb.suggestions || '',
+      additionalComments: fb.comments || '',
+      savedBy: fb.savedBy || '',
+      savedAt: fb.savedAt || ''
+    });
+  });
+  return rows;
+}
+
 function renderAdminAccess(){
   if(!isAdmin){document.getElementById('view-adminaccess').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
   var promoteCount=0, directCount=0;
@@ -5470,9 +5704,12 @@ async function syncToGoogleSheet(){
     // 6. SOPs
     var sopPayload=buildSopPayload();
     if(sopPayload.length>0){var r6=await pushToSheet(url,sopPayload,"SOPs");totalSent+=r6.sent;details.push(sopPayload.length+' SOPs');}
+    // 7. Feedback Forms
+    var fbPayload=buildFeedbackPayload();
+    if(fbPayload.length>0){var r7=await pushToSheet(url,fbPayload,"Feedback Forms");totalSent+=r7.sent;details.push(fbPayload.length+' feedback forms');}
     _lastSheetSync=Date.now();
     if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Sync complete on '+new Date().toLocaleString()+' — '+totalSent+' records across '+details.length+' sheets ('+details.join(', ')+'). Check your Google Sheet tabs.</span>';
-    toast('All data synced to Google Sheet! ('+totalSent+' records in 6 tabs)','success',4000);
+    toast('All data synced to Google Sheet! ('+totalSent+' records in 7 tabs)','success',4000);
     DB.notifications.unshift({id:genId("N"),msg:'Google Sheets sync: '+totalSent+' records sent ('+details.join(', ')+').',time:"Just now",read:false,icon:"table_chart"});
     updateBadges();
   }catch(err){
@@ -5495,7 +5732,7 @@ function queueSheetSync(sheetNames){
   if(!url) return;
   // Store which sheets need syncing (accumulates until timer fires)
   if(!window._pendingSheetSyncs) window._pendingSheetSyncs=new Set();
-  if(!sheetNames) sheetNames=["Training Data","Q&A Details","Employees","Trainings","Certificates","Equipment","SOPs","Audit Trail"];
+  if(!sheetNames) sheetNames=["Training Data","Q&A Details","Employees","Trainings","Certificates","Equipment","SOPs","Audit Trail","Feedback Forms"];
   sheetNames.forEach(function(s){window._pendingSheetSyncs.add(s);});
   // Debounce: reset timer on each call
   if(_sheetSyncTimer) clearTimeout(_sheetSyncTimer);
@@ -5538,6 +5775,9 @@ async function executeSheetSync(){
     }
     if(sheetsToSync.includes("Q&A Details")){
       var p=buildQnAPayload();if(p.length>0){await pushToSheet(url,p,"Q&A Details");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Feedback Forms")){
+      var p=buildFeedbackPayload();if(p.length>0){await pushToSheet(url,p,"Feedback Forms");totalSent+=p.length;}
     }
     _lastSheetSync=Date.now();
     console.log('[Sheet Auto-Sync] Done: '+totalSent+' records across '+sheetsToSync.length+' sheets');
@@ -5586,7 +5826,7 @@ function renderTrainStatus(){
       const completedDate=passResult?passResult.date:((trn.completedDates||{})[empId]||"");
       const result=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
       const cert=DB.certificates.find(c=>c.empId===empId&&c.training===trn.name)||null;
-      rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:"",hoursSinceLast:completedDate?((Date.now()-new Date(completedDate).getTime())/(1000*60*60)):999,resultId:result?result.id:null});
+      rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,trainer:trn.trainer||"",certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:"",hoursSinceLast:completedDate?((Date.now()-new Date(completedDate).getTime())/(1000*60*60)):999,resultId:result?result.id:null});
     });
   });
   DB.testResults.forEach(r=>{
@@ -5595,7 +5835,7 @@ function renderTrainStatus(){
     const emp=DB.employees.find(e=>e.id===r.empId);
     const trn=DB.trainings.find(t=>t.name===r.training);
     const cert=DB.certificates.find(c=>c.empId===r.empId&&c.training===r.training)||null;
-    rows.push({empId:r.empId,empName:r.empName,dept:r.dept,desig:emp?.desig||"",trnId:trn?.id||"",trnName:r.training,trnCat:r.cat||"",certRequired:trn?trn.cert:true,passing:trn?.passing||70,score:r.score,correct:r.correct,wrong:r.wrong,totalQ:r.total,attempts:DB.testResults.filter(x=>x.empId===r.empId&&x.training===r.training).length,pass:r.pass,done:r.pass,completedDate:r.date,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:""});
+    rows.push({empId:r.empId,empName:r.empName,dept:r.dept,desig:emp?.desig||"",trnId:trn?.id||"",trnName:r.training,trnCat:r.cat||"",trainer:trn?.trainer||"",certRequired:trn?trn.cert:true,passing:trn?.passing||70,score:r.score,correct:r.correct,wrong:r.wrong,totalQ:r.total,attempts:DB.testResults.filter(x=>x.empId===r.empId&&x.training===r.training).length,pass:r.pass,done:r.pass,completedDate:r.date,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:""});
   });
   let filtered=rows.filter(r=>{
     const q=ts_search.toLowerCase();
@@ -5698,6 +5938,7 @@ function renderTrainStatus(){
                 ${r.resultId?`<button class="btn btn-sm btn-outline" style="padding:4px 8px;border-color:var(--green);color:var(--green);" onclick="viewAnswerDetails('${r.resultId}')" title="View Question & Answer Details"><span class="mat-ico" style="font-size:11px;">fact_check</span></button>`:""}
                 ${r.certNo?`<button class="btn btn-sm btn-amber" style="padding:4px 8px;" onclick="downloadCertificate('${r.certNo}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`:""}
                 ${r.score===null||(r.pass&&r.hoursSinceLast>=24)?`<button class="btn btn-sm btn-outline" style="padding:4px 8px;" onclick="startQuiz('${r.trnCat.replace(/'/g,"\\'")}','${r.trnName.replace(/'/g,"\\'").replace(/"/g,"&quot;")}')"><span class="mat-ico" style="font-size:11px;">${r.pass&&r.hoursSinceLast>=24?"refresh":"quiz"}</span></button>`:""}
+                 ${r.pass?`<button class="btn btn-sm btn-outline fb-feedback-btn" style="padding:4px 8px;border-color:var(--blue);color:var(--blue);" data-emp-name="${r.empName||''}" data-emp-id="${r.empId}" data-dept="${r.dept||''}" data-desig="${r.desig||''}" data-trn-name="${r.trnName||''}" data-trn-cat="${r.trnCat||''}" data-trainer="${r.trainer||''}" data-comp-date="${r.completedDate||''}" data-score="${r.score||0}" title="Training Feedback Form"><span class="mat-ico" style="font-size:11px;">rate_review</span></button>`:''}
               </div></td>
             </tr>`;
           }).join(""):`<tr><td colspan="17" style="text-align:center;padding:40px;color:var(--muted);"><span class="mat-ico" style="font-size:36px;display:block;margin-bottom:8px;opacity:.3;">fact_check</span>No training records found.</td></tr>`}
@@ -5705,6 +5946,26 @@ function renderTrainStatus(){
       </table>
     </div>
   `;
+  // Event delegation for feedback buttons
+  setTimeout(function(){
+    var fbBtns=document.querySelectorAll('.fb-feedback-btn');
+    for(var bi=0;bi<fbBtns.length;bi++){(function(btn){
+      btn.onclick=function(e){
+        e.preventDefault();e.stopPropagation();
+        openFeedbackForm(
+          btn.getAttribute('data-emp-name'),
+          btn.getAttribute('data-emp-id'),
+          btn.getAttribute('data-dept'),
+          btn.getAttribute('data-desig'),
+          btn.getAttribute('data-trn-name'),
+          btn.getAttribute('data-trn-cat'),
+          btn.getAttribute('data-trainer'),
+          btn.getAttribute('data-comp-date'),
+          parseInt(btn.getAttribute('data-score'))||0
+        );
+      };
+    })(fbBtns[bi]);}
+  },50);
 }
 function exportFullStatusReport(){
   const rows=[];
@@ -5959,6 +6220,7 @@ function loadDBFromLocal(){
     if(saved.sops&&Array.isArray(saved.sops))DB.sops=saved.sops;
     if(saved.notifications&&Array.isArray(saved.notifications))DB.notifications=saved.notifications;
     if(saved.auditLog&&Array.isArray(saved.auditLog))DB.auditLog=saved.auditLog;
+    if(saved.feedbackForms&&Array.isArray(saved.feedbackForms))DB.feedbackForms=saved.feedbackForms;
     if(saved.settings&&typeof saved.settings==="object")Object.assign(DB.settings,saved.settings);
     if(saved.admins&&Array.isArray(saved.admins)&&saved.admins.length>0){
       DB.admins=saved.admins;
@@ -6039,6 +6301,7 @@ async function loadDBFromFirestore(){
       }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
       ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
+    ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
         const cloudIds=new Set(cloudSops.map(s=>s.id));
@@ -6434,4 +6697,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
