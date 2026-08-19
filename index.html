@@ -2592,11 +2592,15 @@ async function deleteEmp(id){
   // === STEP 5: Push cleaned data to cloud ===
   if(firebaseReady){await new Promise(r=>{saveDB();setTimeout(r,1500);});}
 
-  // === STEP 6: Mark deletion time ===
+  // === STEP 6: Clean audit log and feedback forms referencing this employee
+  DB.auditLog=(DB.auditLog||[]).filter(function(l){return l.empId!==id;});
+  DB.feedbackForms=(DB.feedbackForms||[]).filter(function(f){return f.empId!==id;});
+
+  // === STEP 7: Mark deletion time ===
   _lastDeleteTime=Date.now();
   toast("Employee \""+empName+"\" ("+id+") deleted permanently","warning");
   // Auto-sync to Google Sheet (all related sheets)
-  queueSheetSync(["Employees","Training Data","Certificates"]);
+  queueSheetSync(["Employees","Training Data","Certificates","Audit Trail","Feedback Forms"]);
 }
 function exportEmpExcel(){
   const ws=XLSX.utils.json_to_sheet(DB.employees.map(e=>({
@@ -3334,7 +3338,11 @@ async function deleteTraining(id){
   // === STEP 4: Push cleaned data to cloud ===
   if(firebaseReady){await new Promise(function(r){saveDB();setTimeout(r,1500);});}
 
-  // === STEP 5: Mark deletion time ===
+  // === STEP 5: Clean audit log and feedback forms referencing this training
+  DB.auditLog=(DB.auditLog||[]).filter(function(l){return l.training!==trnName;});
+  DB.feedbackForms=(DB.feedbackForms||[]).filter(function(f){return f.training!==trnName;});
+
+  // === STEP 6: Mark deletion time ===
   _lastDeleteTime=Date.now();
   toast('Training "'+trnName+'" deleted permanently','warning');
 }
@@ -6697,3 +6705,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
