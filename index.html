@@ -7058,47 +7058,67 @@ async function manualPurgeCloud(){
   }catch(e){toast('Purge error: '+e.message,'error',5000);}
 }
 async function resetDBToDefault(){
-  if(!confirm("⚠️ DELETE EVERYTHING — Start from ZERO?\n\nThis will PERMANENTLY delete:\n• All Employees\n• All Trainings\n• All Test Results\n• All Certificates\n• All Feedback Forms\n• All SOPs\n• All Notifications\n• All Audit Logs\n• All Custom Data\n• All Firebase Cloud Data\n\nThis CANNOT be undone!"))return;
-  toast('Deleting everything... please wait','info',10000);
-  // Step 1: Clear local storage
-  localStorage.removeItem(DB_STORAGE_KEY);
-  localStorage.removeItem(TOMBSTONE_KEY);
-  localStorage.removeItem('mep_user');
-  localStorage.removeItem('mep_theme');
-  // Step 2: Clear ALL Firebase collections (except admins — we restore it)
+  if(!confirm('⚠️ DELETE EVERYTHING — Start from ZERO?\n\nAll Employees, Trainings, Results, Certificates — GONE.\nThis CANNOT be undone!'))return;
+  toast('Deleting everything from Firebase...','info',15000);
+  // Step 1: Clear ALL Firebase collections — delete one by one with retry
   if(firebaseReady){
     try{
-      try{await authAsAdmin();}catch(e){}
-      const cols=['employees','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog'];
-      for(const c of cols){
+      // Use CURRENT auth (admin is already logged in)
+      var user=fbAuth.currentUser;
+      if(!user){try{await authAsAdmin();}catch(e){}}
+      var cols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
+      var totalDeleted=0;
+      for(var ci=0;ci<cols.length;ci++){
+        var colName=cols[ci];
         try{
-          var snap=await fbDB.collection(c).get();
+          var snap=await fbDB.collection(colName).get();
           var docs=snap.docs;
-          for(var i=0;i<docs.length;i+=500){
-            var batch=fbDB.batch();
-            var chunk=docs.slice(i,i+500);
-            chunk.forEach(function(d){batch.delete(d.ref);});
-            await batch.commit();
+          for(var di=0;di<docs.length;di++){
+            var doc=docs[di];
+            var deleted=false;
+            // Try delete up to 3 times
+            for(var retry=0;retry<3;retry++){
+              try{
+                await doc.ref.delete();
+                // Verify
+                var check=await doc.ref.get();
+                if(!check.exists){deleted=true;totalDeleted++;break;}
+              }catch(delErr){}
+            }
+            if(!deleted){
+              console.error('[NUCLEAR] Failed to delete '+colName+'/'+doc.id);
+            }
           }
-        }catch(colErr){}
+          console.log('[NUCLEAR] '+colName+': '+docs.length+' docs processed');
+        }catch(colErr){console.warn('[NUCLEAR] Error reading '+colName+':',colErr);}
       }
-      // Delete admins collection then re-create default admin
-      try{var admSnap=await fbDB.collection('admins').get();var ab=fbDB.batch();admSnap.docs.forEach(function(d){ab.delete(d.ref);});if(admSnap.size)await ab.commit();}catch(e){}
-      await fbDB.collection('admins').doc('admin').set({username:'admin',password:'admin123',name:'Admin User',role:'admin'},{merge:true});
-      // Re-create config/meta so version check passes on reload
+      // Delete admins then re-create default
+      try{
+        var admSnap=await fbDB.collection('admins').get();
+        for(var ai=0;ai<admSnap.docs.length;ai++){try{await admSnap.docs[ai].ref.delete();}catch(e){}}
+      }catch(e){}
+      // Delete config
+      try{
+        var cfgSnap=await fbDB.collection('config').get();
+        for(var cfgi=0;cfgi<cfgSnap.docs.length;cfgi++){try{await cfgSnap.docs[cfgi].ref.delete();}catch(e){}}
+      }catch(e){}
+      // Re-create admin in Firestore
+      await fbDB.collection('admins').doc('admin').set({username:'admin',password:'admin123',name:'Admin User',role:'admin'});
+      // Re-create config/meta
       await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString()});
-      // Ensure admin Firebase Auth account exists
-      try{await fbAuth.createUserWithEmailAndPassword(toEmail('admin'),'admin123');}catch(e){}
-      await authAsAdmin();
-      toast('Firebase cloud wiped clean! Admin restored.','success');
-    }catch(e){toast('Firebase clear error: '+e.message,'error');}
+      toast('Firebase wiped! '+totalDeleted+' docs deleted. Reloading...','success',3000);
+    }catch(e){
+      toast('Firebase error: '+e.message,'error',5000);
+      console.error('[NUCLEAR] Fatal error:',e);
+    }
   }
-  // Step 3: Set version key BEFORE reload so loadDB does not double-reset
+  // Step 2: Set version key + write clean DB to localStorage
   localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
-  // Step 4: Write clean default DB to localStorage
   var cleanDB={employees:[],trainings:[],testResults:[],certificates:[],notifications:[],customEquipment:[],customQuestions:[],auditLog:[],sops:[],feedbackForms:[],admins:[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}]};
-  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(cleanDB));}catch(e){}
-  location.reload();
+  localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(cleanDB));
+  localStorage.removeItem(TOMBSTONE_KEY);
+  localStorage.removeItem('mep_user');
+  setTimeout(function(){location.reload();},1500);
 }
 async function freshStartSite(){
   if(!confirm('FRESH START — This will:\n\n1. DELETE all trainings (except the HK Safety video one)\n2. DELETE all test results\n3. DELETE all certificates\n4. DELETE all notifications\n5. DELETE all custom questions\n6. DELETE all SOPs\n7. Keep all employees & admins\n\nThis cannot be undone. Continue?'))return;
