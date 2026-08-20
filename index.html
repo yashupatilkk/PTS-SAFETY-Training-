@@ -1002,6 +1002,13 @@ async function fbSaveSettings(){
   try{await fbDB.collection('config').doc('settings').set(DB.settings,{merge:true});}catch(e){console.warn('fbSaveSettings error:',e);}
 }
 
+async function enableCloudSync(){
+  if(!confirm('Enable Cloud Sync?\n\nThis will allow data to load from Firebase again.\n\nIMPORTANT: Before enabling, make sure you have:\n1. Fixed Firebase Security Rules (allow read/write)\n2. Deleted old data from Firebase Console\n\nIf old data still exists in Firebase, it will be loaded!\n\nContinue?'))return;
+  localStorage.removeItem('_nuclearResetDone');
+  toast('Cloud sync ENABLED — reloading page...','success',3000);
+  setTimeout(function(){location.reload();},1500);
+}
+
 async function forceSyncToCloud(){
   if(!firebaseReady){toast('Firebase not available','error');return;}
   toast('Syncing all data to cloud...','info',2000);
@@ -1321,7 +1328,7 @@ async function testFirebaseConnection(){
 }
 
 async function forceSyncFromCloud(){
-  if(!firebaseReady){toast('Firebase not available','error');return;}
+  if(!firebaseReady){toast('Firebase not available (cloud sync may be disabled after nuclear reset). Go to Settings to enable.','error');return;}
   toast('Pulling latest data from cloud...','info',2000);
   updateSyncUI('syncing');
   try{
@@ -1341,6 +1348,7 @@ async function forceSyncFromCloud(){
 // Auto-sync: PUSH to cloud + Admin pulls employee results
 function startAutoSync(){
   if(!firebaseReady)return;
+  if(localStorage.getItem('_nuclearResetDone'))return; // Skip auto-sync when nuclear reset done
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
@@ -1372,8 +1380,8 @@ function startAutoSync(){
         fbSaveSettings()
       ]);
       // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
-      // GUARD: If cloud load is blocked (fresh reset), skip pulling old data from Firebase
-      if(isAdmin && !_skipCloudLoad){
+      // GUARD: If cloud load is blocked (fresh reset or nuclear), skip pulling old data from Firebase
+      if(isAdmin && !_skipCloudLoad && !localStorage.getItem('_nuclearResetDone')){
         try{
           const fbTestSnap=await fbDB.collection('testResults').get();
           const fbTests=fbTestSnap.docs.map(d=>d.data());
@@ -1546,7 +1554,8 @@ async function doLogin(){
       var empId=id.toUpperCase();
       var emp=DB.employees.find(function(e){return e.id===empId;});
       // Employee login: ALWAYS pull fresh trainings from cloud to remove stale local data
-      if(firebaseReady&&!_skipCloudLoad){
+      // SKIP if nuclear reset done (cloud has stale data)
+      if(firebaseReady&&!_skipCloudLoad&&!localStorage.getItem('_nuclearResetDone')){
         try{
           // Auth as admin first so we can read deletedItems (tombstones)
           try{await authAsAdmin();}catch(authE){console.warn('[doLogin] admin auth for tombstones failed:',authE);}
@@ -5904,6 +5913,7 @@ function renderSettings(){
     <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Status: <span id="fbStatusText" style="color:${firebaseReady?'var(--green)':'var(--red)'};"><span class="mat-ico" style="font-size:14px;">${firebaseReady?'check_circle':'cloud_off'}</span> ${firebaseReady?'Connected — data syncs across devices':'Not Connected — using local storage only'}</span></div>
+      ${localStorage.getItem('_nuclearResetDone')?`<div style="background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.3);border-radius:8px;padding:10px 14px;margin-bottom:10px;"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:4px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud_off</span> Cloud Data Loading is DISABLED (Nuclear Reset Active)</div><div style="font-size:11px;color:var(--muted);line-height:1.5;">After nuclear reset, old test results and certificates are blocked from loading. <b style="color:var(--txt);">Data is saved locally only.</b> To re-enable cloud sync: <br>1. Go to <a href="https://console.firebase.google.com/project/pts-safety-training/firestore/rules" target="_blank" style="color:var(--amber);text-decoration:underline;">Firebase Console → Firestore Rules</a> and set rules to allow read/write.<br>2. Delete old data from Firebase Console manually.<br>3. Click the button below.</div><button class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,var(--green),#2ea06e);color:#fff;font-weight:700;border:none;" onclick="enableCloudSync()"><span class="mat-ico" style="font-size:12px;">cloud_sync</span> Enable Cloud Sync</button></div>`:''}
       <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone/device. Admin-added data syncs automatically via Firebase. New employees get Firebase Auth accounts created automatically.</div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-sm btn-green" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">cloud_upload</span> Force Sync to Cloud</button>
@@ -6612,7 +6622,7 @@ function exportFullStatusReport(){
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
-const DB_VERSION="v7-final-reset"; // Change this string to force full data reset on all devices
+const DB_VERSION="v8-zero-start"; // Change this string to force full data reset on all devices
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
@@ -6878,6 +6888,16 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 let _skipCloudLoad=(localStorage.getItem(DB_STORAGE_KEY+'_skipCloud')===DB_VERSION);
 async function loadDBFromFirestore(){
   if(_skipCloudLoad){console.log('[loadDBFromFirestore] SKIPPED — reset mode active (persistent)');return {ok:true,loaded:0,failed:[]};}
+  // === NUCLEAR RESET DONE: Block ALL cloud data loading ===
+  // This flag is set when DB_VERSION changes (nuclear reset on all devices).
+  // It prevents old test results, certificates, etc. from coming back from Firebase.
+  // Clear this flag manually via "Enable Cloud Sync" button after fixing Firebase Security Rules.
+  var _nuclearBlock=localStorage.getItem('_nuclearResetDone');
+  if(_nuclearBlock){
+    console.warn('[loadDBFromFirestore] NUCLEAR RESET DONE — skipping ALL cloud data loading. Flag: _nuclearResetDone=1');
+    console.warn('[loadDBFromFirestore] To re-enable cloud sync, clear _nuclearResetDone from localStorage or use Enable Cloud Sync button');
+    return {ok:true,loaded:0,failed:[],nuclearBlocked:true};
+  }
   let loaded=0;let failed=[];
   try{
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
@@ -7026,6 +7046,9 @@ function loadDB(){
     DB.admins=[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}];
     _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
     console.log('[loadDB] All DB arrays force-cleared');
+    // CRITICAL: Set nuclear reset flag so NO device loads old cloud data
+    localStorage.setItem('_nuclearResetDone','1');
+    console.log('[loadDB] _nuclearResetDone flag SET — cloud data will be blocked on all future loads');
     // Note: Firebase wipe/block is handled in initApp() AFTER firebaseReady=true
   }
   // Synchronous: load from localStorage for immediate use
@@ -7108,6 +7131,8 @@ async function resetDBToDefault(){
   localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(cleanDB));
   localStorage.removeItem(TOMBSTONE_KEY);
   localStorage.removeItem('mep_user');
+  // CRITICAL: Set nuclear reset done flag — permanently blocks cloud data loading
+  localStorage.setItem('_nuclearResetDone','1');
 
   // === METHOD 1: Firebase REST API (bypasses SDK, most reliable) ===
   var restDeleted=0;
@@ -7229,6 +7254,8 @@ async function freshStartSite(){
   // Clear tombstones
   _deletedIds={employees:[],trainings:[],testResults:[],certificates:[],sops:[]};
   try{localStorage.removeItem(TOMBSTONE_KEY);}catch(e){}
+  // CRITICAL: Block cloud data loading so old results/certs don't come back
+  localStorage.setItem('_nuclearResetDone','1');
   // Save to localStorage immediately
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   // Clear Firebase collections
@@ -7282,12 +7309,13 @@ async function freshStartSite(){
   }catch(e){localStorage.removeItem("mep_user");}
 })();
 
-// === AUTO-NUKE v4: First time this file loads, it AUTOMATICALLY wipes everything ===
+// === AUTO-NUKE v5: First time this file loads, it AUTOMATICALLY wipes everything ===
 // This runs BEFORE initApp, BEFORE Firebase, BEFORE anything. Guaranteed zero data.
+// v5: Also sets _nuclearResetDone to block stale cloud data on ALL devices.
 (function(){
-  var AUTO_NUKE_FLAG='_autoNuke_v4_done';
+  var AUTO_NUKE_FLAG='_autoNuke_v5_done';
   if(!localStorage.getItem(AUTO_NUKE_FLAG)){
-    console.warn('[AUTO-NUKE] First load of new file — wiping ALL data automatically');
+    console.warn('[AUTO-NUKE v5] First load of new file — wiping ALL data automatically');
     // 1. Nuke localStorage immediately (sync)
     localStorage.removeItem(DB_STORAGE_KEY);
     localStorage.removeItem(DB_STORAGE_KEY+'_version');
@@ -7301,9 +7329,11 @@ async function freshStartSite(){
     // 3. Set clean DB in localStorage
     var clean={employees:[],trainings:[],testResults:[],certificates:[],notifications:[],customEquipment:[],customQuestions:[],auditLog:[],sops:[],feedbackForms:[],admins:[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}]};
     localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(clean));
-    // 4. Mark as done so this never runs again
+    // 4. CRITICAL: Set nuclear reset done flag — blocks ALL future cloud loading until admin re-enables
+    localStorage.setItem('_nuclearResetDone', '1');
+    // 5. Mark as done so this never runs again
     localStorage.setItem(AUTO_NUKE_FLAG, '1');
-    console.log('[AUTO-NUKE] Local data wiped. Firebase will be blocked by nuclear lock.');
+    console.log('[AUTO-NUKE v5] Local data wiped + _nuclearResetDone SET. Firebase cloud loading permanently blocked.');
   }
 })();
 
@@ -7368,11 +7398,23 @@ async function initApp(){
     DB.sops=[];DB.feedbackForms=[];
     localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
     localStorage.removeItem('_nuclear_lock');
+    // CRITICAL: Set nuclear reset done flag
+    localStorage.setItem('_nuclearResetDone','1');
     // Skip to login form setup directly
     gotoLoginSetup();
     return;
   }
   localStorage.removeItem('_nuclear_lock'); // Clear expired lock
+
+  // === NUCLEAR RESET DONE CHECK: If flag is set, skip ALL Firebase operations ===
+  // This prevents old cloud data (test results, certificates) from loading on any device
+  var _nuclearResetDone=localStorage.getItem('_nuclearResetDone');
+  if(_nuclearResetDone){
+    console.warn('[initApp] _nuclearResetDone is SET — skipping ALL Firebase operations. Cloud data is blocked.');
+    firebaseReady=false;
+    gotoLoginSetup();
+    return;
+  }
 
   try{
     firebaseReady=true;
@@ -7488,7 +7530,8 @@ async function initApp(){
   }
 
   // === Push missing employees + Auth accounts — NON-BLOCKING ===
-  if(firebaseReady && DB.employees.length>0){
+  // Skip background sync if nuclear reset done (cloud has stale data)
+  if(firebaseReady && DB.employees.length>0 && !localStorage.getItem('_nuclearResetDone')){
     // ENABLE LOGIN FIRST — don't make users wait
     if(loadMsg)loadMsg.style.display='none';
     var fbSt=document.getElementById('loginFbStatus');
@@ -7613,9 +7656,15 @@ function gotoLoginSetup(){
   // Show nuclear reset status
   var fbStatus=document.getElementById('loginFbStatus');
   if(fbStatus){
-    fbStatus.style.display='block';
-    fbStatus.style.color='var(--green)';
-    fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">check_circle</span> Nuclear Reset complete — starting fresh with zero data';
+    if(localStorage.getItem('_nuclearResetDone')){
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--amber)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Nuclear Reset done — starting fresh (cloud sync disabled). <span style="color:var(--muted);font-size:10.5px;">Data saved locally only. Enable cloud sync in Settings after fixing Firebase Rules.</span>';
+    }else{
+      fbStatus.style.display='block';
+      fbStatus.style.color='var(--green)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">check_circle</span> Nuclear Reset complete — starting fresh with zero data';
+    }
   }
   _initDone=true;
   if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
@@ -7635,4 +7684,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
