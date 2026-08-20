@@ -900,6 +900,7 @@ let DB={
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"https://script.google.com/macros/s/AKfycbyn5NCt91JkixFDMG2-P86X30edpJUY5b0WYDF4-pGWRsf0d3gLsyk_p4rx4JsM0R6SXw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    driveFolderId:"1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov",driveUploadUrl:"",
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -4036,6 +4037,15 @@ function submitQuiz(){
     var _quizFbCtx={empName:empName,empId:empId,dept:dept,desig:currentUser.desig||"",trnName:quizState.training,trnCat:quizState.category,trainer:trnMatch?trnMatch.trainer||"":"",completedDate:today,score:score};
   }
   quizState.active=false;
+  // === MANDATORY FEEDBACK: Check if already filled for this training+employee ===
+  var feedbackAlreadyFilled = (DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===quizState.training;});
+  var feedbackDone = !!feedbackAlreadyFilled;
+  var fbBtnHtml = '';
+  if(pass && !feedbackDone){
+    fbBtnHtml = '<button class="btn btn-amber" id="openFeedbackFromQuiz" style="padding:12px 24px;font-size:14px;font-weight:700;"><span class="mat-ico">rate_review</span> Fill Training Feedback Form (Required)</button>';
+  } else if(pass && feedbackDone){
+    fbBtnHtml = '<div style="padding:10px 16px;background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.3);border-radius:var(--r-sm);font-size:12px;color:var(--green);display:flex;align-items:center;gap:8px;"><span class="mat-ico">check_circle</span> Training Feedback Form already submitted on '+(feedbackAlreadyFilled.date||'recorded')+'</div>';
+  }
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
       <div class="result-card">
@@ -4057,6 +4067,11 @@ function submitQuiz(){
         </div>`:""}
         ${!pass?`<div style="margin-top:10px;font-size:12px;color:var(--red);">Required: ${passing}% · Your score: ${score}% · Shortfall: ${passing-score}%</div>`:""}
       </div>
+      ${pass&&!feedbackDone?`<div style="background:rgba(66,133,244,.08);border:2px solid rgba(66,133,244,.3);border-radius:var(--r);padding:16px;margin-bottom:14px;text-align:center;">
+        <div style="font-weight:700;font-size:14px;color:var(--blue);margin-bottom:6px;"><span class="mat-ico" style="vertical-align:middle;font-size:18px;">assignment</span> Training Feedback Form Required</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">IMSP 29 F05 — Please fill the feedback form to complete this training. Your response will be saved to Google Drive.</div>
+        ${fbBtnHtml}
+      </div>`:''}
       <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:14px;">
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:12px;">Answer Review</div>
         ${qs.map((q,i)=>`
@@ -4070,7 +4085,7 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        ${pass?`<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> Fill Training Feedback Form</button>`:""}
+        ${pass?`<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> ${feedbackDone?'View Feedback':'Fill Training Feedback Form'}</button>`:""}
         ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${quizState.training||""}')" style="border-color:var(--amber);color:var(--amber);"><span class="mat-ico">refresh</span> Retake Test</button><div style="padding:4px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;color:var(--muted);">Test expires after 24hrs</div>`}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
@@ -4086,6 +4101,12 @@ function submitQuiz(){
       e.preventDefault();e.stopPropagation();
       openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);
     };
+    // === AUTO-OPEN feedback modal if not yet filled (mandatory) ===
+    if(pass && !feedbackDone){
+      setTimeout(function(){
+        openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);
+      }, 800);
+    }
   }
 }
 
@@ -5035,7 +5056,7 @@ function openFeedbackForm(empName,empId,dept,desig,trnName,trnCat,trainer,comple
     '<textarea class="form-control-sm" id="fb_comments" rows="2" placeholder="Any other comments..."></textarea></div>'+
 
     // Submit
-    '<button class="btn btn-amber" style="width:100%;padding:12px;" onclick="saveFeedbackForm()"><span class="mat-ico">save</span> Save Feedback Form & Sync to Sheet</button>'+
+    '<button class="btn btn-amber" style="width:100%;padding:12px;" onclick="saveFeedbackForm()"><span class="mat-ico">save</span> Save Feedback & Upload IMSP 29 F05 to Drive</button>'+
     '</div>';
 
   openModal(modalHtml, '900px');
@@ -5108,6 +5129,250 @@ function saveFeedbackForm(){
 
   closeModal();
   toast('Feedback form saved for ' + ctx.empName + ' — ' + ctx.trnName, 'success', 5000);
+
+  // === UPLOAD IMSP 29 F05 PDF TO GOOGLE DRIVE ===
+  uploadFeedbackToDrive(feedback);
+}
+
+function ratingLabel(v){var m={5:'Strongly Agree',4:'Agree',3:'Neutral',2:'Disagree',1:'Strongly Disagree'};return m[v]||'';}
+function overallLabel(v){var m={5:'Excellent',4:'Good',3:'Average',2:'Poor',1:'Very Poor'};return m[v]||'';}
+
+function generateIMSP29F05HTML(fb){
+  var questions=[
+    'The training met my expectations.',
+    'I will be able to apply the knowledge learned.',
+    'The training objectives for each topic were identified and followed.',
+    'The content was organized and easy to follow.',
+    'The materials distributed were pertinent and useful.',
+    'The trainer was knowledgeable.',
+    'The quality of instruction was good.',
+    'The trainer met the training objectives.',
+    'Class participation and interaction were encouraged.',
+    'Adequate time was provided for questions and discussion.'
+  ];
+  var r=fb.ratings||[];
+  var ratingCols=['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
+
+  function markCell(val,expected){return val===expected?'<td style="border:1px solid #333;padding:8px 12px;text-align:center;font-size:13px;font-weight:700;color:#1a73e8;">&#9733;</td>':'<td style="border:1px solid #999;padding:8px 12px;text-align:center;font-size:11px;color:#999;">&#9675;</td>';}
+
+  var qRowsHtml='';
+  questions.forEach(function(q,idx){
+    var rv=r[idx]||0;
+    qRowsHtml+='<tr style="height:28px;">'+
+      '<td style="border:1px solid #333;padding:6px 10px;font-size:12px;width:55%;">'+(idx+1)+'. '+q+'</td>'+
+      markCell(rv,5)+markCell(rv,4)+markCell(rv,3)+markCell(rv,2)+markCell(rv,1)+
+      '</tr>';
+  });
+
+  var overallRow='';
+  var ov=fb.overall||0;
+  overallRow='<tr style="height:28px;">'+
+    '<td style="border:1px solid #333;padding:6px 10px;font-size:12px;font-weight:700;width:55%;">How do you rate the training overall?</td>'+
+    markCell(ov,5)+markCell(ov,4)+markCell(ov,3)+markCell(ov,2)+markCell(ov,1)+
+    '</tr>';
+
+  var ovLabels=['Excellent','Good','Average','Poor','Very Poor'];
+  var ovLabelRow='<tr><td style="border:1px solid #999;padding:4px;font-size:10px;"></td>';
+  ovLabels.forEach(function(l){ovLabelRow+='<td style="border:1px solid #999;padding:4px 8px;font-size:10px;text-align:center;color:#666;">'+l+'</td>';});
+  ovLabelRow+='</tr>';
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+
+    '@page{size:A4;margin:12mm 15mm;}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#222;margin:0;padding:0;}' +
+    'table{border-collapse:collapse;width:100%;}' +
+    '.header-table{width:100%;margin-bottom:8px;}' +
+    '.header-table td{padding:2px 4px;font-size:10px;vertical-align:top;}' +
+    '.company-name{font-size:15px;font-weight:700;color:#1a3a5c;}' +
+    '.doc-title{font-size:13px;font-weight:700;color:#b8860b;}' +
+    '.section-title{font-size:12px;font-weight:700;color:#1a3a5c;background:#f0f4f8;padding:6px 10px;border-left:3px solid #b8860b;margin:12px 0 8px 0;}' +
+    '.info-table{width:100%;margin-bottom:8px;}' +
+    '.info-table td{border:1px solid #ccc;padding:5px 8px;font-size:11px;}' +
+    '.info-table .label{font-weight:600;background:#f8f9fa;width:18%;color:#333;}' +
+    '.open-q{margin:8px 0;padding:6px 10px;border:1px solid #ddd;border-radius:4px;background:#fafafa;}' +
+    '.open-q .q-label{font-size:11px;font-weight:700;color:#333;margin-bottom:3px;}' +
+    '.open-q .q-answer{font-size:11px;color:#444;min-height:30px;padding:4px 0;border-bottom:1px dotted #ccc;}' +
+    '</style></head><body>'+
+
+    // Document header table
+    '<table class="header-table"><tr>'+
+    '<td rowspan="4" style="width:15%;text-align:center;vertical-align:middle;padding:8px;"><div style="font-size:22px;font-weight:700;color:#1a3a5c;">POM</div><div style="font-size:8px;color:#888;">Prestige Office<br>Management</div></td>'+
+    '<td class="company-name">Prestige Office Management Private Limited</td>'+
+    '<td style="text-align:right;font-size:10px;color:#555;">Document Number: <b>IMSP 29 F05</b></td>'+
+    '</tr><tr>'+
+    '<td style="font-size:11px;color:#555;">Integrated Management System</td>'+
+    '<td style="text-align:right;font-size:10px;color:#555;">Issued Date: 01/06/2024</td>'+
+    '</tr><tr>'+
+    '<td class="doc-title">Training Feedback Form</td>'+
+    '<td style="text-align:right;font-size:10px;color:#555;">Rev.02</td>'+
+    '</tr><tr>'+
+    '<td></td>'+
+    '<td style="text-align:right;font-size:10px;color:#555;">Revision Date: 01/08/2025</td>'+
+    '</tr></table>'+
+    '<hr style="border:none;border-top:2px solid #1a3a5c;margin:6px 0 10px 0;">' +
+
+    // Employee Information
+    '<div class="section-title">EMPLOYEE INFORMATION</div>'+
+    '<table class="info-table"><tr>'+
+    '<td class="label">Name:</td><td style="width:32%;">'+(fb.empName||'')+'</td>'+
+    '<td class="label">Employee ID:</td><td>'+(fb.empId||'')+'</td>'+
+    '<td class="label">Department:</td><td>'+(fb.dept||'')+'</td>'+
+    '</tr><tr>'+
+    '<td class="label">Job Title:</td><td>'+(fb.desig||'')+'</td>'+
+    '<td class="label">Date:</td><td>'+(fb.date||'')+'</td>'+
+    '<td class="label">Manager:</td><td>'+(fb.manager||'')+'</td>'+
+    '</tr><tr>'+
+    '<td class="label">Training Course:</td><td colspan="2">'+(fb.training||'')+'</td>'+
+    '<td class="label">Trainer:</td><td colspan="2">'+(fb.trainer||'')+'</td>'+
+    '</tr></table>'+
+
+    // Rating table
+    '<div class="section-title">Please indicate your impressions of the items listed below.</div>'+
+    '<table style="width:100%;border-collapse:collapse;">'+
+    '<tr style="background:#f0f4f8;">'+
+    '<th style="border:1px solid #333;padding:6px 10px;text-align:left;font-size:11px;width:55%;">Statement</th>'+
+    '<th style="border:1px solid #333;padding:6px 8px;font-size:10px;text-align:center;">Strongly Agree</th>'+
+    '<th style="border:1px solid #333;padding:6px 8px;font-size:10px;text-align:center;">Agree</th>'+
+    '<th style="border:1px solid #333;padding:6px 8px;font-size:10px;text-align:center;">Neutral</th>'+
+    '<th style="border:1px solid #333;padding:6px 8px;font-size:10px;text-align:center;">Disagree</th>'+
+    '<th style="border:1px solid #333;padding:6px 8px;font-size:10px;text-align:center;">Strongly Disagree</th>'+
+    '</tr>' +
+    qRowsHtml +
+    overallRow +
+    ovLabelRow +
+    '</table>' +
+
+    // Open-ended questions
+    '<div class="section-title">Comments</div>'+
+    '<div class="open-q"><div class="q-label">What did you enjoy most about the training?</div><div class="q-answer">'+(fb.enjoyed||'—')+'</div></div>'+
+    '<div class="open-q"><div class="q-label">Suggestions for improvement</div><div class="q-answer">'+(fb.suggestions||'—')+'</div></div>'+
+    '<div class="open-q"><div class="q-label">Additional Comments</div><div class="q-answer">'+(fb.comments||'—')+'</div></div>' +
+
+    // Footer
+    '<div style="margin-top:20px;display:flex;justify-content:space-between;font-size:10px;color:#888;border-top:1px solid #ddd;padding-top:8px;">'+
+    '<div>Test Score: '+(fb.score?fb.score+'%':'N/A')+' | Avg Rating: '+(fb.avgRating||'N/A')+'/5.0</div>'+
+    '<div>Generated: '+new Date().toLocaleString()+'</div>'+
+    '</div>'+
+
+    '</body></html>';
+}
+
+async function uploadFeedbackToDrive(fb){
+  var driveUrl=DB.settings.driveUploadUrl||'';
+  var folderId=DB.settings.driveFolderId||'';
+  if(!driveUrl){
+    console.log('[Drive] No upload URL configured — skipping Google Drive upload');
+    // Still generate downloadable PDF locally
+    generateLocalFeedbackPDF(fb);
+    return;
+  }
+  try{
+    toast('Uploading IMSP 29 F05 to Google Drive...','info',3000);
+    var htmlContent=generateIMSP29F05HTML(fb);
+    var payload={
+      action:'createDoc',
+      folderId:folderId,
+      fileName:'IMSP_29_F05_'+(fb.empName||'employee').replace(/\s+/g,'_')+'_'+(fb.training||'training').replace(/[^a-zA-Z0-9]/g,'_')+'_'+(fb.date||'').replace(/\//g,'-'),
+      html:htmlContent,
+      feedbackId:fb.id
+    };
+    // POST to Google Apps Script
+    var result=await new Promise(function(resolve,reject){
+      var fname='_gdrive_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
+      var iframe=document.createElement('iframe');
+      iframe.name=fname;iframe.style.display='none';
+      document.body.appendChild(iframe);
+      var form=document.createElement('form');
+      form.method='POST';form.action=driveUrl;form.target=fname;
+      var input=document.createElement('input');
+      input.type='hidden';input.name='json';input.value=JSON.stringify(payload);
+      form.appendChild(input);document.body.appendChild(form);
+      var done=false;
+      function cleanup(){
+        if(done)return;done=true;
+        try{document.body.removeChild(iframe);}catch(e){}
+        try{document.body.removeChild(form);}catch(e){}
+        resolve({ok:true});
+      }
+      iframe.onload=cleanup;
+      setTimeout(cleanup,15000);
+      form.submit();
+    });
+    toast('IMSP 29 F05 uploaded to Google Drive!','success',5000);
+  }catch(e){
+    console.error('[Drive] Upload error:',e);
+    toast('Drive upload failed — PDF generated locally','warning',5000);
+    generateLocalFeedbackPDF(fb);
+  }
+}
+
+function generateLocalFeedbackPDF(fb){
+  // Fallback: open HTML in new tab for user to print/save as PDF
+  var html=generateIMSP29F05HTML(fb);
+  var win=window.open('','_blank');
+  if(win){
+    win.document.write(html);
+    win.document.close();
+    setTimeout(function(){win.print();},500);
+  }
+}
+
+function showDriveScript(){
+  var box=document.getElementById('driveScriptBox');
+  if(!box)return;
+  if(box.style.display==='none'){
+    var scriptCode=`function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    if (data.action === 'createDoc') {
+      var folderId = data.folderId;
+      var fileName = data.fileName || 'IMSP_29_F05_Feedback';
+      var htmlContent = data.html;
+
+      // Create a Google Doc from HTML
+      var doc = DocumentApp.create(fileName);
+      var body = doc.getBody();
+      body.clear();
+
+      // Use the HTML content - extract text from HTML for the doc
+      var blob = HtmlService.createHtmlOutput(htmlContent).getBlob().getAs('application/pdf');
+
+      // Save PDF to the specified folder
+      var folder = DriveApp.getFolderById(folderId);
+      var pdfFile = folder.createFile(blob.setName(fileName + '.pdf'));
+
+      // Delete the temp Google Doc
+      DriveApp.getFileById(doc.getId()).setTrashed(true);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'OK',
+        fileId: pdfFile.getId(),
+        fileUrl: 'https://drive.google.com/file/d/' + pdfFile.getId() + '/view',
+        fileName: pdfFile.getName()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput(JSON.stringify({status:'error',msg:'Unknown action'}));
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      msg: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput('IMSP 29 F05 Drive Upload API is running. Use POST to upload feedback forms.');
+}`;
+    box.style.display='block';
+    box.innerHTML='<div style="position:relative;"><pre style="background:#1e1e1e;color:#d4d4d4;padding:14px;border-radius:var(--r-sm);font-size:10px;overflow-x:auto;max-height:300px;white-space:pre-wrap;line-height:1.5;border:1px solid var(--bdr);">'+scriptCode.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre><button class="btn btn-sm btn-amber" style="position:absolute;top:8px;right:8px;" onclick="navigator.clipboard.writeText(decodeURIComponent(\''+encodeURIComponent(scriptCode)+'\'));toast(\'Script copied to clipboard!\',\'success\');"><span class="mat-ico" style="font-size:12px;">content_copy</span> Copy</button></div>';
+  }else{
+    box.style.display='none';
+  }
+}
+
+function reuploadFeedbackToDrive(fbId){
+  var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});
+  if(!fb){toast('Feedback not found','error');return;}
+  uploadFeedbackToDrive(fb);
 }
 
 function buildFeedbackPayload(){
@@ -5440,7 +5705,28 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
           <button class="btn btn-outline" onclick="testSheetConnection()"><span class="mat-ico">wifi_tethering</span> Test</button>
         </div>
         <div id="syncStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
-        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (quiz results), <b>Employees</b> (master list + stats), <b>Trainings</b> (all trainings + progress), <b>Certificates</b> (all issued certs), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures). Each sync replaces the sheet data to stay in sync.</div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (quiz results), <b>Employees</b> (master list + stats), <b>Trainings</b> (all trainings + progress), <b>Certificates</b> (all issued certs), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback Forms</b> (IMSP 29 F05). Each sync replaces the sheet data to stay in sync.</div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title"><span class="mat-ico">cloud_upload</span> Google Drive — Feedback Form Upload (IMSP 29 F05)</div>
+        <div style="padding:10px 14px;background:rgba(66,133,244,.06);border:1px solid rgba(66,133,244,.2);border-radius:var(--r-sm);margin-bottom:12px;font-size:11px;line-height:1.6;display:flex;align-items:flex-start;gap:10px;">
+          <span class="mat-ico" style="color:var(--blue);font-size:18px;margin-top:2px;">info</span>
+          <div>After every training completion, the IMSP 29 F05 Feedback Form is generated as a PDF and uploaded to your Google Drive folder automatically. You need a separate Google Apps Script for Drive uploads.</div>
+        </div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Drive Folder ID</div>
+        <input class="form-control-sm" id="st_driveFolderId" placeholder="1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov" value="${DB.settings.driveFolderId||''}" style="width:100%;margin-bottom:8px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Target folder: <a href="https://drive.google.com/drive/folders/${DB.settings.driveFolderId||'1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov'}" target="_blank" style="color:var(--blue);text-decoration:underline;">Open in Google Drive</a></div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Drive Upload Script URL</div>
+        <input class="form-control-sm" id="st_driveUploadUrl" placeholder="https://script.google.com/macros/s/YOUR_DRIVE_SCRIPT_ID/exec" value="${DB.settings.driveUploadUrl||''}" style="width:100%;margin-bottom:8px;">
+        <div style="padding:10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);margin-bottom:8px;font-size:10.5px;color:var(--muted);line-height:1.6;">
+          <div style="font-weight:700;color:var(--amber);margin-bottom:4px;">SETUP INSTRUCTIONS:</div>
+          <div>1. Go to <a href="https://script.google.com" target="_blank" style="color:var(--blue);">script.google.com</a> → New Project</div>
+          <div>2. Paste the <b>Drive Upload Script</b> (click button below) → Save</div>
+          <div>3. Deploy → New Deployment → Web App → Execute as: <b>Me</b> → Access: <b>Anyone</b> → Deploy</div>
+          <div>4. Copy the deployment URL and paste above</div>
+        </div>
+        <button class="btn btn-outline" style="border-color:var(--blue);color:var(--blue);margin-bottom:10px;" onclick="showDriveScript()"><span class="mat-ico" style="font-size:14px;">code</span> Show Drive Upload Script</button>
+        <div id="driveScriptBox" style="display:none;"></div>
       </div>
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">backup</span> Data Management</div>
@@ -5478,6 +5764,8 @@ function saveSettings(){
   DB.settings.companyLogo=document.getElementById("st_logo")?.value||DB.settings.companyLogo;
   DB.settings.minCertScore=parseInt(document.getElementById("st_mincert")?.value)||70;
   DB.settings.sheetUrl=(document.getElementById("st_sheeturl")?.value||"").trim();
+  DB.settings.driveFolderId=(document.getElementById("st_driveFolderId")?.value||"").trim();
+  DB.settings.driveUploadUrl=(document.getElementById("st_driveUploadUrl")?.value||"").trim();
   var autoSyncEl=document.getElementById("st_sheetAutoSync");
   if(autoSyncEl) DB.settings.sheetAutoSync=autoSyncEl.checked;
   toast("Settings saved","success");saveDB();
