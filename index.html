@@ -3365,10 +3365,22 @@ async function deleteTraining(id){
   linkedCertNums.forEach(function(cnum){tombPromises.push(addToTombstone('certificates',cnum));});
   await Promise.all(tombPromises);
 
-  // === STEP 3: Delete from Firebase directly (best-effort) ===
+  // === STEP 3: Delete from Firebase directly — retry up to 3 times to guarantee removal ===
   if(firebaseReady){
-    try{await fbDB.collection('trainings').doc(String(id)).delete();}catch(e){}
+    try{await authAsAdmin();}catch(e){}
+    // Delete training doc
+    for(var retry=0;retry<3;retry++){
+      try{
+        await fbDB.collection('trainings').doc(String(id)).delete();
+        // Verify it's actually gone
+        var check=await fbDB.collection('trainings').doc(String(id)).get();
+        if(!check.exists)break;
+        console.warn('[deleteTraining] Doc still exists after delete, retry '+(retry+1));
+      }catch(e){console.warn('[deleteTraining] Firebase delete attempt '+(retry+1)+' error:',e);}
+    }
+    // Delete linked test results
     for(const tid of linkedTestIds){try{await fbDB.collection('testResults').doc(String(tid)).delete();}catch(e){}}
+    // Delete linked certificates
     for(const cnum of linkedCertNums){try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){}}
   }
 
