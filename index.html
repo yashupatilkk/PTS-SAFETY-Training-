@@ -7020,7 +7020,8 @@ function loadDB(){
     // FORCE clear all DB arrays — nothing old survives
     DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
     DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
-    DB.sops=[];DB.admins=[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}];
+    DB.sops=[];DB.feedbackForms=[];
+    DB.admins=[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}];
     _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
     console.log('[loadDB] All DB arrays force-cleared');
     // Note: Firebase wipe/block is handled in initApp() AFTER firebaseReady=true
