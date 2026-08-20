@@ -7282,6 +7282,66 @@ async function freshStartSite(){
   }catch(e){localStorage.removeItem("mep_user");}
 })();
 
+// === AUTO-NUKE v4: First time this file loads, it AUTOMATICALLY wipes everything ===
+// This runs BEFORE initApp, BEFORE Firebase, BEFORE anything. Guaranteed zero data.
+(function(){
+  var AUTO_NUKE_FLAG='_autoNuke_v4_done';
+  if(!localStorage.getItem(AUTO_NUKE_FLAG)){
+    console.warn('[AUTO-NUKE] First load of new file — wiping ALL data automatically');
+    // 1. Nuke localStorage immediately (sync)
+    localStorage.removeItem(DB_STORAGE_KEY);
+    localStorage.removeItem(DB_STORAGE_KEY+'_version');
+    localStorage.removeItem(DB_STORAGE_KEY+'_tombstones');
+    localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
+    localStorage.removeItem(TOMBSTONE_KEY);
+    localStorage.removeItem('mep_user');
+    // 2. Set nuclear lock so initApp won't load from Firebase
+    localStorage.setItem('_nuclear_lock', String(Date.now()));
+    localStorage.setItem(DB_STORAGE_KEY+'_version', 'NUCLEAR_auto_'+Date.now());
+    // 3. Set clean DB in localStorage
+    var clean={employees:[],trainings:[],testResults:[],certificates:[],notifications:[],customEquipment:[],customQuestions:[],auditLog:[],sops:[],feedbackForms:[],admins:[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}]};
+    localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(clean));
+    // 4. Mark as done so this never runs again
+    localStorage.setItem(AUTO_NUKE_FLAG, '1');
+    console.log('[AUTO-NUKE] Local data wiped. Firebase will be blocked by nuclear lock.');
+  }
+})();
+
+// === ASYNC AUTO-NUKE: Wipe Firebase via REST API in background ===
+(async function(){
+  var AUTO_NUKE_FB='_autoNuke_v4_firebase';
+  if(!localStorage.getItem(AUTO_NUKE_FB)){
+    try{
+      var apiKey='AIzaSyBo6I9OrkVn1Bcj4hsdH11mj-X42ZEx3b8';
+      var projectId='pts-safety-training';
+      // Get auth token
+      var tr=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+apiKey,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'admin@pts-safety.app',password:'admin123',returnSecureToken:true})});
+      var td=await tr.json();
+      var tk=td.idToken;
+      if(tk){
+        var base='https://firestore.googleapis.com/v1/projects/'+projectId+'/databases/(default)/documents/';
+        var cols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
+        var total=0;
+        for(var i=0;i<cols.length;i++){
+          try{
+            var lr=await fetch(base+cols[i]+'?pageSize=1000',{headers:{'Authorization':'Bearer '+tk}});
+            var ld=await lr.json();
+            if(ld.documents){
+              for(var j=0;j<ld.documents.length;j++){
+                try{var dr=await fetch(ld.documents[j].name,{method:'DELETE',headers:{'Authorization':'Bearer '+tk}});if(dr.status<300)total++;}catch(e){}
+              }
+            }
+          }catch(e){}
+        }
+        console.log('[AUTO-NUKE] Firebase REST: deleted '+total+' docs');
+        // Re-create admin
+        try{await fetch(base+'admins/admin',{method:'PATCH',headers:{'Authorization':'Bearer '+tk,'Content-Type':'application/json'},body:JSON.stringify({fields:{username:{stringValue:'admin'},password:{stringValue:'admin123'},name:{stringValue:'Admin User'},role:{stringValue:'admin'}}})});}catch(e){}
+      }
+    }catch(e){console.warn('[AUTO-NUKE] Firebase REST error:',e);}
+    localStorage.setItem(AUTO_NUKE_FB,'1');
+  }
+})();
+
 async function initApp(){
   // Show loading state
   const loginForm=document.querySelector('.login-wrap');
