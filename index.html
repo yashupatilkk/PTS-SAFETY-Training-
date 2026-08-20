@@ -900,7 +900,7 @@ let DB={
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"https://script.google.com/macros/s/AKfycbyn5NCt91JkixFDMG2-P86X30edpJUY5b0WYDF4-pGWRsf0d3gLsyk_p4rx4JsM0R6SXw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
-    driveFolderId:"1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov",driveUploadUrl:"",
+    driveFolderId:"1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov",driveUploadUrl:"https://script.google.com/macros/s/AKfycby1qkIZKvOLJ1S4OLvQwwJJZwlooEfQ5vKWkutaf9GM8EVkJ0ANR9raspBwAOmyrFmfuA/exec",
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -5260,22 +5260,25 @@ async function uploadFeedbackToDrive(fb){
   var driveUrl=DB.settings.driveUploadUrl||'';
   var folderId=DB.settings.driveFolderId||'';
   if(!driveUrl){
-    console.log('[Drive] No upload URL configured — skipping Google Drive upload');
-    // Still generate downloadable PDF locally
+    console.log('[Drive] No upload URL configured — opening print dialog');
     generateLocalFeedbackPDF(fb);
     return;
   }
   try{
     toast('Uploading IMSP 29 F05 to Google Drive...','info',3000);
-    var htmlContent=generateIMSP29F05HTML(fb);
+    var fileName='IMSP_29_F05_'+(fb.empName||'employee').replace(/\s+/g,'_')+'_'+(fb.training||'training').replace(/[^a-zA-Z0-9]/g,'_')+'_'+(fb.date||'').replace(/\//g,'-');
     var payload={
       action:'createDoc',
       folderId:folderId,
-      fileName:'IMSP_29_F05_'+(fb.empName||'employee').replace(/\s+/g,'_')+'_'+(fb.training||'training').replace(/[^a-zA-Z0-9]/g,'_')+'_'+(fb.date||'').replace(/\//g,'-'),
-      html:htmlContent,
-      feedbackId:fb.id
+      fileName:fileName,
+      feedback:{
+        empName:fb.empName,empId:fb.empId,dept:fb.dept,desig:fb.desig,
+        manager:fb.manager,training:fb.training,trainer:fb.trainer,
+        date:fb.date,score:fb.score,avgRating:fb.avgRating,
+        ratings:fb.ratings,overall:fb.overall,
+        enjoyed:fb.enjoyed,suggestions:fb.suggestions,comments:fb.comments
+      }
     };
-    // POST to Google Apps Script
     var result=await new Promise(function(resolve,reject){
       var fname='_gdrive_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
       var iframe=document.createElement('iframe');
@@ -5297,10 +5300,10 @@ async function uploadFeedbackToDrive(fb){
       setTimeout(cleanup,15000);
       form.submit();
     });
-    toast('IMSP 29 F05 uploaded to Google Drive!','success',5000);
+    toast('IMSP 29 F05 uploaded to Google Drive folder!','success',5000);
   }catch(e){
     console.error('[Drive] Upload error:',e);
-    toast('Drive upload failed — PDF generated locally','warning',5000);
+    toast('Drive upload failed — opening print dialog','warning',5000);
     generateLocalFeedbackPDF(fb);
   }
 }
@@ -5325,20 +5328,247 @@ function showDriveScript(){
     var data = JSON.parse(e.postData.contents);
     if (data.action === 'createDoc') {
       var folderId = data.folderId;
+      var fb = data.feedback || {};
       var fileName = data.fileName || 'IMSP_29_F05_Feedback';
-      var htmlContent = data.html;
 
-      // Create a Google Doc from HTML
+      // Create a properly formatted Google Doc matching IMSP 29 F05 template
       var doc = DocumentApp.create(fileName);
       var body = doc.getBody();
       body.clear();
 
-      // Use the HTML content - extract text from HTML for the doc
-      var blob = HtmlService.createHtmlOutput(htmlContent).getBlob().getAs('application/pdf');
+      // Page setup - A4
+      var pageWidth = body.getPageWidth();
+      var margin = 36; // 0.5 inch
+      body.setMarginLeft(margin);
+      body.setMarginRight(margin);
+      body.setMarginTop(margin);
+      body.setMarginBottom(margin);
 
-      // Save PDF to the specified folder
+      // Styles
+      var companyStyle = {};
+      companyStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      companyStyle[DocumentApp.Attribute.FONT_SIZE] = 14;
+      companyStyle[DocumentApp.Attribute.BOLD] = true;
+      companyStyle[DocumentApp.Attribute.FOREGROUND_COLOR] = '#1a3a5c';
+
+      var subStyle = {};
+      subStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      subStyle[DocumentApp.Attribute.FONT_SIZE] = 10;
+      subStyle[DocumentApp.Attribute.FOREGROUND_COLOR] = '#555555';
+
+      var docTitleStyle = {};
+      docTitleStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      docTitleStyle[DocumentApp.Attribute.FONT_SIZE] = 12;
+      docTitleStyle[DocumentApp.Attribute.BOLD] = true;
+      docTitleStyle[DocumentApp.Attribute.FOREGROUND_COLOR] = '#b8860b';
+
+      var sectionTitleStyle = {};
+      sectionTitleStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      sectionTitleStyle[DocumentApp.Attribute.FONT_SIZE] = 11;
+      sectionTitleStyle[DocumentApp.Attribute.BOLD] = true;
+      sectionTitleStyle[DocumentApp.Attribute.FOREGROUND_COLOR] = '#1a3a5c';
+      sectionTitleStyle[DocumentApp.Attribute.BACKGROUND_COLOR] = '#f0f4f8';
+
+      var labelStyle = {};
+      labelStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      labelStyle[DocumentApp.Attribute.FONT_SIZE] = 10;
+      labelStyle[DocumentApp.Attribute.BOLD] = true;
+
+      var valueStyle = {};
+      valueStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      valueStyle[DocumentApp.Attribute.FONT_SIZE] = 10;
+
+      var headerStyle = {};
+      headerStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      headerStyle[DocumentApp.Attribute.FONT_SIZE] = 9;
+      headerStyle[DocumentApp.Attribute.BOLD] = true;
+      headerStyle[DocumentApp.Attribute.FOREGROUND_COLOR] = '#ffffff';
+
+      var cellStyle = {};
+      cellStyle[DocumentApp.Attribute.FONT_FAMILY] = 'Arial';
+      cellStyle[DocumentApp.Attribute.FONT_SIZE] = 9;
+
+      // ===== HEADER TABLE =====
+      var headerTable = body.appendTable([]);
+      headerTable.setBorderWidth(0);
+      headerTable.setColumnWidth(0, 100);
+      headerTable.setColumnWidth(1, 350);
+      headerTable.setColumnWidth(2, 140);
+
+      var r0 = headerTable.appendTableRow();
+      var c0 = r0.getCell(0).appendParagraph('POM');
+      c0.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+      c0.getHeadingStyle().setFontSize(20);
+      r0.getCell(1).appendParagraph('Prestige Office Management Private Limited').setAttributes(companyStyle);
+      var r0c2 = r0.getCell(2).appendParagraph('Document Number: IMSP 29 F05');
+      r0c2.setAttributes(subStyle);
+      r0c2.setAlignment(DocumentApp.TextAlignment.RIGHT);
+
+      var r1 = headerTable.appendTableRow();
+      r1.getCell(0).appendParagraph('');
+      r1.getCell(1).appendParagraph('Integrated Management System').setAttributes(subStyle);
+      var r1c2 = r1.getCell(2).appendParagraph('Issued Date: 01/06/2024');
+      r1c2.setAttributes(subStyle);
+      r1c2.setAlignment(DocumentApp.TextAlignment.RIGHT);
+
+      var r2 = headerTable.appendTableRow();
+      r2.getCell(0).appendParagraph('');
+      r2.getCell(1).appendParagraph('Training Feedback Form').setAttributes(docTitleStyle);
+      var r2c2 = r2.getCell(2).appendParagraph('Rev.02');
+      r2c2.setAttributes(subStyle);
+      r2c2.setAlignment(DocumentApp.TextAlignment.RIGHT);
+
+      var r3 = headerTable.appendTableRow();
+      r3.getCell(0).appendParagraph('');
+      r3.getCell(1).appendParagraph('');
+      var r3c2 = r3.getCell(2).appendParagraph('Revision Date: 01/08/2025');
+      r3c2.setAttributes(subStyle);
+      r3c2.setAlignment(DocumentApp.TextAlignment.RIGHT);
+
+      // Separator line
+      body.appendHorizontalRule();
+
+      // ===== EMPLOYEE INFORMATION =====
+      body.appendParagraph('EMPLOYEE INFORMATION').setAttributes(sectionTitleStyle);
+
+      var infoTable = body.appendTable([]);
+      infoTable.setBorderWidth(1);
+      infoTable.setColumnWidth(0, 70);
+      infoTable.setColumnWidth(1, 140);
+      infoTable.setColumnWidth(2, 70);
+      infoTable.setColumnWidth(3, 130);
+      infoTable.setColumnWidth(4, 70);
+      infoTable.setColumnWidth(5, 150);
+
+      // Row 1: Name, Employee ID, Department
+      var ir1 = infoTable.appendTableRow();
+      ir1.getCell(0).appendParagraph('Name:').setAttributes(labelStyle);
+      ir1.getCell(1).appendParagraph(fb.empName || '').setAttributes(valueStyle);
+      ir1.getCell(2).appendParagraph('Employee ID:').setAttributes(labelStyle);
+      ir1.getCell(3).appendParagraph(fb.empId || '').setAttributes(valueStyle);
+      ir1.getCell(4).appendParagraph('Department:').setAttributes(labelStyle);
+      ir1.getCell(5).appendParagraph(fb.dept || '').setAttributes(valueStyle);
+
+      // Row 2: Job Title, Date, Manager
+      var ir2 = infoTable.appendTableRow();
+      ir2.getCell(0).appendParagraph('Job Title:').setAttributes(labelStyle);
+      ir2.getCell(1).appendParagraph(fb.desig || '').setAttributes(valueStyle);
+      ir2.getCell(2).appendParagraph('Date:').setAttributes(labelStyle);
+      ir2.getCell(3).appendParagraph(fb.date || '').setAttributes(valueStyle);
+      ir2.getCell(4).appendParagraph('Manager:').setAttributes(labelStyle);
+      ir2.getCell(5).appendParagraph(fb.manager || '').setAttributes(valueStyle);
+
+      // Row 3: Training Course, Trainer
+      var ir3 = infoTable.appendTableRow();
+      ir3.getCell(0).appendParagraph('Training Course:').setAttributes(labelStyle);
+      ir3.getCell(1).appendParagraph(fb.training || '').setAttributes(valueStyle);
+      ir3.getCell(2).appendParagraph('Trainer:').setAttributes(labelStyle);
+      var trnCell = ir3.getCell(3);
+      trnCell.merge();
+      trnCell.appendParagraph(fb.trainer || '').setAttributes(valueStyle);
+
+      body.appendParagraph('');
+
+      // ===== RATING TABLE =====
+      body.appendParagraph('Please indicate your impressions of the items listed below.').setAttributes(sectionTitleStyle);
+
+      var questions = [
+        'The training met my expectations.',
+        'I will be able to apply the knowledge learned.',
+        'The training objectives for each topic were identified and followed.',
+        'The content was organized and easy to follow.',
+        'The materials distributed were pertinent and useful.',
+        'The trainer was knowledgeable.',
+        'The quality of instruction was good.',
+        'The trainer met the training objectives.',
+        'Class participation and interaction were encouraged.',
+        'Adequate time was provided for questions and discussion.'
+      ];
+      var colHeaders = ['Strongly Agree', 'Agree', 'Neutral', 'Disagree', 'Strongly Disagree'];
+      var ratings = fb.ratings || [];
+
+      var qTable = body.appendTable([]);
+      qTable.setBorderWidth(1);
+      qTable.setColumnWidth(0, 260);
+      for (var c = 0; c < 5; c++) qTable.setColumnWidth(c + 1, 54);
+
+      // Header row
+      var qhr = qTable.appendTableRow();
+      var qhc0 = qhr.getCell(0).appendParagraph('Statement');
+      qhc0.setAttributes(headerStyle);
+      for (var c = 0; c < 5; c++) {
+        var hc = qhr.getCell(c + 1).appendParagraph(colHeaders[c]);
+        hc.setAttributes(headerStyle);
+        hc.setAlignment(DocumentApp.TextAlignment.CENTER);
+      }
+
+      // Question rows
+      for (var i = 0; i < questions.length; i++) {
+        var qr = qTable.appendTableRow();
+        qr.getCell(0).appendParagraph((i + 1) + '. ' + questions[i]).setAttributes(cellStyle);
+        var rv = ratings[i] || 0;
+        for (var c = 0; c < 5; c++) {
+          var mark = (rv === (5 - c)) ? '\u2605' : '\u25CB';
+          var mc = qr.getCell(c + 1).appendParagraph(mark);
+          mc.setAlignment(DocumentApp.TextAlignment.CENTER);
+          if (rv === (5 - c)) {
+            mc.setBold(true);
+          }
+        }
+      }
+
+      // Overall rating row
+      var orRow = qTable.appendTableRow();
+      var orCell = orRow.getCell(0).appendParagraph('How do you rate the training overall?');
+      orCell.setAttributes(labelStyle);
+      var ov = fb.overall || 0;
+      var ovLabels = ['Excellent', 'Good', 'Average', 'Poor', 'Very Poor'];
+      for (var c = 0; c < 5; c++) {
+        var mark = (ov === (5 - c)) ? '\u2605' : '\u25CB';
+        var mc = orRow.getCell(c + 1).appendParagraph(mark);
+        mc.setAlignment(DocumentApp.TextAlignment.CENTER);
+        if (ov === (5 - c)) mc.setBold(true);
+      }
+
+      // Overall label row
+      var olRow = qTable.appendTableRow();
+      olRow.getCell(0).appendParagraph('');
+      for (var c = 0; c < 5; c++) {
+        var olc = olRow.getCell(c + 1).appendParagraph(ovLabels[c]);
+        olc.setAlignment(DocumentApp.TextAlignment.CENTER);
+        olc.getAttributes()[DocumentApp.Attribute.FONT_SIZE] = 8;
+      }
+
+      body.appendParagraph('');
+
+      // ===== COMMENTS =====
+      body.appendParagraph('COMMENTS').setAttributes(sectionTitleStyle);
+
+      var openQs = [
+        {label: 'What did you enjoy most about the training?', value: fb.enjoyed || ''},
+        {label: 'Suggestions for improvement', value: fb.suggestions || ''},
+        {label: 'Additional Comments', value: fb.comments || ''}
+      ];
+
+      for (var q = 0; q < openQs.length; q++) {
+        var p = body.appendParagraph(openQs[q].label);
+        p.setAttributes(labelStyle);
+        var ans = body.appendParagraph(openQs[q].value || '\u2014');
+        ans.setAttributes(valueStyle);
+        body.appendParagraph('');
+      }
+
+      // Footer
+      body.appendHorizontalRule();
+      var footerText = 'Test Score: ' + (fb.score ? fb.score + '%' : 'N/A') + '  |  Avg Rating: ' + (fb.avgRating || 'N/A') + '/5.0  |  Generated: ' + new Date().toLocaleString();
+      var fp = body.appendParagraph(footerText);
+      fp.setAttributes(subStyle);
+      fp.setAlignment(DocumentApp.TextAlignment.CENTER);
+
+      // ===== EXPORT AS PDF TO DRIVE FOLDER =====
+      var pdfBlob = doc.getBlob().getAs('application/pdf');
       var folder = DriveApp.getFolderById(folderId);
-      var pdfFile = folder.createFile(blob.setName(fileName + '.pdf'));
+      var pdfFile = folder.createFile(pdfBlob.setName(fileName + '.pdf'));
 
       // Delete the temp Google Doc
       DriveApp.getFileById(doc.getId()).setTrashed(true);
@@ -5361,8 +5591,7 @@ function showDriveScript(){
 
 function doGet(e) {
   return ContentService.createTextOutput('IMSP 29 F05 Drive Upload API is running. Use POST to upload feedback forms.');
-}`;
-    box.style.display='block';
+}`;    box.style.display='block';
     box.innerHTML='<div style="position:relative;"><pre style="background:#1e1e1e;color:#d4d4d4;padding:14px;border-radius:var(--r-sm);font-size:10px;overflow-x:auto;max-height:300px;white-space:pre-wrap;line-height:1.5;border:1px solid var(--bdr);">'+scriptCode.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre><button class="btn btn-sm btn-amber" style="position:absolute;top:8px;right:8px;" onclick="navigator.clipboard.writeText(decodeURIComponent(\''+encodeURIComponent(scriptCode)+'\'));toast(\'Script copied to clipboard!\',\'success\');"><span class="mat-ico" style="font-size:12px;">content_copy</span> Copy</button></div>';
   }else{
     box.style.display='none';
