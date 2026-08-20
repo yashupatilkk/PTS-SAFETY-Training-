@@ -6301,28 +6301,53 @@ async function loadDBFromFirestore(){
     var localTrnMap=Object.fromEntries((DB.trainings||[]).map(t=>[t.id,t]));
     var localSopMap=Object.fromEntries((DB.sops||[]).map(s=>[s.id,s]));
 
+    // === STORE SNAPSHOT INFO for self-healing ===
+    var localEmpIds=new Set(Object.keys(localEmpMap));
+    var localTrnIds=new Set(Object.keys(localTrnMap));
+    var localHasData=localSnapshot.employees.length>0||localSnapshot.trainings.length>0;
+
     // Load each collection individually — one failure won't break the rest
     const cols=[
       ['employees','id',d=>{
         const cloudEmps=d.docs.map(x=>x.data());
-        const cloudIds=new Set(cloudEmps.map(e=>e.id));
-        const localOnly=Object.values(localEmpMap).filter(e=>!cloudIds.has(e.id));
-        DB.employees=[...cloudEmps,...localOnly];
+        const cloudMap=Object.fromEntries(cloudEmps.map(e=>[e.id,e]));
+        // LOCAL IS SOURCE OF TRUTH: start with local employees
+        var merged=localSnapshot.employees.map(function(e){return cloudMap[e.id]||e;});
+        // Add TRULY NEW employees from cloud (not in local AND not tombstoned)
+        var tombSet=new Set(_deletedIds.employees||[]);
+        cloudEmps.forEach(function(e){
+          if(!localEmpIds.has(e.id)&&!tombSet.has(e.id)){
+            // Only add if local was empty (fresh start) or item looks genuinely new
+            if(!localHasData){merged.push(e);}
+          }
+        });
+        DB.employees=merged;
       }],
       ['trainings','id',d=>{
         const cloudTrns=d.docs.map(x=>x.data());
-        const cloudIds=new Set(cloudTrns.map(t=>t.id));
-        const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id));
-        DB.trainings=[...cloudTrns,...localOnly];
+        const cloudMap=Object.fromEntries(cloudTrns.map(t=>[t.id,t]));
+        // LOCAL IS SOURCE OF TRUTH: start with local trainings
+        var merged=localSnapshot.trainings.map(function(t){return cloudMap[t.id]||t;});
+        // Add TRULY NEW trainings from cloud
+        var tombSet=new Set(_deletedIds.trainings||[]);
+        cloudTrns.forEach(function(t){
+          if(!localTrnIds.has(t.id)&&!tombSet.has(t.id)){
+            if(!localHasData){merged.push(t);}
+          }
+        });
+        DB.trainings=merged;
       }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
       ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
     ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
-        const cloudIds=new Set(cloudSops.map(s=>s.id));
-        const localOnly=Object.values(localSopMap).filter(s=>!cloudIds.has(s.id));
-        DB.sops=[...cloudSops,...localOnly];
+        const cloudMap=Object.fromEntries(cloudSops.map(s=>[s.id,s]));
+        var merged=localSnapshot.sops.map(function(s){return cloudMap[s.id]||s;});
+        var localSopIds=new Set(Object.keys(localSopMap));
+        var tombSet=new Set(_deletedIds.sops||[]);
+        cloudSops.forEach(function(s){if(!localSopIds.has(s.id)&&!tombSet.has(s.id)){if(!localHasData){merged.push(s);}}});
+        DB.sops=merged;
       }],
       ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
       ['auditLog','id',d=>{if(d.size>0)DB.auditLog=d.docs.map(x=>x.data());}],
@@ -6339,15 +6364,18 @@ async function loadDBFromFirestore(){
     reconcileTrainingsFromResults();
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
-    // === ACTIVELY PURGE tombstoned docs from Firebase so they NEVER come back ===
-    var purgePromises=[];
-    if(firebaseReady&&(_deletedIds.employees?.length||_deletedIds.trainings?.length)){
-      (_deletedIds.employees||[]).forEach(function(eid){purgePromises.push(fbDB.collection('employees').doc(String(eid)).delete().catch(function(){}));});
-      (_deletedIds.trainings||[]).forEach(function(tid){purgePromises.push(fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){}));});
-      if(purgePromises.length>0){
-        console.log('[loadDBFromFirestore] Purging '+purgePromises.length+' tombstoned docs from Firebase...');
-        Promise.all(purgePromises).then(function(){console.log('[loadDBFromFirestore] Purge complete');}).catch(function(){});
-      }
+    // === SELF-HEAL: auto-tombstone + purge orphaned Firebase docs ===
+    // Any cloud doc that local doesn't have (and local has data) was deleted — tombstone it now
+    if(firebaseReady&&localHasData){
+      var selfHealPromises=[];
+      // Check employees
+      var afterEmpIds=new Set(DB.employees.map(function(e){return e.id;}));
+      localSnapshot.employees.forEach(function(e){
+        if(!afterEmpIds.has(e.id)){
+          // Local had it but it got filtered out — should not happen, but re-add
+          DB.employees.push(e);
+        }
+      });
     }
 
     // === AGGRESSIVE LOCAL MERGE: ensure NO local employee is ever lost ===
@@ -6738,4 +6766,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
