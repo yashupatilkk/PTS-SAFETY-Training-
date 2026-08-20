@@ -2717,7 +2717,7 @@ function renderEmpTrainings(){
     <div class="section-header"><div class="section-title">My <span>Trainings</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
       <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-      <div><b>Video Required:</b> Watch 90% of the YouTube video to unlock the test. Forwarding/skipping will NOT be counted. You can only take the test <b>one time</b> after completing the video.</div>
+      <div><b>Training Steps:</b> 1) Watch 90% of video (if any) → 2) Fill the Feedback Form (mandatory) → 3) Take the Test. Forwarding/skipping will NOT be counted. You can only take the test <b>one time</b> after completing feedback.</div>
     </div>
     <div class="training-cards">
       ${myTrns.map(t=>{
@@ -2734,7 +2734,11 @@ function renderEmpTrainings(){
         const alreadyTested=myRes.length>0&&!isExpired24h;
         const videoProgress=((t.videoProgress||{})[empId])||0;
         const videoCompleted=videoProgress>=90;
-        const canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
+        const feedbackFilled=!!((DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===t.name;}));
+        const videoReady=!hasVideo||videoCompleted;
+        const showFeedbackBtn=videoReady&&!alreadyTested&&!feedbackFilled;
+        const showTestBtn=videoReady&&!alreadyTested&&feedbackFilled;
+        const canTakeTest=showTestBtn;
         return`<div class="training-card">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
@@ -2765,9 +2769,11 @@ function renderEmpTrainings(){
               </div>
               ${!videoCompleted?`<div id="trnVidLock_${t.id}" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);">
                 <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% — forwarding/skipping not counted
-              </div>`:`<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);">
-                <span class="mat-ico" style="font-size:13px;">check_circle</span> Video completed! You can now take the test.
-              </div>`}
+              </div>`:showFeedbackBtn?`<div style="padding:5px 10px;background:rgba(62,160,232,.08);border-left:3px solid var(--blue);border-radius:0 8px 8px 0;font-size:11px;color:var(--blue);">
+                <span class="mat-ico" style="font-size:13px;">assignment</span> Video done! Fill feedback form to unlock the test.
+              </div>`:showTestBtn?`<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);">
+                <span class="mat-ico" style="font-size:13px;">check_circle</span> Ready! You can now take the test.
+              </div>`:``}
             </div>
             `:""}
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:6px;">
@@ -2776,8 +2782,10 @@ function renderEmpTrainings(){
             </div>
             ${myRes.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Last score: <b style="color:${bestRes.pass?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}${isExpired24h&&myPassRes.length>0?" · <span style=\"color:var(--orange);\">Status expired after 24hrs</span>":""}</div>`:``}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-              ${canTakeTest?`
-                <button id="trnVidTestBtn_${t.id}" class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')" ${!videoCompleted?"disabled style=\"opacity:0.5;cursor:not-allowed;\"":videoCompleted?"style=\"animation:pulseGlow 1.5s ease-in-out infinite;\"":""}><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
+              ${showFeedbackBtn?`
+                <button class="btn btn-sm" style="background:rgba(62,160,232,.15);border:1px solid var(--blue);color:var(--blue);" onclick="openPreTestFeedback('${t.id}')"><span class="mat-ico" style="font-size:11px;">rate_review</span> Fill Feedback Form (Required)</button>
+              `:showTestBtn?`
+                <button id="trnVidTestBtn_${t.id}" class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')" style="animation:pulseGlow 1.5s ease-in-out infinite;"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               `:alreadyTested&&!done?`<div style="padding:4px 10px;background:rgba(232,72,58,.08);border-radius:6px;font-size:11px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">block</span> Test taken (score: ${bestRes.score}%)</div>`:done?`<div style="padding:4px 10px;background:rgba(62,207,142,.08);border-radius:6px;font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">verified</span> Training completed</div>`:""}
               ${done&&myRes.find(r=>r.cert)?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
             </div>
@@ -3656,6 +3664,27 @@ function initTrnVideoTracker(ytVideoId,trnId,empId){
 /* ============================================================
    START QUIZ FOR A SPECIFIC TRAINING (Employee)
 ============================================================ */
+function openPreTestFeedback(trnId){
+  var t=DB.trainings.find(function(x){return x.id===trnId;});
+  if(!t){toast('Training not found','error');return;}
+  var empId=currentUser.id;
+  var empName=currentUser.name||currentUser.id;
+  var dept=currentUser.dept||'';
+  var desig=currentUser.desig||'';
+  var todayStr=new Date().toISOString().split('T')[0];
+  // Check if already filled
+  var existing=(DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===t.name;});
+  if(existing){
+    toast('Feedback already submitted for this training. You can take the test now.','info');
+    renderEmpTrainings();
+    return;
+  }
+  _preTestFeedbackTrnId=trnId;
+  openFeedbackForm(empName,empId,dept,desig,t.name,t.cat,t.trainer||'',todayStr,0);
+}
+
+var _preTestFeedbackTrnId=null;
+
 function startQuizForTrn(trnId){
   var t=DB.trainings.find(function(x){return x.id===trnId;});
   if(!t){toast('Training not found','error');return;}
@@ -3663,6 +3692,15 @@ function startQuizForTrn(trnId){
   var empId=currentUser.id;
   var existingResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
   if(existingResults.length>0){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only.','error');return;}
+  // MANDATORY: Check if feedback form is filled before allowing test (employees only)
+  if(!isAdmin){
+    var feedbackDone=(DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===t.name;});
+    if(!feedbackDone){
+      toast('Please fill the Training Feedback Form first! It is mandatory before taking the test.','error',5000);
+      renderEmpTrainings();
+      return;
+    }
+  }
   // Check video progress if YouTube link exists
   var ytId=extractYoutubeId(t.youtubeLink||'');
   if(ytId){
@@ -3844,7 +3882,7 @@ function renderQuizMenu(){
       </div>
       <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
         <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-        <div>Click a category below to take an online test. For training-specific tests (with video), go to the <b>Trainings</b> page. Each training test is <b>one-time only</b> after 90% video watch.</div>
+        <div>Click a category below to take a general practice test. For <b>training-specific tests</b> (with video + feedback requirement), go to the <b>Trainings</b> page. Training tests require feedback form before the test.</div>
       </div>
       <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>Take a Test by Category</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:20px;">
@@ -4085,15 +4123,9 @@ function submitQuiz(){
     var _quizFbCtx={empName:empName,empId:empId,dept:dept,desig:currentUser.desig||"",trnName:quizState.training,trnCat:quizState.category,trainer:trnMatch?trnMatch.trainer||"":"",completedDate:today,score:score};
   }
   quizState.active=false;
-  // === MANDATORY FEEDBACK: Check if already filled for this training+employee ===
+  // === CHECK FEEDBACK STATUS ===
   var feedbackAlreadyFilled = (DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===quizState.training;});
   var feedbackDone = !!feedbackAlreadyFilled;
-  var fbBtnHtml = '';
-  if(pass && !feedbackDone){
-    fbBtnHtml = '<button class="btn btn-amber" id="openFeedbackFromQuiz" style="padding:12px 24px;font-size:14px;font-weight:700;"><span class="mat-ico">rate_review</span> Fill Training Feedback Form (Required)</button>';
-  } else if(pass && feedbackDone){
-    fbBtnHtml = '<div style="padding:10px 16px;background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.3);border-radius:var(--r-sm);font-size:12px;color:var(--green);display:flex;align-items:center;gap:8px;"><span class="mat-ico">check_circle</span> Training Feedback Form already submitted on '+(feedbackAlreadyFilled.date||'recorded')+'</div>';
-  }
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
       <div class="result-card">
@@ -4115,10 +4147,9 @@ function submitQuiz(){
         </div>`:""}
         ${!pass?`<div style="margin-top:10px;font-size:12px;color:var(--red);">Required: ${passing}% · Your score: ${score}% · Shortfall: ${passing-score}%</div>`:""}
       </div>
-      ${pass&&!feedbackDone?`<div style="background:rgba(66,133,244,.08);border:2px solid rgba(66,133,244,.3);border-radius:var(--r);padding:16px;margin-bottom:14px;text-align:center;">
-        <div style="font-weight:700;font-size:14px;color:var(--blue);margin-bottom:6px;"><span class="mat-ico" style="vertical-align:middle;font-size:18px;">assignment</span> Training Feedback Form Required</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">IMSP 29 F05 — Please fill the feedback form to complete this training. Your response will be saved to Google Drive.</div>
-        ${fbBtnHtml}
+      ${pass&&feedbackDone?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.3);border-radius:var(--r);padding:14px;margin-bottom:14px;text-align:center;">
+        <div style="font-weight:700;font-size:13px;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="vertical-align:middle;font-size:18px;">check_circle</span> Training Feedback Form Submitted</div>
+        <div style="font-size:11px;color:var(--muted);">IMSP 29 F05 — Feedback submitted on ${feedbackAlreadyFilled.date||'recorded'} · Avg Rating: ${feedbackAlreadyFilled.avgRating||'N/A'}/5</div>
       </div>`:''}
       <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:14px;">
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:12px;">Answer Review</div>
@@ -4133,8 +4164,8 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        ${pass?`<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> ${feedbackDone?'View Feedback':'Fill Training Feedback Form'}</button>`:""}
-        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${quizState.training||""}')" style="border-color:var(--amber);color:var(--amber);"><span class="mat-ico">refresh</span> Retake Test</button><div style="padding:4px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;color:var(--muted);">Test expires after 24hrs</div>`}
+        ${pass&&feedbackDone?`<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> View Feedback Form</button>`:""}
+        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${quizState.training||""} ')" style="border-color:var(--amber);color:var(--amber);"><span class="mat-ico">refresh</span> Retake Test</button><div style="padding:4px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;color:var(--muted);">Test expires after 24hrs</div>`}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
     </div>
@@ -4142,19 +4173,13 @@ function submitQuiz(){
   if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
   else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
-  // Bind feedback button click
+  // Bind feedback button click (view-only since feedback was already filled pre-test)
   var fbBtn=document.getElementById("openFeedbackFromQuiz");
   if(fbBtn&&typeof _quizFbCtx!=="undefined"&&_quizFbCtx){
     fbBtn.onclick=function(e){
       e.preventDefault();e.stopPropagation();
       openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);
     };
-    // === AUTO-OPEN feedback modal if not yet filled (mandatory) ===
-    if(pass && !feedbackDone){
-      setTimeout(function(){
-        openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);
-      }, 800);
-    }
   }
 }
 
@@ -5177,6 +5202,17 @@ function saveFeedbackForm(){
 
   closeModal();
   toast('Feedback form saved for ' + ctx.empName + ' — ' + ctx.trnName, 'success', 5000);
+
+  // If this was a pre-test feedback, refresh the training list to unlock the test button
+  if(_preTestFeedbackTrnId){
+    var savedTrnId=_preTestFeedbackTrnId;
+    _preTestFeedbackTrnId=null;
+    // Refresh employee trainings view to show "Take Test" button
+    if(!isAdmin && currentView==='trainings'){
+      renderEmpTrainings();
+    }
+    toast('Feedback submitted! You can now take the test.','success',4000);
+  }
 
   // === UPLOAD IMSP 29 F05 PDF TO GOOGLE DRIVE ===
   uploadFeedbackToDrive(feedback);
@@ -7063,57 +7099,59 @@ async function resetDBToDefault(){
   // Step 1: Clear ALL Firebase collections — delete one by one with retry
   if(firebaseReady){
     try{
-      // Use CURRENT auth (admin is already logged in)
-      var user=fbAuth.currentUser;
-      if(!user){try{await authAsAdmin();}catch(e){}}
+      // Authenticate — MUST succeed or nothing gets deleted
+      var authOk=false;
+      for(var authTry=0;authTry<3;authTry++){
+        try{
+          await authAsAdmin();
+          if(fbAuth.currentUser){authOk=true;break;}
+        }catch(ae){console.warn('[NUCLEAR] Auth attempt '+(authTry+1)+' failed:',ae.message);}
+      }
+      if(!authOk){toast('Admin authentication failed — cannot delete cloud data. Check your connection.','error',8000);return;}
       var cols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
       var totalDeleted=0;
+      var failCols=[];
       for(var ci=0;ci<cols.length;ci++){
         var colName=cols[ci];
         try{
-          var snap=await fbDB.collection(colName).get();
-          var docs=snap.docs;
-          for(var di=0;di<docs.length;di++){
-            var doc=docs[di];
-            var deleted=false;
-            // Try delete up to 3 times
-            for(var retry=0;retry<3;retry++){
-              try{
-                await doc.ref.delete();
-                // Verify
-                var check=await doc.ref.get();
-                if(!check.exists){deleted=true;totalDeleted++;break;}
-              }catch(delErr){}
-            }
-            if(!deleted){
-              console.error('[NUCLEAR] Failed to delete '+colName+'/'+doc.id);
+          // TWO passes: delete, then verify empty
+          for(var pass=0;pass<2;pass++){
+            var snap=await fbDB.collection(colName).get();
+            var docs=snap.docs;
+            for(var di=0;di<docs.length;di++){
+              var doc=docs[di];
+              var deleted=false;
+              for(var retry=0;retry<3;retry++){
+                try{
+                  await doc.ref.delete();
+                  var check=await doc.ref.get();
+                  if(!check.exists){deleted=true;totalDeleted++;break;}
+                }catch(delErr){}
+              }
+              if(!deleted){failCols.push(colName+'/'+doc.id);}
             }
           }
-          console.log('[NUCLEAR] '+colName+': '+docs.length+' docs processed');
+          console.log('[NUCLEAR] '+colName+': done');
         }catch(colErr){console.warn('[NUCLEAR] Error reading '+colName+':',colErr);}
       }
       // Delete admins then re-create default
-      try{
-        var admSnap=await fbDB.collection('admins').get();
-        for(var ai=0;ai<admSnap.docs.length;ai++){try{await admSnap.docs[ai].ref.delete();}catch(e){}}
-      }catch(e){}
+      try{var admSnap=await fbDB.collection('admins').get();for(var ai=0;ai<admSnap.docs.length;ai++){try{await admSnap.docs[ai].ref.delete();}catch(e){}}}catch(e){}
       // Delete config
-      try{
-        var cfgSnap=await fbDB.collection('config').get();
-        for(var cfgi=0;cfgi<cfgSnap.docs.length;cfgi++){try{await cfgSnap.docs[cfgi].ref.delete();}catch(e){}}
-      }catch(e){}
+      try{var cfgSnap=await fbDB.collection('config').get();for(var cfgi=0;cfgi<cfgSnap.docs.length;cfgi++){try{await cfgSnap.docs[cfgi].ref.delete();}catch(e){}}}catch(e){}
       // Re-create admin in Firestore
       await fbDB.collection('admins').doc('admin').set({username:'admin',password:'admin123',name:'Admin User',role:'admin'});
-      // Re-create config/meta
-      await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString()});
-      toast('Firebase wiped! '+totalDeleted+' docs deleted. Reloading...','success',3000);
+      // Set nuclear flag in config — initApp will check this to SKIP loading
+      await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:'NUCLEAR_'+Date.now(),resetTime:new Date().toISOString(),nuclearReset:true});
+      var msg='Firebase wiped! '+totalDeleted+' docs deleted.';
+      if(failCols.length>0)msg+=' WARNING: '+failCols.length+' docs could not be deleted.';
+      toast(msg,'success',5000);
     }catch(e){
-      toast('Firebase error: '+e.message,'error',5000);
+      toast('Firebase error: '+e.message,'error',8000);
       console.error('[NUCLEAR] Fatal error:',e);
     }
   }
-  // Step 2: Set version key + write clean DB to localStorage
-  localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+  // Step 2: Write clean DB to localStorage with NUCLEAR version to force initApp skip Firebase load
+  localStorage.setItem(DB_STORAGE_KEY+'_version','NUCLEAR_'+Date.now());
   var cleanDB={employees:[],trainings:[],testResults:[],certificates:[],notifications:[],customEquipment:[],customQuestions:[],auditLog:[],sops:[],feedbackForms:[],admins:[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}]};
   localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(cleanDB));
   localStorage.removeItem(TOMBSTONE_KEY);
@@ -7214,19 +7252,46 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
-    // === VERSION CHECK: fresh start — skip loading old Firebase data ===
+    // === VERSION CHECK: fresh start / nuclear reset — skip loading old Firebase data ===
     var storedVersion=localStorage.getItem(DB_STORAGE_KEY+'_version');
+    var isNuclear=(storedVersion&&String(storedVersion).indexOf('NUCLEAR_')===0);
     var needsReset=(storedVersion!==DB_VERSION);
-    if(needsReset){
+    if(isNuclear){
+      console.warn('[initApp] NUCLEAR reset detected — wiping Firebase again and starting completely fresh');
+    }else if(needsReset){
       console.warn('[initApp] Version mismatch ("'+storedVersion+'" vs "'+DB_VERSION+'") — SKIPPING Firebase load, starting fresh');
     }
-    if(!needsReset){
+    if(!needsReset && !isNuclear){
       // Normal load from Firebase
       cleanupSampleDataFromCloud();
       var loadResult=await loadDBFromFirestore();
       if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
         fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
       }
+    }else if(isNuclear){
+      // NUCLEAR RESET MODE: wipe Firebase completely, do NOT load anything
+      _skipCloudLoad=true;
+      try{await authAsAdmin();}catch(e){}
+      DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
+      DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
+      DB.sops=[];DB.feedbackForms=[];
+      try{
+        var nukeCols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','auditLog','feedbackForms','videos'];
+        for(var ni=0;ni<nukeCols.length;ni++){
+          var nSnap=await fbDB.collection(nukeCols[ni]).get();
+          for(var nd=0;nd<nSnap.docs.length;nd++){try{await nSnap.docs[nd].ref.delete();}catch(de){}}
+        }
+        try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
+        console.log('[nuclear] All Firebase collections wiped on reload');
+      }catch(nukeErr){console.warn('[nuclear] Wipe error:',nukeErr);}
+      // Re-create admin + config
+      try{
+        await fbDB.collection('admins').doc('admin').set({username:'admin',password:'admin123',name:'Admin User',role:'admin'});
+        await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString(),nuclearReset:true});
+      }catch(e){}
+      try{saveDB();}catch(e){}
+      localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+      _skipCloudLoad=false;
     }else{
       // RESET MODE: Check if another device already did the reset
       _skipCloudLoad=true;
