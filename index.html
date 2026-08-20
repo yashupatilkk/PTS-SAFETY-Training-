@@ -1549,14 +1549,28 @@ async function doLogin(){
       if(!emp&&firebaseReady&&!_skipCloudLoad){
         try{
           toast('Checking cloud...','info',2000);
+          await loadTombstonesFromCloud();
+          applyTombstones();
           var empSnap=await fbDB.collection('employees').get();
           if(empSnap.size>0){
-            var cloudEmps=empSnap.docs.map(function(x){return x.data();});
+            var empTombSet=new Set(_deletedIds.employees||[]);
+            var cloudEmps=empSnap.docs.map(function(x){return x.data();}).filter(function(e){return !empTombSet.has(e.id);});
             var cloudIds=new Set(cloudEmps.map(function(e){return e.id;}));
             var localOnly=DB.employees.filter(function(e){return !cloudIds.has(e.id);});
             DB.employees=cloudEmps.concat(localOnly);
-            await loadTombstonesFromCloud();
             applyTombstones();
+            // Also reload trainings from cloud and filter tombstones
+            try{
+              var trnSnap=await fbDB.collection('trainings').get();
+              if(trnSnap.size>0){
+                var trnTombSet=new Set(_deletedIds.trainings||[]);
+                var cloudTrns=trnSnap.docs.map(function(x){return x.data();}).filter(function(t){return !trnTombSet.has(t.id);});
+                var trnCloudIds=new Set(cloudTrns.map(function(t){return t.id;}));
+                var trnLocalOnly=DB.trainings.filter(function(t){return !trnCloudIds.has(t.id);});
+                DB.trainings=cloudTrns.concat(trnLocalOnly);
+                applyTombstones();
+              }
+            }catch(trnErr){console.warn('[doLogin] trainings cloud reload skipped:',trnErr);}
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
             emp=DB.employees.find(function(e){return e.id===empId;});
           }
@@ -1627,10 +1641,19 @@ async function showForgot(){
   if(!emp&&firebaseReady){
     try{
       toast('Looking up '+empId+' in cloud...','info',2000);
+      await loadTombstonesFromCloud();
+      const empTombSet=new Set(_deletedIds.employees||[]);
+      const localIds=new Set(DB.employees.map(e=>e.id));
       const snap=await fbDB.collection('employees').get();
-      if(snap.size>0){DB.employees=snap.docs.map(x=>x.data());await loadTombstonesFromCloud();applyTombstones();}
+      if(snap.size>0){
+        var cloudEmps=snap.docs.map(x=>x.data()).filter(e=>!empTombSet.has(e.id));
+        var cloudIds=new Set(cloudEmps.map(e=>e.id));
+        var localOnly=DB.employees.filter(e=>!cloudIds.has(e.id));
+        DB.employees=cloudEmps.concat(localOnly);
+        applyTombstones();
+      }
       emp=DB.employees.find(e=>e.id===empId);
-    }catch(e){}
+    }catch(e){console.warn('[showForgot] error:',e);}
   }
   if(!emp){toast('Employee '+empId+' not found. Ask admin to add you.','error',4000);return;}
   toast('Found: '+emp.name+'. You can login with your Name ("'+emp.name+'") or Password.','success',5000);
@@ -1726,6 +1749,7 @@ function doLogout(){
   toast("Logged out successfully","info");
 }
 function startApp(){
+  applyTombstones();
   document.getElementById("loginPage").style.display="none";
   document.getElementById("mainArea").style.display="flex";
   document.getElementById("sidebarAvatar").textContent=avatarInitials(currentUser.name||currentUser.username);
@@ -1933,7 +1957,8 @@ function renderDashboard(){
 }
 function renderEmpDashboard(){
   const empId=currentUser.id;
-  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
+  const activeTrnIds=new Set(_deletedIds.trainings||[]);
+  const myTrns=DB.trainings.filter(t=>!activeTrnIds.has(t.id)).filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
   const myResults=DB.testResults.filter(r=>r.empId===empId);
   const myPassed=myResults.filter(r=>r.pass).length;
   const myFailed=myResults.filter(r=>!r.pass).length;
@@ -2676,7 +2701,8 @@ function renderTrainings(){
 }
 function renderEmpTrainings(){
   const empId=currentUser.id;
-  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
+  const activeTrnIds=new Set(_deletedIds.trainings||[]);
+  const myTrns=DB.trainings.filter(t=>!activeTrnIds.has(t.id)).filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
   document.getElementById("view-trainings").innerHTML=`
     <div class="section-header"><div class="section-title">My <span>Trainings</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
