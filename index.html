@@ -1003,9 +1003,9 @@ async function fbSaveSettings(){
 }
 
 async function enableCloudSync(){
-  if(!confirm('Enable Cloud Sync?\n\nThis will allow data to load from Firebase again.\n\nIMPORTANT: Before enabling, make sure you have:\n1. Fixed Firebase Security Rules (allow read/write)\n2. Deleted old data from Firebase Console\n\nIf old data still exists in Firebase, it will be loaded!\n\nContinue?'))return;
+  if(!confirm('Remove Nuclear Reset Block?\n\nThis will allow ALL data (including old test results) to load from Firebase again.\n\nMake sure you have already deleted old test results and certificates from Firebase Console!\n\nContinue?'))return;
   localStorage.removeItem('_nuclearResetDone');
-  toast('Cloud sync ENABLED — reloading page...','success',3000);
+  toast('Block removed — full cloud sync re-enabled. Reloading...','success',3000);
   setTimeout(function(){location.reload();},1500);
 }
 
@@ -1348,7 +1348,7 @@ async function forceSyncFromCloud(){
 // Auto-sync: PUSH to cloud + Admin pulls employee results
 function startAutoSync(){
   if(!firebaseReady)return;
-  if(localStorage.getItem('_nuclearResetDone'))return; // Skip auto-sync when nuclear reset done
+  // Auto-sync runs normally — testResults/certificates pull is already guarded below
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
@@ -1553,9 +1553,9 @@ async function doLogin(){
     }else{
       var empId=id.toUpperCase();
       var emp=DB.employees.find(function(e){return e.id===empId;});
-      // Employee login: ALWAYS pull fresh trainings from cloud to remove stale local data
-      // SKIP if nuclear reset done (cloud has stale data)
-      if(firebaseReady&&!_skipCloudLoad&&!localStorage.getItem('_nuclearResetDone')){
+      // Employee login: pull fresh trainings from cloud
+      // Allow trainings to sync (needed for employee view) but block old testResults
+      if(firebaseReady&&!_skipCloudLoad){
         try{
           // Auth as admin first so we can read deletedItems (tombstones)
           try{await authAsAdmin();}catch(authE){console.warn('[doLogin] admin auth for tombstones failed:',authE);}
@@ -1568,14 +1568,18 @@ async function doLogin(){
             DB.trainings=trnSnap.docs.map(function(x){return x.data();}).filter(function(t){return !trnTombSet.has(t.id);});
           }else{DB.trainings=[];}
           applyTombstones();
-          // Also reload testResults from cloud so expired status is accurate
-          try{
-            var resSnap=await fbDB.collection('testResults').get();
-            if(resSnap.size>0){
-              var resTombSet=new Set(_deletedIds.testResults||[]);
-              DB.testResults=resSnap.docs.map(function(x){return x.data();}).filter(function(r){return !resTombSet.has(r.id);});
-            }
-          }catch(resErr){console.warn('[doLogin] testResults cloud refresh skipped:',resErr);}
+          // testResults: BLOCKED after nuclear reset (old results must not come back)
+          if(!localStorage.getItem('_nuclearResetDone')){
+            try{
+              var resSnap=await fbDB.collection('testResults').get();
+              if(resSnap.size>0){
+                var resTombSet=new Set(_deletedIds.testResults||[]);
+                DB.testResults=resSnap.docs.map(function(x){return x.data();}).filter(function(r){return !resTombSet.has(r.id);});
+              }
+            }catch(resErr){console.warn('[doLogin] testResults cloud refresh skipped:',resErr);}
+          }else{
+            console.warn('[doLogin] testResults cloud pull BLOCKED (nuclear reset active)');
+          }
           try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         }catch(cloudTrnErr){console.warn('[doLogin] training cloud refresh error:',cloudTrnErr);}
       }
@@ -5913,7 +5917,7 @@ function renderSettings(){
     <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Status: <span id="fbStatusText" style="color:${firebaseReady?'var(--green)':'var(--red)'};"><span class="mat-ico" style="font-size:14px;">${firebaseReady?'check_circle':'cloud_off'}</span> ${firebaseReady?'Connected — data syncs across devices':'Not Connected — using local storage only'}</span></div>
-      ${localStorage.getItem('_nuclearResetDone')?`<div style="background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.3);border-radius:8px;padding:10px 14px;margin-bottom:10px;"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:4px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud_off</span> Cloud Data Loading is DISABLED (Nuclear Reset Active)</div><div style="font-size:11px;color:var(--muted);line-height:1.5;">After nuclear reset, old test results and certificates are blocked from loading. <b style="color:var(--txt);">Data is saved locally only.</b> To re-enable cloud sync: <br>1. Go to <a href="https://console.firebase.google.com/project/pts-safety-training/firestore/rules" target="_blank" style="color:var(--amber);text-decoration:underline;">Firebase Console → Firestore Rules</a> and set rules to allow read/write.<br>2. Delete old data from Firebase Console manually.<br>3. Click the button below.</div><button class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,var(--green),#2ea06e);color:#fff;font-weight:700;border:none;" onclick="enableCloudSync()"><span class="mat-ico" style="font-size:12px;">cloud_sync</span> Enable Cloud Sync</button></div>`:''}
+      ${localStorage.getItem('_nuclearResetDone')?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:8px;padding:10px 14px;margin-bottom:10px;"><div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">check_circle</span> Nuclear Reset Active — Old Results Blocked</div><div style="font-size:11px;color:var(--muted);line-height:1.5;">Old test results and certificates are <b style="color:var(--txt);">blocked from cloud</b>. <b style="color:var(--green);">Employees and trainings sync normally</b> — phone login works!<br><br>To fully clear old data and re-enable everything: <br>1. Go to <a href="https://console.firebase.google.com/project/pts-safety-training/firestore" target="_blank" style="color:var(--amber);text-decoration:underline;">Firebase Console → Firestore</a><br>2. Manually delete old testResults and certificates collections<br>3. Click the button below to remove this block.</div><button class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-weight:700;border:none;" onclick="enableCloudSync()"><span class="mat-ico" style="font-size:12px;">cloud_sync</span> Remove Block (Full Cloud Sync)</button></div>`:''}
       <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone/device. Admin-added data syncs automatically via Firebase. New employees get Firebase Auth accounts created automatically.</div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-sm btn-green" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">cloud_upload</span> Force Sync to Cloud</button>
@@ -6888,15 +6892,11 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 let _skipCloudLoad=(localStorage.getItem(DB_STORAGE_KEY+'_skipCloud')===DB_VERSION);
 async function loadDBFromFirestore(){
   if(_skipCloudLoad){console.log('[loadDBFromFirestore] SKIPPED — reset mode active (persistent)');return {ok:true,loaded:0,failed:[]};}
-  // === NUCLEAR RESET DONE: Block ALL cloud data loading ===
-  // This flag is set when DB_VERSION changes (nuclear reset on all devices).
-  // It prevents old test results, certificates, etc. from coming back from Firebase.
-  // Clear this flag manually via "Enable Cloud Sync" button after fixing Firebase Security Rules.
+  // === NUCLEAR RESET DONE: Block OLD test results, certificates, feedbackForms from cloud ===
+  // Employees, trainings, SOPs, etc. still sync normally (needed for phone login)
   var _nuclearBlock=localStorage.getItem('_nuclearResetDone');
   if(_nuclearBlock){
-    console.warn('[loadDBFromFirestore] NUCLEAR RESET DONE — skipping ALL cloud data loading. Flag: _nuclearResetDone=1');
-    console.warn('[loadDBFromFirestore] To re-enable cloud sync, clear _nuclearResetDone from localStorage or use Enable Cloud Sync button');
-    return {ok:true,loaded:0,failed:[],nuclearBlocked:true};
+    console.warn('[loadDBFromFirestore] NUCLEAR RESET DONE — blocking testResults, certificates, feedbackForms from cloud. Employees & trainings sync normally.');
   }
   let loaded=0;let failed=[];
   try{
@@ -6950,9 +6950,9 @@ async function loadDBFromFirestore(){
         });
         DB.trainings=merged;
       }],
-      ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
-      ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
-    ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
+      ['testResults','id',d=>{if(_nuclearBlock)return; /* BLOCKED after nuclear reset */ if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
+      ['certificates','num',d=>{if(_nuclearBlock)return; /* BLOCKED after nuclear reset */ if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
+    ['feedbackForms','id',d=>{if(_nuclearBlock)return; /* BLOCKED after nuclear reset */ if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
         const cloudMap=Object.fromEntries(cloudSops.map(s=>[s.id,s]));
@@ -7406,14 +7406,14 @@ async function initApp(){
   }
   localStorage.removeItem('_nuclear_lock'); // Clear expired lock
 
-  // === NUCLEAR RESET DONE CHECK: If flag is set, skip ALL Firebase operations ===
-  // This prevents old cloud data (test results, certificates) from loading on any device
+  // === NUCLEAR RESET DONE CHECK: Block OLD results from cloud, but allow employee sync ===
+  // When flag is set, loadDBFromFirestore() will skip testResults/certificates/feedbackForms
+  // but employees, trainings, and all other collections sync normally.
   var _nuclearResetDone=localStorage.getItem('_nuclearResetDone');
   if(_nuclearResetDone){
-    console.warn('[initApp] _nuclearResetDone is SET — skipping ALL Firebase operations. Cloud data is blocked.');
-    firebaseReady=false;
-    gotoLoginSetup();
-    return;
+    console.warn('[initApp] _nuclearResetDone SET — old test results & certificates blocked from cloud. Employees & trainings sync normally.');
+    // DON'T set firebaseReady=false — we NEED Firebase for employee sync & phone login
+    // DON'T return — let Firebase initialize so saveDB() can write new data
   }
 
   try{
@@ -7530,8 +7530,7 @@ async function initApp(){
   }
 
   // === Push missing employees + Auth accounts — NON-BLOCKING ===
-  // Skip background sync if nuclear reset done (cloud has stale data)
-  if(firebaseReady && DB.employees.length>0 && !localStorage.getItem('_nuclearResetDone')){
+  if(firebaseReady && DB.employees.length>0){
     // ENABLE LOGIN FIRST — don't make users wait
     if(loadMsg)loadMsg.style.display='none';
     var fbSt=document.getElementById('loginFbStatus');
@@ -7658,8 +7657,8 @@ function gotoLoginSetup(){
   if(fbStatus){
     if(localStorage.getItem('_nuclearResetDone')){
       fbStatus.style.display='block';
-      fbStatus.style.color='var(--amber)';
-      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Nuclear Reset done — starting fresh (cloud sync disabled). <span style="color:var(--muted);font-size:10.5px;">Data saved locally only. Enable cloud sync in Settings after fixing Firebase Rules.</span>';
+      fbStatus.style.color='var(--green)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">check_circle</span> Nuclear Reset done — starting fresh. Employees & trainings sync to cloud.';
     }else{
       fbStatus.style.display='block';
       fbStatus.style.color='var(--green)';
@@ -7684,3 +7683,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
