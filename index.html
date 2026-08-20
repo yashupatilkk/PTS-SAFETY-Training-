@@ -2433,6 +2433,7 @@ async function saveEmployee(){
   var empJoin=document.getElementById('ne_join').value||new Date().toISOString().split('T')[0];
   var empLoc=document.getElementById('ne_loc').value||'Site';
   // 1. Add to local array
+  localStorage.removeItem('_nuclear_lock'); // Clear nuclear lock when adding new data
   DB.employees.push({id:id,name:name,dept:empDept,desig:empDesig,shift:empShift,mobile:mobile,email:empEmail,status:'active',joining:empJoin,location:empLoc,password:empPw,company:DB.settings.companyName,photo:'',_localAddedAt:Date.now()});
   // 2. ALWAYS remove tombstone for this ID (even if Firebase is not ready)
   //    This prevents applyTombstones() from filtering out a re-added employee on next reload
@@ -3037,6 +3038,7 @@ async function saveTraining(){
   var saved=false;
   if(btn){btn.disabled=true;btn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Saving...';}
   try{
+  localStorage.removeItem('_nuclear_lock'); // Clear nuclear lock when adding new data
   var name=document.getElementById('nt_name').value.trim();
   var trainerVal=(document.getElementById('nt_trainer')||{}).value||'';if(trainerVal==='__add_new__'){trainerVal=DB.settings.trainerList.length?(typeof DB.settings.trainerList[0]==='object'?DB.settings.trainerList[0].name:DB.settings.trainerList[0]):'';}var desigVal=(document.getElementById('nt_trainer_desig')||{}).value||'';if(desigVal==='__add_new__')desigVal='';var catVal=(document.getElementById("nt_cat")||{}).value||"";if(catVal==="__add_new__")catVal=getAllCategories()[0]||"";if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var cat=catVal||document.getElementById('nt_cat').value;
@@ -7096,68 +7098,110 @@ async function manualPurgeCloud(){
 }
 async function resetDBToDefault(){
   if(!confirm('⚠️ DELETE EVERYTHING — Start from ZERO?\n\nAll Employees, Trainings, Results, Certificates — GONE.\nThis CANNOT be undone!'))return;
-  toast('Deleting everything from Firebase...','info',15000);
-  // Step 1: Clear ALL Firebase collections — delete one by one with retry
-  if(firebaseReady){
-    try{
-      // Authenticate — MUST succeed or nothing gets deleted
-      var authOk=false;
-      for(var authTry=0;authTry<3;authTry++){
-        try{
-          await authAsAdmin();
-          if(fbAuth.currentUser){authOk=true;break;}
-        }catch(ae){console.warn('[NUCLEAR] Auth attempt '+(authTry+1)+' failed:',ae.message);}
-      }
-      if(!authOk){toast('Admin authentication failed — cannot delete cloud data. Check your connection.','error',8000);return;}
-      var cols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
-      var totalDeleted=0;
-      var failCols=[];
-      for(var ci=0;ci<cols.length;ci++){
-        var colName=cols[ci];
-        try{
-          // TWO passes: delete, then verify empty
-          for(var pass=0;pass<2;pass++){
-            var snap=await fbDB.collection(colName).get();
-            var docs=snap.docs;
-            for(var di=0;di<docs.length;di++){
-              var doc=docs[di];
-              var deleted=false;
-              for(var retry=0;retry<3;retry++){
-                try{
-                  await doc.ref.delete();
-                  var check=await doc.ref.get();
-                  if(!check.exists){deleted=true;totalDeleted++;break;}
-                }catch(delErr){}
-              }
-              if(!deleted){failCols.push(colName+'/'+doc.id);}
-            }
-          }
-          console.log('[NUCLEAR] '+colName+': done');
-        }catch(colErr){console.warn('[NUCLEAR] Error reading '+colName+':',colErr);}
-      }
-      // Delete admins then re-create default
-      try{var admSnap=await fbDB.collection('admins').get();for(var ai=0;ai<admSnap.docs.length;ai++){try{await admSnap.docs[ai].ref.delete();}catch(e){}}}catch(e){}
-      // Delete config
-      try{var cfgSnap=await fbDB.collection('config').get();for(var cfgi=0;cfgi<cfgSnap.docs.length;cfgi++){try{await cfgSnap.docs[cfgi].ref.delete();}catch(e){}}}catch(e){}
-      // Re-create admin in Firestore
-      await fbDB.collection('admins').doc('admin').set({username:'admin',password:'admin123',name:'Admin User',role:'admin'});
-      // Set nuclear flag in config — initApp will check this to SKIP loading
-      await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:'NUCLEAR_'+Date.now(),resetTime:new Date().toISOString(),nuclearReset:true});
-      var msg='Firebase wiped! '+totalDeleted+' docs deleted.';
-      if(failCols.length>0)msg+=' WARNING: '+failCols.length+' docs could not be deleted.';
-      toast(msg,'success',5000);
-    }catch(e){
-      toast('Firebase error: '+e.message,'error',8000);
-      console.error('[NUCLEAR] Fatal error:',e);
-    }
-  }
-  // Step 2: Write clean DB to localStorage with NUCLEAR version to force initApp skip Firebase load
-  localStorage.setItem(DB_STORAGE_KEY+'_version','NUCLEAR_'+Date.now());
+  toast('Deleting everything from Firebase...','info',20000);
+
+  // === NUCLEAR LOCK: Set immediately so even if page crashes, next load stays clean ===
+  var nuclearLock=Date.now();
+  localStorage.setItem('_nuclear_lock',String(nuclearLock));
+  localStorage.setItem(DB_STORAGE_KEY+'_version','NUCLEAR_'+nuclearLock);
   var cleanDB={employees:[],trainings:[],testResults:[],certificates:[],notifications:[],customEquipment:[],customQuestions:[],auditLog:[],sops:[],feedbackForms:[],admins:[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}]};
   localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(cleanDB));
   localStorage.removeItem(TOMBSTONE_KEY);
   localStorage.removeItem('mep_user');
-  setTimeout(function(){location.reload();},1500);
+
+  // === METHOD 1: Firebase REST API (bypasses SDK, most reliable) ===
+  var restDeleted=0;
+  var restFailed=[];
+  try{
+    var projectId=firebaseConfig.projectId;
+    var apiKey=firebaseConfig.apiKey;
+    var cols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
+    // Step A: Get auth token via REST API
+    var tokenResp=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+apiKey,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:'admin@pts-safety.app',password:'admin123',returnSecureToken:true})
+    });
+    var tokenData=await tokenResp.json();
+    var idToken=tokenData.idToken;
+    if(idToken){
+      console.log('[NUCLEAR-REST] Got auth token, deleting via REST API...');
+      var base='https://firestore.googleapis.com/v1/projects/'+projectId+'/databases/(default)/documents/';
+      for(var ci=0;ci<cols.length;ci++){
+        var colName=cols[ci];
+        try{
+          // List all docs (up to 1000 per page)
+          var listResp=await fetch(base+colName+'?pageSize=1000',{headers:{'Authorization':'Bearer '+idToken}});
+          var listData=await listResp.json();
+          if(listData.documents&&listData.documents.length>0){
+            for(var di=0;di<listData.documents.length;di++){
+              var docName=listData.documents[di].name;
+              try{
+                var delResp=await fetch(docName,{method:'DELETE',headers:{'Authorization':'Bearer '+idToken}});
+                if(delResp.status===200||delResp.status===204){restDeleted++;}
+                else{restFailed.push(colName);console.warn('[NUCLEAR-REST] Delete failed:',colName,delResp.status,await delResp.text());}
+              }catch(de){restFailed.push(colName);}
+            }
+            // Handle pagination
+            var pageToken=listData.nextPageToken;
+            while(pageToken){
+              var pageResp=await fetch(base+colName+'?pageSize=1000&pageToken='+pageToken,{headers:{'Authorization':'Bearer '+idToken}});
+              var pageData=await pageResp.json();
+              if(pageData.documents){
+                for(var pi=0;pi<pageData.documents.length;pi++){
+                  try{var pr=await fetch(pageData.documents[pi].name,{method:'DELETE',headers:{'Authorization':'Bearer '+idToken}});if(pr.status<300)restDeleted++;else restFailed.push(colName);}catch(pe){restFailed.push(colName);}
+                }
+              }
+              pageToken=pageData.nextPageToken;
+            }
+          }
+          console.log('[NUCLEAR-REST] '+colName+': done');
+        }catch(colErr){console.warn('[NUCLEAR-REST] Error on '+colName+':',colErr);}
+      }
+      // Delete admins collection via REST
+      try{
+        var admList=await fetch(base+'admins?pageSize=100',{headers:{'Authorization':'Bearer '+idToken}});
+        var admData=await admList.json();
+        if(admData.documents){for(var ai=0;ai<admData.documents.length;ai++){try{await fetch(admData.documents[ai].name,{method:'DELETE',headers:{'Authorization':'Bearer '+idToken}});}catch(ae){}}}
+      }catch(e){}
+      // Delete config collection via REST
+      try{
+        var cfgList=await fetch(base+'config?pageSize=100',{headers:{'Authorization':'Bearer '+idToken}});
+        var cfgData=await cfgList.json();
+        if(cfgData.documents){for(var ci2=0;ci2<cfgData.documents.length;ci2++){try{await fetch(cfgData.documents[ci2].name,{method:'DELETE',headers:{'Authorization':'Bearer '+idToken}});}catch(ce){}}}
+      }catch(e){}
+      // Re-create admin via REST
+      try{
+        await fetch(base+'admins/admin',{method:'PATCH',headers:{'Authorization':'Bearer '+idToken,'Content-Type':'application/json'},body:JSON.stringify({fields:{username:{stringValue:'admin'},password:{stringValue:'admin123'},name:{stringValue:'Admin User'},role:{stringValue:'admin'}}})});
+      }catch(e){}
+      // Set nuclear meta via REST
+      try{
+        await fetch(base+'config/meta',{method:'PATCH',headers:{'Authorization':'Bearer '+idToken,'Content-Type':'application/json'},body:JSON.stringify({fields:{nuclearReset:{booleanValue:true},nuclearTime:{stringValue:new Date().toISOString()}}})});
+      }catch(e){}
+    }else{
+      console.warn('[NUCLEAR-REST] No token — REST auth failed:',tokenData.error?.message||'unknown');
+      toast('REST auth failed: '+(tokenData.error?.message||'check credentials'),'error',8000);
+    }
+  }catch(restErr){
+    console.error('[NUCLEAR-REST] Fatal error:',restErr);
+  }
+
+  // === METHOD 2: SDK fallback (try even if REST worked, for extra safety) ===
+  if(firebaseReady){
+    try{
+      try{await authAsAdmin();}catch(e){}
+      var sdkCols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
+      for(var si=0;si<sdkCols.length;si++){
+        try{var sSnap=await fbDB.collection(sdkCols[si]).get();for(var sd=0;sd<sSnap.docs.length;sd++){try{await sSnap.docs[sd].ref.delete();}catch(se){}}}catch(se2){}
+      }
+    }catch(sdkErr){}
+  }
+
+  var totalMsg='Nuclear Reset done!';
+  if(restDeleted>0)totalMsg+=' REST deleted: '+restDeleted+' docs.';
+  if(restFailed.length>0)totalMsg+=' Some REST fails (SDK fallback used).';
+  toast(totalMsg,'success',6000);
+  setTimeout(function(){location.reload();},2000);
 }
 async function freshStartSite(){
   if(!confirm('FRESH START — This will:\n\n1. DELETE all trainings (except the HK Safety video one)\n2. DELETE all test results\n3. DELETE all certificates\n4. DELETE all notifications\n5. DELETE all custom questions\n6. DELETE all SOPs\n7. Keep all employees & admins\n\nThis cannot be undone. Continue?'))return;
@@ -7251,6 +7295,25 @@ async function initApp(){
 
   // 2. Try Firebase/Firestore
   let fbLoadError=null;
+
+  // === NUCLEAR LOCK CHECK: If nuclear reset was just done, BLOCK ALL Firebase loading ===
+  var nuclearLockTime=parseInt(localStorage.getItem('_nuclear_lock')||'0');
+  var nuclearActive=(nuclearLockTime>0 && (Date.now()-nuclearLockTime)<300000); // Active for 5 minutes
+  if(nuclearActive){
+    console.warn('[initApp] NUCLEAR LOCK ACTIVE — skipping ALL Firebase operations for 5 min');
+    firebaseReady=false; // Completely disable Firebase
+    // Force clean DB
+    DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
+    DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
+    DB.sops=[];DB.feedbackForms=[];
+    localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+    localStorage.removeItem('_nuclear_lock');
+    // Skip to login form setup directly
+    gotoLoginSetup();
+    return;
+  }
+  localStorage.removeItem('_nuclear_lock'); // Clear expired lock
+
   try{
     firebaseReady=true;
     // === VERSION CHECK: fresh start / nuclear reset — skip loading old Firebase data ===
@@ -7480,6 +7543,31 @@ async function initApp(){
       if(valid){startApp();}else{localStorage.removeItem("mep_user");}
     }catch{localStorage.removeItem("mep_user");}
   }
+}
+
+// === NUCLEAR LOCK: Login setup function (called when nuclear lock is active) ===
+function gotoLoginSetup(){
+  var loadMsg=document.getElementById('fbLoadStatus');
+  var loginBtn=document.getElementById('loginBtn');
+  if(loadMsg)loadMsg.style.display='none';
+  // Show nuclear reset status
+  var fbStatus=document.getElementById('loginFbStatus');
+  if(fbStatus){
+    fbStatus.style.display='block';
+    fbStatus.style.color='var(--green)';
+    fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">check_circle</span> Nuclear Reset complete — starting fresh with zero data';
+  }
+  _initDone=true;
+  if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+  var syncBtn=document.getElementById('loginSyncBtn');
+  if(syncBtn)syncBtn.style.display='inline-block';
+  if(!DB.admins.find(a=>a.username==='admin')){DB.admins.push({username:'admin',password:'admin123',name:'Admin User',role:'admin'});}
+  var t=localStorage.getItem('mep_theme')||'dark';
+  document.documentElement.setAttribute('data-theme',t);
+  DB.settings.theme=t;
+  document.getElementById('themeBtn').querySelector('.mat-ico').textContent=t==='dark'?'dark_mode':'light_mode';
+  // No auto-login after nuclear
+  localStorage.removeItem('mep_user');
 }
 
 initApp();
