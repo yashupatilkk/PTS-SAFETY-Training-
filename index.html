@@ -6182,7 +6182,15 @@ async function saveDB(){
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveSettings()
-    ]).then(results=>{
+    ]).then(async function(results){
+      // === ACTIVELY DELETE tombstoned docs from Firebase (not just skip them) ===
+      // This prevents orphaned docs from resurrecting on next load
+      var delPromises=[];
+      if(_deletedIds.employees?.length){_deletedIds.employees.forEach(function(eid){delPromises.push(fbDB.collection('employees').doc(String(eid)).delete().catch(function(){}));});}
+      if(_deletedIds.trainings?.length){_deletedIds.trainings.forEach(function(tid){delPromises.push(fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){}));});}
+      if(_deletedIds.testResults?.length){_deletedIds.testResults.forEach(function(rid){delPromises.push(fbDB.collection('testResults').doc(String(rid)).delete().catch(function(){}));});}
+      if(_deletedIds.certificates?.length){_deletedIds.certificates.forEach(function(cnum){delPromises.push(fbDB.collection('certificates').doc(String(cnum)).delete().catch(function(){}));});}
+      if(delPromises.length>0){console.log('saveDB: Deleting '+delPromises.length+' tombstoned docs from Firebase...');try{await Promise.all(delPromises);console.log('saveDB: Tombstone docs deleted');}catch(e){}}
       // Check if any collection FAILED to save to Firebase
       const failed=results.filter(r=>r&&r.ok===false);
       if(failed.length>0){
@@ -6331,6 +6339,16 @@ async function loadDBFromFirestore(){
     reconcileTrainingsFromResults();
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
+    // === ACTIVELY PURGE tombstoned docs from Firebase so they NEVER come back ===
+    var purgePromises=[];
+    if(firebaseReady&&(_deletedIds.employees?.length||_deletedIds.trainings?.length)){
+      (_deletedIds.employees||[]).forEach(function(eid){purgePromises.push(fbDB.collection('employees').doc(String(eid)).delete().catch(function(){}));});
+      (_deletedIds.trainings||[]).forEach(function(tid){purgePromises.push(fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){}));});
+      if(purgePromises.length>0){
+        console.log('[loadDBFromFirestore] Purging '+purgePromises.length+' tombstoned docs from Firebase...');
+        Promise.all(purgePromises).then(function(){console.log('[loadDBFromFirestore] Purge complete');}).catch(function(){});
+      }
+    }
 
     // === AGGRESSIVE LOCAL MERGE: ensure NO local employee is ever lost ===
     // Always merge local employees/trainings that cloud doesn't have (even without _localAddedAt)
@@ -6387,6 +6405,8 @@ function loadDB(){
   if(!DB.auditLog)DB.auditLog=[];
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
+  // Schedule Firebase purge of tombstoned docs (runs after Firebase is ready in initApp)
+  window._pendingFirebasePurge=true;
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
   var badTrnIds=[];
   DB.trainings=DB.trainings.filter(function(t){
@@ -6587,6 +6607,19 @@ async function initApp(){
       localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
     }
     // Always keep firebaseReady ON — even partial load is OK
+    // === EXECUTE PENDING FIREBASE PURGE (from loadDB tombstone filter) ===
+    if(window._pendingFirebasePurge&&firebaseReady&&(_deletedIds.employees?.length||_deletedIds.trainings?.length)){
+      window._pendingFirebasePurge=false;
+      (async function(){
+        try{
+          await authAsAdmin();
+          var p=[];
+          (_deletedIds.employees||[]).forEach(function(eid){p.push(fbDB.collection('employees').doc(String(eid)).delete().catch(function(){}));});
+          (_deletedIds.trainings||[]).forEach(function(tid){p.push(fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){}));});
+          if(p.length>0){await Promise.all(p);console.log('[initApp] Purged '+p.length+' tombstoned docs from Firebase on startup');}
+        }catch(e){console.warn('[initApp] Startup purge error:',e);}
+      })();
+    }
     if(!DB.admins.find(a=>a.username==="admin")){
       DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
       saveDB();
