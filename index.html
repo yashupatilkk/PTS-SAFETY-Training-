@@ -1548,6 +1548,8 @@ async function doLogin(){
       // Employee login: ALWAYS pull fresh trainings from cloud to remove stale local data
       if(firebaseReady&&!_skipCloudLoad){
         try{
+          // Auth as admin first so we can read deletedItems (tombstones)
+          try{await authAsAdmin();}catch(authE){console.warn('[doLogin] admin auth for tombstones failed:',authE);}
           await loadTombstonesFromCloud();
           applyTombstones();
           // Always reload trainings from cloud — replace local stale data completely
@@ -1557,6 +1559,14 @@ async function doLogin(){
             DB.trainings=trnSnap.docs.map(function(x){return x.data();}).filter(function(t){return !trnTombSet.has(t.id);});
           }else{DB.trainings=[];}
           applyTombstones();
+          // Also reload testResults from cloud so expired status is accurate
+          try{
+            var resSnap=await fbDB.collection('testResults').get();
+            if(resSnap.size>0){
+              var resTombSet=new Set(_deletedIds.testResults||[]);
+              DB.testResults=resSnap.docs.map(function(x){return x.data();}).filter(function(r){return !resTombSet.has(r.id);});
+            }
+          }catch(resErr){console.warn('[doLogin] testResults cloud refresh skipped:',resErr);}
           try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         }catch(cloudTrnErr){console.warn('[doLogin] training cloud refresh error:',cloudTrnErr);}
       }
