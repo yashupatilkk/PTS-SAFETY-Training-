@@ -1917,16 +1917,21 @@ function renderDashboard(){
   if(!isAdmin){renderEmpDashboard();return;}
   const total=DB.employees.length;
   const totalTrn=DB.trainings.length;
-  const completed=DB.testResults.filter(r=>r.pass).length;
+  // Count unique (employee, training) pairs based on BEST attempt
+  // An employee+training is "passed" if their highest score meets the passing threshold
+  // An employee+training is "failed" only if their best score is STILL below passing
+  const bestByEmpTrn={};// key: "empId|training" → best test result (highest score)
+  DB.testResults.forEach(r=>{var k=r.empId+'|'+r.training;if(!bestByEmpTrn[k]||r.score>bestByEmpTrn[k].score)bestByEmpTrn[k]=r;});
+  var completed=0,failed=0,totalAttempts=DB.testResults.length,scoreSum=0;
+  Object.values(bestByEmpTrn).forEach(r=>{if(r.pass)completed++;else failed++;scoreSum+=r.score;});
+  const avgScore=Object.keys(bestByEmpTrn).length?Math.round(scoreSum/Object.keys(bestByEmpTrn).length):0;
   const pending=DB.trainings.reduce((s,t)=>{
     const enrolled=(t.enrolled||[]);
-    const passed=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
+    const passed=new Set(Object.values(bestByEmpTrn).filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
     return s+enrolled.filter(eid=>!passed.has(eid)).length;
   },0);
-  const failed=DB.testResults.filter(r=>!r.pass).length;
-  const avgScore=DB.testResults.length?Math.round(DB.testResults.reduce((s,r)=>s+r.score,0)/DB.testResults.length):0;
   const certCount=DB.certificates.length;
-  const compPct=DB.testResults.length?Math.round(completed/DB.testResults.length*100):0;
+  const compPct=Object.keys(bestByEmpTrn).length?Math.round(completed/Object.keys(bestByEmpTrn).length*100):0;
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
@@ -2013,7 +2018,7 @@ function renderDashboard(){
     let c=0;const step=Math.max(1,Math.ceil(t/35));
     const iv=setInterval(()=>{c=Math.min(c+step,t);el.textContent=el.dataset.suffix?c+el.dataset.suffix:c;if(c>=t)clearInterval(iv);},25);
   });
-  setTimeout(()=>drawCharts(),100);
+  setTimeout(()=>drawCharts(completed,failed),100);
 }
 function renderEmpDashboard(){
   const empId=currentUser.id;
@@ -2104,7 +2109,10 @@ function statCard(icon,label,val,color,sub){
     <div class="stat-sub">${sub}</div>
   </div>`;
 }
-function drawCharts(){
+function drawCharts(dashPassed,dashFailed){
+  if(dashPassed===undefined)dashPassed=DB.testResults.filter(r=>r.pass).length;
+  if(dashFailed===undefined)dashFailed=DB.testResults.filter(r=>!r.pass).length;
+
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
   const textColor=isDark?"#7d8590":"#656d76";
@@ -2140,14 +2148,17 @@ function drawCharts(){
   // === PASS/FAIL DOUGHNUT ===
   destroyChart("chartPassFail");
   var pfCtx=document.getElementById("chartPassFail");
-  if(pfCtx){var pass=DB.testResults.filter(r=>r.pass).length,fail=DB.testResults.filter(r=>!r.pass).length;charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[pass||0,fail||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
+  if(pfCtx){charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[dashPassed||0,dashFailed||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
   // === TRAINING-WISE COMPLETION GROUPED BAR ===
   destroyChart("chartTrnCompletion");
   var tcCtx=document.getElementById("chartTrnCompletion");
   if(tcCtx&&DB.trainings.length){
     var trnNames=DB.trainings.map(function(t){return t.name.length>20?t.name.slice(0,20)+'...':t.name;});
     var trnEnrolled=DB.trainings.map(function(t){return (t.enrolled||[]).length;});
-    var trnCompleted=DB.trainings.map(function(t){return DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).length;});
+    var trnCompleted=DB.trainings.map(function(t){
+      var passedIds=new Set(DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).map(function(r){return r.empId;}));
+      return passedIds.size;
+    });
     var trnPending=DB.trainings.map(function(t){
       var passedIds=new Set(DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).map(function(r){return r.empId;}));
       return (t.enrolled||[]).filter(function(eid){return !passedIds.has(eid);}).length;
@@ -2899,7 +2910,7 @@ function openTrainingDetail(id){
       </div>
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table>
-        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th></tr></thead>
+        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
           const bestResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
           const anyResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
@@ -2916,6 +2927,7 @@ function openTrainingDetail(id){
             <td style="font-weight:600;">${completedDate?formatDate(completedDate):"—"}</td>
             <td>${result?`<b style="color:${result.pass?"var(--green)":"var(--red)"}">${result.score}%</b>`:"—"}</td>
             <td>${cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${cert.num}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`:"—"}</td>
+            <td><button class="btn btn-sm btn-red" onclick="removeEmployeeFromTraining('${t.id}','${e.id}','${e.name.replace(/'/g,"\\\'")}')" title="Remove from training"><span class="mat-ico" style="font-size:14px;">person_remove</span></button></td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
     </div>
@@ -2973,6 +2985,20 @@ function confirmAssignAllDept(trnId){
   t.enrolled=[...new Set([...t.enrolled,...toAssign.map(e=>e.id)])];
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
   updateBadges();renderTrainings();saveDB();
+}
+function removeEmployeeFromTraining(trnId,empId,empName){
+  if(!confirm('Remove '+empName+' ('+empId+') from this training?'))return;
+  const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
+  if(!t.enrolled)t.enrolled=[];
+  t.enrolled=t.enrolled.filter(function(id){return id!==empId;});
+  // Also remove from completed/completedDates if present
+  if(t.completed)t.completed=t.completed.filter(function(id){return id!==empId;});
+  if(t.completedDates)delete t.completedDates[empId];
+  toast(empName+' removed from "'+t.name+'"',"info");
+  updateBadges();saveDB();
+  // Re-render the training detail modal
+  var trn=DB.trainings.find(function(x){return x.id===trnId;});
+  if(trn)openTrainingDetail(trn.id);
 }
 async function deleteTraining(id){
   if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
