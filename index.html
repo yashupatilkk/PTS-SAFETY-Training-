@@ -900,7 +900,7 @@ let DB={
   notifications:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
-    sheetUrl:"https://script.google.com/macros/s/AKfycbyn5NCt91JkixFDMG2-P86X30edpJUY5b0WYDF4-pGWRsf0d3gLsyk_p4rx4JsM0R6SXw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    sheetUrl:"https://script.google.com/macros/s/AKfycby1qkIZKvOLJ1S4OLvQwwJJZwlooEfQ5vKWkutaf9GM8EVkJ0ANR9raspBwAOmyrFmfuA/exec",sheetAutoSync:true,driveFolderId:"1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov",trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     driveFolderId:"1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov",driveUploadUrl:"https://script.google.com/macros/s/AKfycby1qkIZKvOLJ1S4OLvQwwJJZwlooEfQ5vKWkutaf9GM8EVkJ0ANR9raspBwAOmyrFmfuA/exec",
     theme:"dark",language:"English",minCertScore:70
   },
@@ -1374,23 +1374,37 @@ function startAutoSync(){
         fbSaveCollection('sops',DB.sops,'id'),
         fbSaveCollection('testResults',DB.testResults,'id'),
         fbSaveCollection('certificates',DB.certificates,'num'),
+        fbSaveCollection('feedbackForms',DB.feedbackForms,'id'),
         fbSaveCollection('notifications',DB.notifications,'id'),
         fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
         fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
         fbSaveSettings()
       ]);
       // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
-      // GUARD: If cloud load is blocked (fresh reset or nuclear), skip pulling old data from Firebase
-      if(isAdmin && !_skipCloudLoad && !localStorage.getItem('_nuclearResetDone')){
+      // NEW data (after nuclear reset) is always loaded. OLD data is filtered by reset timestamp.
+      if(isAdmin && !_skipCloudLoad){
+        var _nrt=parseInt(localStorage.getItem('_nuclearResetTime')||'0');
         try{
           const fbTestSnap=await fbDB.collection('testResults').get();
           const fbTests=fbTestSnap.docs.map(d=>d.data());
           let newTests=0;
-          fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
+          fbTests.forEach(fbR=>{
+            if(!DB.testResults.find(r=>r.id===fbR.id)){
+              // Skip old results if nuclear reset is active
+              if(_nrt&&fbR.date&&new Date(fbR.date).getTime()<=_nrt) return;
+              DB.testResults.push(fbR);newTests++;
+            }
+          });
           const fbCertSnap=await fbDB.collection('certificates').get();
           const fbCerts=fbCertSnap.docs.map(d=>d.data());
           let newCerts=0;
-          fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
+          fbCerts.forEach(fbC=>{
+            if(!DB.certificates.find(c=>c.num===fbC.num)){
+              if(_nrt&&fbC.issued&&new Date(fbC.issued).getTime()<=_nrt) return;
+              if(_nrt&&fbC.issueDate&&new Date(fbC.issueDate).getTime()<=_nrt) return;
+              DB.certificates.push(fbC);newCerts++;
+            }
+          });
           // Reconcile training completed arrays from all testResults (source of truth)
           const trainingsUpdated=reconcileTrainingsFromResults()>0;
           // Save merged data to localStorage (don't re-push to avoid loop)
@@ -1568,7 +1582,7 @@ async function doLogin(){
             DB.trainings=trnSnap.docs.map(function(x){return x.data();}).filter(function(t){return !trnTombSet.has(t.id);});
           }else{DB.trainings=[];}
           applyTombstones();
-          // testResults: BLOCKED after nuclear reset (old results must not come back)
+          // testResults: Load NEW results only (old ones blocked if nuclear reset active)
           if(!localStorage.getItem('_nuclearResetDone')){
             try{
               var resSnap=await fbDB.collection('testResults').get();
@@ -1578,7 +1592,22 @@ async function doLogin(){
               }
             }catch(resErr){console.warn('[doLogin] testResults cloud refresh skipped:',resErr);}
           }else{
-            console.warn('[doLogin] testResults cloud pull BLOCKED (nuclear reset active)');
+            // Nuclear reset active: only load NEW testResults (created after reset)
+            try{
+              var _nrtLogin=parseInt(localStorage.getItem('_nuclearResetTime')||'0');
+              var resSnap2=await fbDB.collection('testResults').get();
+              if(resSnap2.size>0){
+                var resTombSet2=new Set(_deletedIds.testResults||[]);
+                var newResults=resSnap2.docs.map(function(x){return x.data();}).filter(function(r){
+                  if(resTombSet2.has(r.id)) return false;
+                  if(_nrtLogin&&r.date&&new Date(r.date).getTime()<=_nrtLogin) return false;
+                  return true;
+                });
+                // Merge with existing local results (don't overwrite)
+                var existingIds=new Set(DB.testResults.map(function(r){return r.id;}));
+                newResults.forEach(function(r){if(!existingIds.has(r.id)){DB.testResults.push(r);}});
+              }
+            }catch(resErr2){console.warn('[doLogin] testResults nuclear-filtered refresh skipped:',resErr2);}
           }
           try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         }catch(cloudTrnErr){console.warn('[doLogin] training cloud refresh error:',cloudTrnErr);}
@@ -2748,10 +2777,8 @@ function renderEmpTrainings(){
         const alreadyTested=myRes.length>0&&!isExpired24h;
         const videoProgress=((t.videoProgress||{})[empId])||0;
         const videoCompleted=videoProgress>=90;
-        const feedbackFilled=!!((DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===t.name;}));
         const videoReady=!hasVideo||videoCompleted;
-        const showFeedbackBtn=videoReady&&!alreadyTested&&!feedbackFilled;
-        const showTestBtn=videoReady&&!alreadyTested&&feedbackFilled;
+        const showTestBtn=videoReady&&!alreadyTested;
         const canTakeTest=showTestBtn;
         return`<div class="training-card">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
@@ -2783,10 +2810,8 @@ function renderEmpTrainings(){
               </div>
               ${!videoCompleted?`<div id="trnVidLock_${t.id}" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);">
                 <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% — forwarding/skipping not counted
-              </div>`:showFeedbackBtn?`<div style="padding:5px 10px;background:rgba(62,160,232,.08);border-left:3px solid var(--blue);border-radius:0 8px 8px 0;font-size:11px;color:var(--blue);">
-                <span class="mat-ico" style="font-size:13px;">assignment</span> Video done! Fill feedback form to unlock the test.
               </div>`:showTestBtn?`<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);">
-                <span class="mat-ico" style="font-size:13px;">check_circle</span> Ready! You can now take the test.
+                <span class="mat-ico" style="font-size:13px;">check_circle</span> Video done! Take the test now. Feedback form will appear after submit.
               </div>`:``}
             </div>
             `:""}
@@ -2796,9 +2821,7 @@ function renderEmpTrainings(){
             </div>
             ${myRes.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Last score: <b style="color:${bestRes.pass?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}${isExpired24h&&myPassRes.length>0?" · <span style=\"color:var(--orange);\">Status expired after 24hrs</span>":""}</div>`:``}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-              ${showFeedbackBtn?`
-                <button class="btn btn-sm" style="background:rgba(62,160,232,.15);border:1px solid var(--blue);color:var(--blue);" onclick="openPreTestFeedback('${t.id}')"><span class="mat-ico" style="font-size:11px;">rate_review</span> Fill Feedback Form (Required)</button>
-              `:showTestBtn?`
+              ${showTestBtn?`
                 <button id="trnVidTestBtn_${t.id}" class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')" style="animation:pulseGlow 1.5s ease-in-out infinite;"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
               `:alreadyTested&&!done?`<div style="padding:4px 10px;background:rgba(232,72,58,.08);border-radius:6px;font-size:11px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">block</span> Test taken (score: ${bestRes.score}%)</div>`:done?`<div style="padding:4px 10px;background:rgba(62,207,142,.08);border-radius:6px;font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">verified</span> Training completed</div>`:""}
               ${done&&myRes.find(r=>r.cert)?`<button class="btn btn-sm btn-outline" onclick="downloadCertificate('${myRes.find(r=>r.cert).cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>`:""}
@@ -3708,14 +3731,8 @@ function startQuizForTrn(trnId){
   var existingResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
   if(existingResults.length>0){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only.','error');return;}
   // MANDATORY: Check if feedback form is filled before allowing test (employees only)
-  if(!isAdmin){
-    var feedbackDone=(DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===t.name;});
-    if(!feedbackDone){
-      toast('Please fill the Training Feedback Form first! It is mandatory before taking the test.','error',5000);
-      renderEmpTrainings();
-      return;
-    }
-  }
+  // Feedback is now POST-TEST (after submit), not pre-test. Remove this guard.
+  // The feedback form appears automatically after quiz submission.
   // Check video progress if YouTube link exists
   var ytId=extractYoutubeId(t.youtubeLink||'');
   if(ytId){
@@ -4053,16 +4070,79 @@ function submitQuiz(){
   const nowTime=new Date().toTimeString().slice(0,5);
   const certNum=qualifiesForCert&&pass?"CERT-"+Date.now().toString(36).toUpperCase():"";
   const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,time:nowTime,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||"",answers:[...quizState.answers],questionDetails:quizState.questions.map(q=>({q:q.q,o:q.o,a:q.a}))};
+
+  // === POST-TEST MANDATORY FEEDBACK FLOW ===
+  // Check if feedback already filled for this training
+  var feedbackAlreadyFilled = (DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===quizState.training;});
+  if(!feedbackAlreadyFilled){
+    // Store pending result — will be saved AFTER feedback is submitted
+    _pendingQuizResult = result;
+    _pendingQuizTrnMatch = trnMatch;
+    _pendingQuizScore = score;
+    _pendingQuizCorrect = correct;
+    _pendingQuizWrong = wrong;
+    _pendingQuizSkipped = skipped;
+    _pendingQuizTotal = total;
+    _pendingQuizPass = pass;
+    _pendingQuizPassing = passing;
+    _pendingQuizMinCertScore = minCertScore;
+    _pendingQuizCertNum = certNum;
+    _pendingQuizEmpId = empId;
+    _pendingQuizEmpName = empName;
+    _pendingQuizDept = dept;
+    _pendingQuizToday = today;
+    _pendingQuizNowTime = nowTime;
+    _pendingQuizQs = qs;
+    _pendingQuizAnswers = answers;
+    quizState.active = false;
+
+    // Show mandatory feedback notice and open feedback form
+    document.getElementById("view-quiz").innerHTML = `
+      <div class="quiz-wrap">
+        <div style="text-align:center;padding:40px 20px;">
+          <div style="width:80px;height:80px;border-radius:50%;background:rgba(62,160,232,.15);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;"><span class="mat-ico" style="font-size:40px;color:var(--blue);">rate_review</span></div>
+          <h2 style="font-size:20px;margin-bottom:8px;">Training Feedback Required</h2>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">You have completed the test for <b style="color:var(--txt);">${quizState.training}</b>.<br>Before viewing your results, please fill the mandatory Training Feedback Form (IMSP 29 F05).</p>
+          <div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:20px;text-align:left;font-size:12px;color:var(--amber);"><span class="mat-ico" style="vertical-align:middle;">info</span> This feedback form is <b>compulsory</b>. Your test results will be shown immediately after submission.</div>
+          <button class="btn btn-amber" style="padding:14px 40px;font-size:15px;" onclick="openPostTestFeedback()"><span class="mat-ico">assignment</span> Open Feedback Form</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // Feedback already filled — proceed to show results directly
+  _finalizeQuizResult(result, trnMatch, score, correct, wrong, skipped, total, pass, passing, minCertScore, certNum, empId, empName, dept, today, nowTime, qs, answers);
+}
+// Pending quiz result variables (set when feedback is required before showing results)
+var _pendingQuizResult=null,_pendingQuizTrnMatch=null,_pendingQuizScore=0,_pendingQuizCorrect=0,_pendingQuizWrong=0,_pendingQuizSkipped=0,_pendingQuizTotal=0,_pendingQuizPass=false,_pendingQuizPassing=70,_pendingQuizMinCertScore=70,_pendingQuizCertNum='',_pendingQuizEmpId='',_pendingQuizEmpName='',_pendingQuizDept='',_pendingQuizToday='',_pendingQuizNowTime='',_pendingQuizQs=[],_pendingQuizAnswers=[];
+var _postTestFeedbackPending=false;
+
+// Open feedback form AFTER test completion (mandatory before seeing results)
+function openPostTestFeedback(){
+  if(!_pendingQuizResult){toast('No pending test result','error');return;}
+  var ctx={
+    empName:_pendingQuizEmpName,empId:_pendingQuizEmpId,dept:_pendingQuizDept,
+    desig:currentUser.desig||'',trnName:_pendingQuizResult.training,trnCat:_pendingQuizResult.cat,
+    trainer:_pendingQuizTrnMatch?_pendingQuizTrnMatch.trainer||'':'',
+    completedDate:_pendingQuizToday,score:_pendingQuizScore
+  };
+  _postTestFeedbackPending=true;
+  openFeedbackForm(ctx.empName,ctx.empId,ctx.dept,ctx.desig,ctx.trnName,ctx.trnCat,ctx.trainer,ctx.completedDate,ctx.score);
+}
+
+// Finalize quiz result: save to DB, Firebase, Sheets, then show results screen
+function _finalizeQuizResult(result, trnMatch, score, correct, wrong, skipped, total, pass, passing, minCertScore, certNum, empId, empName, dept, today, nowTime, qs, answers){
+  var certNum2=certNum||result.cert||'';
   DB.testResults.push(result);
-  // Add audit log entry
   if(!DB.auditLog)DB.auditLog=[];
-  DB.auditLog.push({id:result.id+"_A",date:today,type:"test_result",empId,empName,dept,training:quizState.training,cat:quizState.category,score,pass,result:pass?"PASS":"FAIL",attempt:result.attempt,trainer:trnMatch?.trainer||"",details:pass?"Passed with "+score+"% ("+correct+"/"+total+")":"Failed with "+score+"% ("+correct+"/"+total+")",action:pass?"None required":"Pending corrective action",actionBy:""});
-  if(certNum){
+  DB.auditLog.push({id:result.id+"_A",date:today,type:"test_result",empId:empId,empName:empName,dept:dept,training:result.training,cat:result.cat,score:score,pass:pass,result:pass?"PASS":"FAIL",attempt:result.attempt,trainer:trnMatch?trnMatch.trainer||"":"",details:pass?"Passed with "+score+"% ("+correct+"/"+total+")":"Failed with "+score+"% ("+correct+"/"+total+")",action:pass?"None required":"Pending corrective action",actionBy:""});
+  if(certNum2){
     const expiry=new Date();
-    const validityYears=trnMatch?.validity?.includes("2")?2:trnMatch?.validity?.includes("6")?0.5:1;
+    const validityYears=trnMatch&&trnMatch.validity&&trnMatch.validity.includes("2")?2:trnMatch&&trnMatch.validity&&trnMatch.validity.includes("6")?0.5:1;
     expiry.setFullYear(expiry.getFullYear()+Math.floor(validityYears));
-    DB.certificates.push({num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",trainerDesignation:trnMatch?.trainerDesignation||"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
-    DB.notifications.unshift({id:genId("N"),msg:`Certificate ${certNum} auto-generated for ${empName} — ${quizState.training} (Score: ${score}%)`,time:"Just now",read:false,icon:"workspace_premium"});
+    DB.certificates.push({num:certNum2,empId:empId,empName:empName,training:result.training,score:score,dept:dept,trainer:trnMatch?trnMatch.trainer||"Trainer":"Trainer",trainerDesignation:trnMatch?trnMatch.trainerDesignation||"":"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
+    DB.notifications.unshift({id:genId("N"),msg:"Certificate "+certNum2+" auto-generated for "+empName+" — "+result.training+" (Score: "+score+"%)",time:"Just now",read:false,icon:"workspace_premium"});
   }
   if(trnMatch){
     if(!trnMatch.completed)trnMatch.completed=[];
@@ -4071,131 +4151,30 @@ function submitQuiz(){
   }
   updateBadges();
   saveDB();
-  // Force immediate Firebase save for test result so it's not lost
   if(firebaseReady){
     (async function(){
-      try{
-        // CRITICAL: Authenticate as admin before writing — employees are NOT Firebase Auth users
-        await authAsAdmin();
-        const r=DB.testResults[DB.testResults.length-1];
-        if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
-        if(certNum){
-          const c=DB.certificates[DB.certificates.length-1];
-          if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
-        }
-        console.log('Quiz result saved to Firebase immediately');
-      }catch(e){console.warn('Firebase quiz save error:',e);}
+      try{await authAsAdmin();const r=DB.testResults[DB.testResults.length-1];if(r)await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});if(certNum2){const c=DB.certificates[DB.certificates.length-1];if(c)await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});}console.log('Quiz result saved to Firebase');}catch(e){console.warn('Firebase quiz save error:',e);}
     })();
   }
-  // Auto-sync this test result to Google Sheets (fire-and-forget)
   (async function(){
     try{
-      var sheetUrl=DB.settings.sheetUrl||"";
-      if(!sheetUrl)return;
-      var r=DB.testResults[DB.testResults.length-1];
-      if(!r)return;
-      var trn=DB.trainings.find(function(t){return t.name===r.training;});
-      var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
-      var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
-      (function(){
-      var f=document.createElement('form');
-      f.method='POST';f.action=sheetUrl;f.target='_gsq_'+Date.now();
-      f.style.display='none';
-      var inp=document.createElement('input');
-      inp.type='hidden';inp.name='json';
-      inp.value=JSON.stringify({sheet:'Training Data',data:[row]});
-      f.appendChild(inp);document.body.appendChild(f);f.submit();
-      setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);
-    })();
-      // Also push Q&A details (each question as a row) immediately
-      (function(){
-        var qs=r.questionDetails||[];
-        var ans=r.answers||[];
-        if(qs.length){
-          var qnaRows=qs.map(function(q,i){
-            var empAns=ans[i]!=null&&ans[i]>=0?q.o[ans[i]]:'';
-            var correctAns=q.o[q.a]||'';
-            var status=ans[i]<0?'Skipped':(ans[i]===q.a?'Right':'Wrong');
-            return{date:r.date||'',time:r.time||'',empId:r.empId||'',empName:r.empName||'',dept:r.dept||'',training:r.training||'',cat:r.cat||'',attempt:r.attempt||1,score:r.score+'%',qNo:i+1,question:q.q||'',empAnswer:empAns,correctAnswer:correctAns,status:status};
-          });
-          var f2=document.createElement('form');
-          f2.method='POST';f2.action=sheetUrl;f2.target='_gsq_qna_'+Date.now();
-          f2.style.display='none';
-          var inp2=document.createElement('input');
-          inp2.type='hidden';inp2.name='json';
-          inp2.value=JSON.stringify({sheet:'Q&A Details',data:qnaRows});
-          f2.appendChild(inp2);document.body.appendChild(f2);f2.submit();
-          setTimeout(function(){try{document.body.removeChild(f2);}catch(e){}},5000);
-        }
-      })();
-      console.log('Auto-synced test result + Q&A to Google Sheet:',r.training,r.empName,r.score+'%');
-      // Also queue full sync (debounced, 2 sec delay)
-      queueSheetSync(["Training Data","Q&A Details","Certificates","Audit Trail"]);
-    }catch(e){console.warn('Google Sheets auto-sync error:',e);}
+      var sheetUrl=DB.settings.sheetUrl||"";if(!sheetUrl)return;
+      var r=DB.testResults[DB.testResults.length-1];if(!r)return;
+      var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certNo:r.cert||"",completionDate:r.date};
+      (function(){var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';inp.value=JSON.stringify({sheet:'Training Data',data:[row]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);})();
+      (function(){var qs2=r.questionDetails||[];var ans2=r.answers||[];if(qs2.length){var qnaRows=qs2.map(function(q,i){var empAns=ans2[i]!=null&&ans2[i]>=0?q.o[ans2[i]]:'';var correctAns=q.o[q.a]||'';var status=ans2[i]<0?'Skipped':(ans2[i]===q.a?'Right':'Wrong');return{date:r.date||'',time:r.time||'',empId:r.empId||'',empName:r.empName||'',dept:r.dept||'',training:r.training||'',cat:r.cat||'',attempt:r.attempt||1,score:r.score+'%',qNo:i+1,question:q.q||'',empAnswer:empAns,correctAnswer:correctAns,status:status};});var f2=document.createElement('form');f2.method='POST';f2.action=sheetUrl;f2.target='_gsq_qna_'+Date.now();f2.style.display='none';var inp2=document.createElement('input');inp2.type='hidden';inp2.name='json';inp2.value=JSON.stringify({sheet:'Q&A Details',data:qnaRows});f2.appendChild(inp2);document.body.appendChild(f2);f2.submit();setTimeout(function(){try{document.body.removeChild(f2);}catch(e){}},5000);}})();
+      queueSheetSync(["Training Data","Q&A Details","Certificates","Audit Trail","Feedback Forms"]);
+    }catch(e){console.warn('Sheet sync error:',e);}
   })();
-  // Store feedback context so the feedback button in result screen can use it
-  if(pass){
-    var _quizFbCtx={empName:empName,empId:empId,dept:dept,desig:currentUser.desig||"",trnName:quizState.training,trnCat:quizState.category,trainer:trnMatch?trnMatch.trainer||"":"",completedDate:today,score:score};
-  }
+  var _quizFbCtx={empName:empName,empId:empId,dept:dept,desig:currentUser.desig||"",trnName:result.training,trnCat:result.cat,trainer:trnMatch?trnMatch.trainer||"":"",completedDate:today,score:score};
   quizState.active=false;
-  // === CHECK FEEDBACK STATUS ===
-  var feedbackAlreadyFilled = (DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===quizState.training;});
-  var feedbackDone = !!feedbackAlreadyFilled;
-  document.getElementById("view-quiz").innerHTML=`
-    <div class="quiz-wrap">
-      <div class="result-card">
-        ${pass&&certNum?`<div style="display:flex;justify-content:center;margin-bottom:12px;"><span class="badge badge-amber" style="font-size:12px;padding:6px 14px;"><span class="mat-ico" style="font-size:14px;">workspace_premium</span> Certificate Earned!</span></div>`:""}
-        <div class="result-score ${pass?"result-pass":"result-fail"}">${score}%</div>
-        <div class="result-label ${pass?"result-pass":"result-fail"}">${pass?"✅ PASSED":"❌ FAILED"}</div>
-        <div style="margin:12px 0;font-size:13px;color:var(--muted);">${quizState.training}</div>
-        <div style="display:flex;justify-content:center;gap:24px;margin:16px 0;">
-          <div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--green);">${correct}</div><div style="color:var(--muted);font-size:11px;">Correct</div></div>
-          <div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--red);">${wrong}</div><div style="color:var(--muted);font-size:11px;">Wrong</div></div>
-          <div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--muted);">${skipped}</div><div style="color:var(--muted);font-size:11px;">Skipped</div></div>
-          <div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--muted);">${total}</div><div style="color:var(--muted);font-size:11px;">Total</div></div>
-        </div>
-        <div style="font-size:12px;color:var(--muted);">Employee: <b>${empName}</b> (${empId}) · Dept: ${dept}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:3px;">Date: ${formatDate(today)} · Pass Mark: ${passing}% · Cert Threshold: ${minCertScore}%</div>
-        ${pass&&certNum?`<div style="margin-top:10px;padding:10px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);font-size:12px;">
-          <b style="color:var(--amber);">🏆 Certificate Generated!</b><br>
-          Certificate No: <span class="mono">${certNum}</span>
-        </div>`:""}
-        ${!pass?`<div style="margin-top:10px;font-size:12px;color:var(--red);">Required: ${passing}% · Your score: ${score}% · Shortfall: ${passing-score}%</div>`:""}
-      </div>
-      ${pass&&feedbackDone?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.3);border-radius:var(--r);padding:14px;margin-bottom:14px;text-align:center;">
-        <div style="font-weight:700;font-size:13px;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="vertical-align:middle;font-size:18px;">check_circle</span> Training Feedback Form Submitted</div>
-        <div style="font-size:11px;color:var(--muted);">IMSP 29 F05 — Feedback submitted on ${feedbackAlreadyFilled.date||'recorded'} · Avg Rating: ${feedbackAlreadyFilled.avgRating||'N/A'}/5</div>
-      </div>`:''}
-      <div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:14px;">
-        <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:12px;">Answer Review</div>
-        ${qs.map((q,i)=>`
-          <div style="margin-bottom:12px;padding:10px;border-radius:var(--r-sm);background:${answers[i]===q.a?"rgba(62,207,142,.06)":"rgba(232,72,58,.06)"};border:1px solid ${answers[i]===q.a?"rgba(62,207,142,.2)":"rgba(232,72,58,.2)"}">
-            <div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">${i+1}. ${q.q}</div>
-            <div style="font-size:11.5px;color:var(--green);">✓ Correct: ${q.o[q.a]}</div>
-            ${answers[i]!==q.a&&answers[i]>=0?`<div style="font-size:11.5px;color:var(--red);">✗ Your answer: ${q.o[answers[i]]}</div>`:""}
-            ${answers[i]<0?`<div style="font-size:11.5px;color:var(--muted);">— Skipped</div>`:""}
-          </div>
-        `).join("")}
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        ${pass&&feedbackDone?`<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> View Feedback Form</button>`:""}
-        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}','${quizState.training||""} ')" style="border-color:var(--amber);color:var(--amber);"><span class="mat-ico">refresh</span> Retake Test</button><div style="padding:4px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;color:var(--muted);">Test expires after 24hrs</div>`}
-        <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
-      </div>
-    </div>
-  `;
-  if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
-  else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
-  else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
-  // Bind feedback button click (view-only since feedback was already filled pre-test)
+  var fbDone=(DB.feedbackForms||[]).find(function(f){return f.empId===empId&&f.training===result.training;});
+  document.getElementById('view-quiz').innerHTML=`<div class="quiz-wrap"><div class="result-card">${pass&&certNum2?'<div style="display:flex;justify-content:center;margin-bottom:12px;"><span class="badge badge-amber" style="font-size:12px;padding:6px 14px;"><span class="mat-ico" style="font-size:14px;">workspace_premium</span> Certificate Earned!</span></div>':''}<div class="result-score ${pass?"result-pass":"result-fail"}">${score}%</div><div class="result-label ${pass?"result-pass":"result-fail"}">${pass?"✅ PASSED":"❌ FAILED"}</div><div style="margin:12px 0;font-size:13px;color:var(--muted);">${result.training}</div><div style="display:flex;justify-content:center;gap:24px;margin:16px 0;"><div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--green);">${correct}</div><div style="color:var(--muted);font-size:11px;">Correct</div></div><div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--red);">${wrong}</div><div style="color:var(--muted);font-size:11px;">Wrong</div></div><div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--muted);">${skipped}</div><div style="color:var(--muted);font-size:11px;">Skipped</div></div><div style="text-align:center;"><div style="font-size:28px;font-weight:700;color:var(--muted);">${total}</div><div style="color:var(--muted);font-size:11px;">Total</div></div></div><div style="font-size:12px;color:var(--muted);">Employee: <b>${empName}</b> (${empId}) · Dept: ${dept}</div><div style="font-size:12px;color:var(--muted);margin-top:3px;">Date: ${formatDate(today)} · Pass Mark: ${passing}%</div>${pass&&certNum2?'<div style="margin-top:10px;padding:10px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);font-size:12px;"><b style="color:var(--amber);">🏆 Certificate Generated!</b><br>Certificate No: <span class="mono">'+certNum2+'</span></div>':''}${!pass?'<div style="margin-top:10px;font-size:12px;color:var(--red);">Required: '+passing+'% · Your score: '+score+'% · Shortfall: '+(passing-score)+'%</div>':''}</div>${fbDone?'<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.3);border-radius:var(--r);padding:14px;margin-bottom:14px;text-align:center;"><div style="font-weight:700;font-size:13px;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="vertical-align:middle;font-size:18px;">check_circle</span> Training Feedback Form Submitted</div><div style="font-size:11px;color:var(--muted);">IMSP 29 F05 — Submitted on '+(fbDone.date||'recorded')+' · Avg Rating: '+(fbDone.avgRating||'N/A')+'/5</div></div>':''}<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:14px;"><div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:12px;">Answer Review</div>${qs.map((q,i)=>'<div style="margin-bottom:12px;padding:10px;border-radius:var(--r-sm);background:'+(answers[i]===q.a?'rgba(62,207,142,.06)':'rgba(232,72,58,.06)')+';border:1px solid '+(answers[i]===q.a?'rgba(62,207,142,.2)':'rgba(232,72,58,.2)')+'"><div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">'+(i+1)+'. '+q.q+'</div><div style="font-size:11.5px;color:var(--green);">✓ Correct: '+q.o[q.a]+'</div>'+(answers[i]!==q.a&&answers[i]>=0?'<div style="font-size:11.5px;color:var(--red);">✗ Your answer: '+q.o[answers[i]]+'</div>':'')+(answers[i]<0?'<div style="font-size:11.5px;color:var(--muted);">— Skipped</div>':'')+'</div>').join("")}</div><div style="display:flex;gap:8px;flex-wrap:wrap;">${pass&&certNum2?"<button class=\"btn btn-amber\" onclick=\"downloadCertificate('"+certNum2+"')\"><span class=\"mat-ico\">workspace_premium</span> Download Certificate</button>":""}${fbDone?'<button class="btn btn-outline" id="openFeedbackFromQuiz" style="border-color:var(--blue);color:var(--blue);"><span class="mat-ico">rate_review</span> View Feedback Form</button>':''}${"<button class=\"btn btn-outline\" onclick=\"gotoView('quiz')\"><span class=\"mat-ico\">arrow_back</span> Back to Tests</button>"}</div></div>`;
+  if(pass&&certNum2)toast('🏆 Congratulations! Passed with '+score+'% — Certificate auto-generated!',"success",5000);
+  else if(pass)toast('✅ Passed with '+score+'%! Well done.',"success",4000);
+  else toast('❌ Failed. Score: '+score+'%. Required: '+passing+'%.',"error",4000);
   var fbBtn=document.getElementById("openFeedbackFromQuiz");
-  if(fbBtn&&typeof _quizFbCtx!=="undefined"&&_quizFbCtx){
-    fbBtn.onclick=function(e){
-      e.preventDefault();e.stopPropagation();
-      openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);
-    };
-  }
+  if(fbBtn&&_quizFbCtx){fbBtn.onclick=function(e){e.preventDefault();e.stopPropagation();openFeedbackForm(_quizFbCtx.empName,_quizFbCtx.empId,_quizFbCtx.dept,_quizFbCtx.desig,_quizFbCtx.trnName,_quizFbCtx.trnCat,_quizFbCtx.trainer,_quizFbCtx.completedDate,_quizFbCtx.score);};}
 }
 
 
@@ -5212,17 +5191,74 @@ function saveFeedbackForm(){
   try{localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   saveDB();
 
-  // Sync to Google Sheets
+  // IMMEDIATE: Push this feedback to Google Sheets directly (don't wait for debounced sync)
+  (function(){
+    var sheetUrl=DB.settings.sheetUrl||"";
+    if(!sheetUrl)return;
+    var fbRow={
+      date:feedback.date||'',empId:feedback.empId||'',empName:feedback.empName||'',
+      department:feedback.dept||'',jobTitle:feedback.desig||'',manager:feedback.manager||'',
+      trainingCourse:feedback.training||'',category:feedback.cat||'',trainer:feedback.trainer||'',
+      testScore:feedback.score?feedback.score+'%':'',completedDate:feedback.completedDate||'',
+      q1_metExpectations:(feedback.ratings||[])[0]||'',q2_applyKnowledge:(feedback.ratings||[])[1]||'',
+      q3_objectivesFollowed:(feedback.ratings||[])[2]||'',q4_organizedContent:(feedback.ratings||[])[3]||'',
+      q5_usefulMaterials:(feedback.ratings||[])[4]||'',q6_knowledgeableTrainer:(feedback.ratings||[])[5]||'',
+      q7_qualityInstruction:(feedback.ratings||[])[6]||'',q8_trainerMetObjectives:(feedback.ratings||[])[7]||'',
+      q9_participationEncouraged:(feedback.ratings||[])[8]||'',q10_timeForQuestions:(feedback.ratings||[])[9]||'',
+      overallRating:feedback.overall||'',avgRating:feedback.avgRating||'',
+      enjoyedMost:feedback.enjoyed||'',suggestions:feedback.suggestions||'',additionalComments:feedback.comments||'',
+      savedBy:feedback.savedBy||'',savedAt:feedback.savedAt||''
+    };
+    var f=document.createElement('form');
+    f.method='POST';f.action=sheetUrl;f.target='_gsf_fb_'+Date.now();
+    f.style.display='none';
+    var inp=document.createElement('input');
+    inp.type='hidden';inp.name='json';
+    inp.value=JSON.stringify({sheet:'Feedback Forms',data:[fbRow]});
+    f.appendChild(inp);document.body.appendChild(f);f.submit();
+    setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);
+    console.log('[Feedback] Pushed to Google Sheet immediately:',feedback.empName,feedback.training);
+  })();
+
+  // Also queue full debounced sync as backup
   queueSheetSync(['Feedback Forms']);
 
   closeModal();
   toast('Feedback form saved for ' + ctx.empName + ' — ' + ctx.trnName, 'success', 5000);
 
+  // === POST-TEST FLOW: If feedback was pending after quiz, finalize the result now ===
+  if(_postTestFeedbackPending && _pendingQuizResult){
+    _postTestFeedbackPending = false;
+    var pqr = _pendingQuizResult;
+    var pTrnMatch = _pendingQuizTrnMatch;
+    var pScore = _pendingQuizScore;
+    var pCorrect = _pendingQuizCorrect;
+    var pWrong = _pendingQuizWrong;
+    var pSkipped = _pendingQuizSkipped;
+    var pTotal = _pendingQuizTotal;
+    var pPass = _pendingQuizPass;
+    var pPassing = _pendingQuizPassing;
+    var pMinCertScore = _pendingQuizMinCertScore;
+    var pCertNum = _pendingQuizCertNum;
+    var pEmpId = _pendingQuizEmpId;
+    var pEmpName = _pendingQuizEmpName;
+    var pDept = _pendingQuizDept;
+    var pToday = _pendingQuizToday;
+    var pNowTime = _pendingQuizNowTime;
+    var pQs = _pendingQuizQs;
+    var pAnswers = _pendingQuizAnswers;
+    _pendingQuizResult = null;
+    toast('Feedback submitted! Showing your test results now...','success',3000);
+    setTimeout(function(){
+      _finalizeQuizResult(pqr, pTrnMatch, pScore, pCorrect, pWrong, pSkipped, pTotal, pPass, pPassing, pMinCertScore, pCertNum, pEmpId, pEmpName, pDept, pToday, pNowTime, pQs, pAnswers);
+    }, 1500);
+    return;
+  }
+
   // If this was a pre-test feedback, refresh the training list to unlock the test button
   if(_preTestFeedbackTrnId){
     var savedTrnId=_preTestFeedbackTrnId;
     _preTestFeedbackTrnId=null;
-    // Refresh employee trainings view to show "Take Test" button
     if(!isAdmin && currentView==='trainings'){
       renderEmpTrainings();
     }
@@ -5917,7 +5953,7 @@ function renderSettings(){
     <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Status: <span id="fbStatusText" style="color:${firebaseReady?'var(--green)':'var(--red)'};"><span class="mat-ico" style="font-size:14px;">${firebaseReady?'check_circle':'cloud_off'}</span> ${firebaseReady?'Connected — data syncs across devices':'Not Connected — using local storage only'}</span></div>
-      ${localStorage.getItem('_nuclearResetDone')?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:8px;padding:10px 14px;margin-bottom:10px;"><div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">check_circle</span> Nuclear Reset Active — Old Results Blocked</div><div style="font-size:11px;color:var(--muted);line-height:1.5;">Old test results and certificates are <b style="color:var(--txt);">blocked from cloud</b>. <b style="color:var(--green);">Employees and trainings sync normally</b> — phone login works!<br><br>To fully clear old data and re-enable everything: <br>1. Go to <a href="https://console.firebase.google.com/project/pts-safety-training/firestore" target="_blank" style="color:var(--amber);text-decoration:underline;">Firebase Console → Firestore</a><br>2. Manually delete old testResults and certificates collections<br>3. Click the button below to remove this block.</div><button class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-weight:700;border:none;" onclick="enableCloudSync()"><span class="mat-ico" style="font-size:12px;">cloud_sync</span> Remove Block (Full Cloud Sync)</button></div>`:''}
+      ${localStorage.getItem('_nuclearResetDone')?`<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.25);border-radius:8px;padding:10px 14px;margin-bottom:10px;"><div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">check_circle</span> Nuclear Reset Active — Old Results Blocked</div><div style="font-size:11px;color:var(--muted);line-height:1.5;">Old test results and certificates (before ${new Date(parseInt(localStorage.getItem('_nuclearResetTime')||'0')).toLocaleDateString()}) are <b style="color:var(--txt);">blocked from cloud</b>. <b style="color:var(--green);">NEW test results, feedback forms, and certificates sync normally</b> between devices.<br><br>Employees can login from any phone. New test data is visible to admin.</div><button class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,var(--amber),#e0961a);color:#151515;font-weight:700;border:none;" onclick="enableCloudSync()"><span class="mat-ico" style="font-size:12px;">cloud_sync</span> Remove Block (Full Cloud Sync)</button></div>`:''}
       <div style="font-size:11px;color:var(--muted);line-height:1.6;">Employees can login from any phone/device. Admin-added data syncs automatically via Firebase. New employees get Firebase Auth accounts created automatically.</div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-sm btn-green" onclick="forceSyncToCloud()"><span class="mat-ico" style="font-size:12px;">cloud_upload</span> Force Sync to Cloud</button>
@@ -6352,7 +6388,8 @@ let _sheetSyncRunning=false;
 
 // Queue a sheet sync — call this after ANY data change (debounced automatically)
 function queueSheetSync(sheetNames){
-  if(!isAdmin) return; // Only admin can sync
+  // Allow BOTH admin and employee feedback to sync to sheets
+  // (employees submit feedback after tests — this must reach Google Sheets)
   if(DB.settings.sheetAutoSync===false) return; // Auto-sync OFF (default is ON)
   var url=DB.settings.sheetUrl||"";
   if(!url) return;
@@ -6626,7 +6663,7 @@ function exportFullStatusReport(){
    DATA PERSISTENCE — Auto-save & load all data to localStorage
 ============================================================ */
 const DB_STORAGE_KEY="pts_safety_db";
-const DB_VERSION="v8-zero-start"; // Change this string to force full data reset on all devices
+const DB_VERSION="v9-login-fix"; // Change this string to force full data reset on all devices
 const TOMBSTONE_KEY="pts_safety_deleted"; // Stores permanently deleted IDs
 let _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
 let _syncBusy=false;
@@ -6892,11 +6929,13 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 let _skipCloudLoad=(localStorage.getItem(DB_STORAGE_KEY+'_skipCloud')===DB_VERSION);
 async function loadDBFromFirestore(){
   if(_skipCloudLoad){console.log('[loadDBFromFirestore] SKIPPED — reset mode active (persistent)');return {ok:true,loaded:0,failed:[]};}
-  // === NUCLEAR RESET DONE: Block OLD test results, certificates, feedbackForms from cloud ===
-  // Employees, trainings, SOPs, etc. still sync normally (needed for phone login)
+  // === NUCLEAR RESET: Only block OLD data from cloud (before reset timestamp) ===
+  // Employees, trainings, SOPs, etc. always sync normally (needed for phone login)
+  // NEW testResults/feedbackForms/certificates (created after reset) ARE loaded
   var _nuclearBlock=localStorage.getItem('_nuclearResetDone');
+  var _nuclearResetTime=parseInt(localStorage.getItem('_nuclearResetTime')||'0');
   if(_nuclearBlock){
-    console.warn('[loadDBFromFirestore] NUCLEAR RESET DONE — blocking testResults, certificates, feedbackForms from cloud. Employees & trainings sync normally.');
+    console.warn('[loadDBFromFirestore] Nuclear reset active (time:'+_nuclearResetTime+'). Blocking OLD testResults/certificates/feedbackForms from before reset. NEW data loads normally.');
   }
   let loaded=0;let failed=[];
   try{
@@ -6950,9 +6989,9 @@ async function loadDBFromFirestore(){
         });
         DB.trainings=merged;
       }],
-      ['testResults','id',d=>{if(_nuclearBlock)return; /* BLOCKED after nuclear reset */ if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
-      ['certificates','num',d=>{if(_nuclearBlock)return; /* BLOCKED after nuclear reset */ if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
-    ['feedbackForms','id',d=>{if(_nuclearBlock)return; /* BLOCKED after nuclear reset */ if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
+      ['testResults','id',d=>{if(d.size>0){var filtered=d.docs.map(x=>x.data());if(_nuclearBlock&&_nuclearResetTime){filtered=filtered.filter(function(r){return (r.date&&new Date(r.date).getTime()>_nuclearResetTime)||(r.id&&parseInt(r.id.replace(/\D/g,''))>_nuclearResetTime)||!r.date;});console.log('[loadDB] testResults: '+d.size+' total, '+filtered.length+' after nuclear filter');}DB.testResults=filtered;}}],
+      ['certificates','num',d=>{if(d.size>0){var filtered=d.docs.map(x=>x.data());if(_nuclearBlock&&_nuclearResetTime){filtered=filtered.filter(function(c){return (c.issued&&new Date(c.issued).getTime()>_nuclearResetTime)||(c.issueDate&&new Date(c.issueDate).getTime()>_nuclearResetTime)||!c.issued;});console.log('[loadDB] certificates: '+d.size+' total, '+filtered.length+' after nuclear filter');}DB.certificates=filtered;}}],
+    ['feedbackForms','id',d=>{if(d.size>0){var filtered=d.docs.map(x=>x.data());if(_nuclearBlock&&_nuclearResetTime){filtered=filtered.filter(function(f){return (f.date&&new Date(f.date).getTime()>_nuclearResetTime)||(f.savedAt&&new Date(f.savedAt).getTime()>_nuclearResetTime)||!f.date;});console.log('[loadDB] feedbackForms: '+d.size+' total, '+filtered.length+' after nuclear filter');}DB.feedbackForms=filtered;}}],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
         const cloudMap=Object.fromEntries(cloudSops.map(s=>[s.id,s]));
@@ -7030,32 +7069,25 @@ async function loadDBFromFirestore(){
 function loadDB(){
   // Load tombstone list first
   loadTombstones();
-  // === FORCE FULL DATA RESET ===
-  // If stored version doesn't match DB_VERSION, wipe everything and start fresh
+  // === VERSION CHECK (no wipe here — AUTO-NUKE v7 and initApp handle reset) ===
+  // Previously this wiped data on version mismatch, causing double-wipe with AUTO-NUKE
+  // and infinite reset loops when cloud pull failed. Now only logs the mismatch.
   var storedVersion=localStorage.getItem(DB_STORAGE_KEY+'_version');
   if(storedVersion!==DB_VERSION){
-    console.warn('[loadDB] Version mismatch (stored:'+storedVersion+' vs current:'+DB_VERSION+') — wiping ALL data for fresh start');
-    localStorage.removeItem(DB_STORAGE_KEY);
-    localStorage.removeItem(DB_STORAGE_KEY+'_tombstones');
-    localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
-    localStorage.removeItem('mep_user');
-    // FORCE clear all DB arrays — nothing old survives
-    DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
-    DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
-    DB.sops=[];DB.feedbackForms=[];
-    DB.admins=[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}];
-    _deletedIds={trainings:[],employees:[],sops:[],testResults:[],certificates:[]};
-    console.log('[loadDB] All DB arrays force-cleared');
-    // CRITICAL: Set nuclear reset flag so NO device loads old cloud data
+    console.warn('[loadDB] Version mismatch (stored:'+storedVersion+' vs current:'+DB_VERSION+') — initApp will handle reset');
+    // Set nuclear flag so OLD testResults/certificates from cloud are blocked
+    // NEW data (created after reset) will still be loaded
     localStorage.setItem('_nuclearResetDone','1');
-    console.log('[loadDB] _nuclearResetDone flag SET — cloud data will be blocked on all future loads');
-    // Note: Firebase wipe/block is handled in initApp() AFTER firebaseReady=true
+    localStorage.setItem('_nuclearResetTime', String(Date.now()));
+    // Clear version so initApp detects mismatch and enters reset mode
+    localStorage.removeItem(DB_STORAGE_KEY+'_version');
   }
   // Synchronous: load from localStorage for immediate use
   loadDBFromLocal();
   // CRITICAL: ALWAYS use the correct Google Sheet URL (old localStorage may have wrong URL)
-  DB.settings.sheetUrl="https://script.google.com/macros/s/AKfycbywbzRaR80eU1Hk9OMLT-DpkwHaNqK8ponzRrRFVp-QjDEhip1gnQFC2T3pwGm10nL3fg/exec";
+  DB.settings.sheetUrl="https://script.google.com/macros/s/AKfycby1qkIZKvOLJ1S4OLvQwwJJZwlooEfQ5vKWkutaf9GM8EVkJ0ANR9raspBwAOmyrFmfuA/exec";
   DB.settings.sheetAutoSync=true;
+  DB.settings.driveFolderId="1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov";
   // Ensure auditLog exists (new field — old localStorage won't have it)
   if(!DB.auditLog)DB.auditLog=[];
   // Remove anything that was previously deleted (tombstone filter)
@@ -7309,13 +7341,13 @@ async function freshStartSite(){
   }catch(e){localStorage.removeItem("mep_user");}
 })();
 
-// === AUTO-NUKE v5: First time this file loads, it AUTOMATICALLY wipes everything ===
-// This runs BEFORE initApp, BEFORE Firebase, BEFORE anything. Guaranteed zero data.
-// v5: Also sets _nuclearResetDone to block stale cloud data on ALL devices.
+// === AUTO-NUKE v7: First time this file loads, wipes LOCAL data only.
+// Cloud data is PRESERVED — employees/trainings are pulled from Firebase after wipe.
+// NEW testResults/feedbackForms/certificates (after reset time) are loaded; OLD ones are filtered out.
 (function(){
-  var AUTO_NUKE_FLAG='_autoNuke_v5_done';
+  var AUTO_NUKE_FLAG='_autoNuke_v7_done';
   if(!localStorage.getItem(AUTO_NUKE_FLAG)){
-    console.warn('[AUTO-NUKE v5] First load of new file — wiping ALL data automatically');
+    console.warn('[AUTO-NUKE v7] First load — wiping LOCAL data, preserving cloud data');
     // 1. Nuke localStorage immediately (sync)
     localStorage.removeItem(DB_STORAGE_KEY);
     localStorage.removeItem(DB_STORAGE_KEY+'_version');
@@ -7323,54 +7355,27 @@ async function freshStartSite(){
     localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
     localStorage.removeItem(TOMBSTONE_KEY);
     localStorage.removeItem('mep_user');
-    // 2. Set nuclear lock so initApp won't load from Firebase
-    localStorage.setItem('_nuclear_lock', String(Date.now()));
-    localStorage.setItem(DB_STORAGE_KEY+'_version', 'NUCLEAR_auto_'+Date.now());
+    localStorage.removeItem('_autoNuke_v5_done');
+    localStorage.removeItem('_autoNuke_v6_done');
+    localStorage.removeItem('_nuclearResetDone');
+    localStorage.removeItem('_nuclearResetTime');
+    // 2. Set version to trigger nuclear mode in initApp (which now pulls from cloud)
+    localStorage.setItem(DB_STORAGE_KEY+'_version', 'NUCLEAR_auto_v7_'+Date.now());
     // 3. Set clean DB in localStorage
     var clean={employees:[],trainings:[],testResults:[],certificates:[],notifications:[],customEquipment:[],customQuestions:[],auditLog:[],sops:[],feedbackForms:[],admins:[{username:'admin',password:'admin123',name:'Admin User',role:'admin'}]};
     localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(clean));
-    // 4. CRITICAL: Set nuclear reset done flag — blocks ALL future cloud loading until admin re-enables
+    // 4. Block OLD testResults/certificates from cloud (employees/trainings still sync)
+    var _resetTime=Date.now();
     localStorage.setItem('_nuclearResetDone', '1');
+    localStorage.setItem('_nuclearResetTime', String(_resetTime));
     // 5. Mark as done so this never runs again
     localStorage.setItem(AUTO_NUKE_FLAG, '1');
-    console.log('[AUTO-NUKE v5] Local data wiped + _nuclearResetDone SET. Firebase cloud loading permanently blocked.');
+    console.log('[AUTO-NUKE v7] Local wiped, cloud preserved. Nuclear reset time: '+_resetTime+'. initApp will pull employees/trainings from Firebase.');
   }
 })();
 
-// === ASYNC AUTO-NUKE: Wipe Firebase via REST API in background ===
-(async function(){
-  var AUTO_NUKE_FB='_autoNuke_v4_firebase';
-  if(!localStorage.getItem(AUTO_NUKE_FB)){
-    try{
-      var apiKey='AIzaSyBo6I9OrkVn1Bcj4hsdH11mj-X42ZEx3b8';
-      var projectId='pts-safety-training';
-      // Get auth token
-      var tr=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+apiKey,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'admin@pts-safety.app',password:'admin123',returnSecureToken:true})});
-      var td=await tr.json();
-      var tk=td.idToken;
-      if(tk){
-        var base='https://firestore.googleapis.com/v1/projects/'+projectId+'/databases/(default)/documents/';
-        var cols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','feedbackForms','auditLog','videos'];
-        var total=0;
-        for(var i=0;i<cols.length;i++){
-          try{
-            var lr=await fetch(base+cols[i]+'?pageSize=1000',{headers:{'Authorization':'Bearer '+tk}});
-            var ld=await lr.json();
-            if(ld.documents){
-              for(var j=0;j<ld.documents.length;j++){
-                try{var dr=await fetch(ld.documents[j].name,{method:'DELETE',headers:{'Authorization':'Bearer '+tk}});if(dr.status<300)total++;}catch(e){}
-              }
-            }
-          }catch(e){}
-        }
-        console.log('[AUTO-NUKE] Firebase REST: deleted '+total+' docs');
-        // Re-create admin
-        try{await fetch(base+'admins/admin',{method:'PATCH',headers:{'Authorization':'Bearer '+tk,'Content-Type':'application/json'},body:JSON.stringify({fields:{username:{stringValue:'admin'},password:{stringValue:'admin123'},name:{stringValue:'Admin User'},role:{stringValue:'admin'}}})});}catch(e){}
-      }
-    }catch(e){console.warn('[AUTO-NUKE] Firebase REST error:',e);}
-    localStorage.setItem(AUTO_NUKE_FB,'1');
-  }
-})();
+// === ASYNC AUTO-NUKE: REMOVED — was deleting all Firebase data on every new device ===
+// Cloud data is now preserved. Local data is wiped by AUTO-NUKE v7 above.
 
 async function initApp(){
   // Show loading state
@@ -7386,34 +7391,19 @@ async function initApp(){
   // 2. Try Firebase/Firestore
   let fbLoadError=null;
 
-  // === NUCLEAR LOCK CHECK: If nuclear reset was just done, BLOCK ALL Firebase loading ===
+  // === NUCLEAR LOCK: No longer blocks Firebase. Just sets version and clears lock. ===
   var nuclearLockTime=parseInt(localStorage.getItem('_nuclear_lock')||'0');
-  var nuclearActive=(nuclearLockTime>0 && (Date.now()-nuclearLockTime)<300000); // Active for 5 minutes
-  if(nuclearActive){
-    console.warn('[initApp] NUCLEAR LOCK ACTIVE — skipping ALL Firebase operations for 5 min');
-    firebaseReady=false; // Completely disable Firebase
-    // Force clean DB
-    DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
-    DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
-    DB.sops=[];DB.feedbackForms=[];
-    localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
+  if(nuclearLockTime>0){
+    console.warn('[initApp] Nuclear lock found — clearing it. Firebase will initialize normally.');
     localStorage.removeItem('_nuclear_lock');
-    // CRITICAL: Set nuclear reset done flag
-    localStorage.setItem('_nuclearResetDone','1');
-    // Skip to login form setup directly
-    gotoLoginSetup();
-    return;
+    // Ensure version is set correctly so we don't re-wipe
+    localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
   }
-  localStorage.removeItem('_nuclear_lock'); // Clear expired lock
 
   // === NUCLEAR RESET DONE CHECK: Block OLD results from cloud, but allow employee sync ===
-  // When flag is set, loadDBFromFirestore() will skip testResults/certificates/feedbackForms
-  // but employees, trainings, and all other collections sync normally.
   var _nuclearResetDone=localStorage.getItem('_nuclearResetDone');
   if(_nuclearResetDone){
     console.warn('[initApp] _nuclearResetDone SET — old test results & certificates blocked from cloud. Employees & trainings sync normally.');
-    // DON'T set firebaseReady=false — we NEED Firebase for employee sync & phone login
-    // DON'T return — let Firebase initialize so saveDB() can write new data
   }
 
   try{
@@ -7423,7 +7413,7 @@ async function initApp(){
     var isNuclear=(storedVersion&&String(storedVersion).indexOf('NUCLEAR_')===0);
     var needsReset=(storedVersion!==DB_VERSION);
     if(isNuclear){
-      console.warn('[initApp] NUCLEAR reset detected — wiping Firebase again and starting completely fresh');
+      console.warn('[initApp] NUCLEAR reset detected — local wiped, pulling employees from cloud');
     }else if(needsReset){
       console.warn('[initApp] Version mismatch ("'+storedVersion+'" vs "'+DB_VERSION+'") — SKIPPING Firebase load, starting fresh');
     }
@@ -7435,71 +7425,58 @@ async function initApp(){
         fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
       }
     }else if(isNuclear){
-      // NUCLEAR RESET MODE: wipe Firebase completely, do NOT load anything
-      _skipCloudLoad=true;
+      // NUCLEAR RESET MODE: Local data already wiped by AUTO-NUKE v6.
+      // DO NOT wipe Firebase — preserve cloud employees/trainings so phone login works.
+      // _nuclearResetDone flag (set by AUTO-NUKE v6) will block old testResults/certificates in loadDBFromFirestore.
+      console.log('[nuclear] Nuclear reset mode — keeping cloud data intact, blocking old results only');
       try{await authAsAdmin();}catch(e){}
-      DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
-      DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
-      DB.sops=[];DB.feedbackForms=[];
+      // Mark reset in cloud so other devices know
       try{
-        var nukeCols=['employees','trainings','testResults','certificates','notifications','sops','deletedItems','customEquipment','customQuestions','auditLog','feedbackForms','videos'];
-        for(var ni=0;ni<nukeCols.length;ni++){
-          var nSnap=await fbDB.collection(nukeCols[ni]).get();
-          for(var nd=0;nd<nSnap.docs.length;nd++){try{await nSnap.docs[nd].ref.delete();}catch(de){}}
-        }
-        try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
-        console.log('[nuclear] All Firebase collections wiped on reload');
-      }catch(nukeErr){console.warn('[nuclear] Wipe error:',nukeErr);}
-      // Re-create admin + config
-      try{
-        await fbDB.collection('admins').doc('admin').set({username:'admin',password:'admin123',name:'Admin User',role:'admin'});
-        await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString(),nuclearReset:true});
+        await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString(),nuclearReset:true},{merge:true});
       }catch(e){}
-      try{saveDB();}catch(e){}
+      // DO NOT call saveDB() here — local DB is empty and we don't want to push emptiness
       localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
       _skipCloudLoad=false;
-    }else{
-      // RESET MODE: Check if another device already did the reset
-      _skipCloudLoad=true;
-      try{await authAsAdmin();}catch(e){}
-      var resetAlreadyDone=false;
+      // IMMEDIATE cloud pull for employees/trainings so login works without waiting for background sync
       try{
-        var metaDoc=await fbDB.collection('config').doc('meta').get();
-        if(metaDoc.exists && metaDoc.data().resetVersion===DB_VERSION){
-          resetAlreadyDone=true;
-          console.log('[reset] Another device already wiped Firebase for '+DB_VERSION+' — skipping wipe, loading from cloud');
+        await loadTombstonesFromCloud();
+        var nEmpSnap=await fbDB.collection('employees').get();
+        if(nEmpSnap.size>0){
+          var nTombSet=new Set(_deletedIds.employees||[]);
+          DB.employees=nEmpSnap.docs.map(function(x){return x.data();}).filter(function(e){return !nTombSet.has(e.id);});
         }
-      }catch(checkErr){console.warn('[reset] Meta check error:',checkErr.message);}
-      if(!resetAlreadyDone){
-        // FIRST DEVICE: wipe Firebase clean
-        DB.employees=[];DB.trainings=[];DB.testResults=[];DB.certificates=[];
-        DB.notifications=[];DB.customEquipment=[];DB.customQuestions=[];DB.auditLog=[];
-        DB.sops=[];
-        try{
-          var resetCols=['employees','trainings','testResults','certificates','notifications','sops','customEquipment','customQuestions','auditLog'];
-          for(var ri=0;ri<resetCols.length;ri++){
-            var rSnap=await fbDB.collection(resetCols[ri]).get();
-            var rBatch=fbDB.batch();
-            rSnap.docs.forEach(function(d){rBatch.delete(d.ref);});
-            if(rSnap.size>0)await rBatch.commit();
-          }
-          try{await fbDB.collection('config').doc('settings').delete();}catch(e){}
-          try{await fbDB.collection('deletedItems').get().then(function(s){var b=fbDB.batch();s.docs.forEach(function(d){b.delete(d.ref);});if(s.size>0)return b.commit();});}catch(e){}
-          console.log('[reset] Firebase collections WIPED — old data can never return');
-        }catch(resetErr){console.warn('[reset] Firebase wipe error (non-fatal):',resetErr);}
-        try{await saveDB();}catch(e){console.warn('[reset] saveDB error:',e);}
-        // Mark reset as done in Firebase so other devices skip the wipe
-        try{await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString()});}catch(e){}
-        console.log('[reset] Fresh start — Firebase wiped, reset marked in cloud');
-      }else{
-        // OTHER DEVICES: reset already done by another device — just load from cloud
-        console.log('[reset] Loading from cloud (reset already done by another device)...');
-        _skipCloudLoad=false;
-        var loadResult=await loadDBFromFirestore();
-        if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
-          fbLoadError='Failed to load: '+loadResult.failed.join(', ');
+        var nTrnSnap=await fbDB.collection('trainings').get();
+        if(nTrnSnap.size>0){
+          var nTrnTombSet=new Set(_deletedIds.trainings||[]);
+          DB.trainings=nTrnSnap.docs.map(function(x){return x.data();}).filter(function(t){return !nTrnTombSet.has(t.id);});
         }
-      }
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+        console.log('[nuclear] Pulled from cloud: '+DB.employees.length+' employees, '+DB.trainings.length+' trainings');
+      }catch(pullErr){console.warn('[nuclear] Cloud pull error:',pullErr);}
+    }else{
+      // RESET MODE: Version changed but not nuclear. Keep cloud data intact.
+      // _nuclearResetDone (if set) will block old testResults/certificates in loadDBFromFirestore.
+      console.log('[reset] Version mismatch — keeping cloud data, skipping old results only');
+      try{await authAsAdmin();}catch(e){}
+      // Mark reset as done in Firebase so other devices skip the wipe
+      try{await fbDB.collection('config').doc('meta').set({seeded:true,version:2,resetVersion:DB_VERSION,resetTime:new Date().toISOString()},{merge:true});}catch(e){}
+      // IMMEDIATE cloud pull for employees/trainings so login works without waiting for background sync
+      try{
+        await loadTombstonesFromCloud();
+        var rEmpSnap=await fbDB.collection('employees').get();
+        if(rEmpSnap.size>0){
+          var rTombSet=new Set(_deletedIds.employees||[]);
+          DB.employees=rEmpSnap.docs.map(function(x){return x.data();}).filter(function(e){return !rTombSet.has(e.id);});
+        }
+        var rTrnSnap=await fbDB.collection('trainings').get();
+        if(rTrnSnap.size>0){
+          var rTrnTombSet=new Set(_deletedIds.trainings||[]);
+          DB.trainings=rTrnSnap.docs.map(function(x){return x.data();}).filter(function(t){return !rTrnTombSet.has(t.id);});
+        }
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+        console.log('[reset] Pulled from cloud: '+DB.employees.length+' employees, '+DB.trainings.length+' trainings');
+      }catch(rPullErr){console.warn('[reset] Cloud pull error:',rPullErr);}
+      console.log('[reset] Fresh start — cloud data preserved, reset marked in cloud');
       localStorage.setItem(DB_STORAGE_KEY+'_version',DB_VERSION);
       _skipCloudLoad=false;
       localStorage.removeItem(DB_STORAGE_KEY+'_skipCloud');
@@ -7530,7 +7507,8 @@ async function initApp(){
   }
 
   // === Push missing employees + Auth accounts — NON-BLOCKING ===
-  if(firebaseReady && DB.employees.length>0){
+  // CRITICAL FIX: Always run when firebaseReady, even if local DB is empty (need to PULL from cloud)
+  if(firebaseReady){
     // ENABLE LOGIN FIRST — don't make users wait
     if(loadMsg)loadMsg.style.display='none';
     var fbSt=document.getElementById('loginFbStatus');
