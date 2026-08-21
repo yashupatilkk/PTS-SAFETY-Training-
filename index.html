@@ -904,26 +904,98 @@ let DB={
 };
 
 /* ============================================================
-   SELF-CLEAN: Remove ghost trainings from localStorage BEFORE anything loads
-   This runs before loadDB() so stale data never reaches the UI.
+   SELF-CLEAN: Remove ghost trainings, orphaned test results & certificates
+   from localStorage BEFORE anything loads. This runs before loadDB()
+   so stale data never reaches the UI.
 ============================================================ */
 (function(){
   try {
     var raw = localStorage.getItem('pts_safety_db');
     if (!raw) return;
     var db = JSON.parse(raw);
-    if (!db.trainings || !db.trainings.length) return;
-    var before = db.trainings.length;
-    db.trainings = db.trainings.filter(function(t) {
-      var n = (t.name || '').toLowerCase();
-      // Block known ghost training names
-      if (n.includes('electrical safety') && n.includes('animated safety videos')) return false;
-      if (n.includes('types of fire') && n.includes('extinguishing methods') && n.includes('complete safety guide')) return false;
-      return true;
-    });
-    if (db.trainings.length !== before) {
-      console.log('[SELF-CLEAN] Removed ' + (before - db.trainings.length) + ' ghost training(s) from localStorage');
+    var changed = false;
+
+    // 1) Remove ghost trainings by known name patterns
+    if (db.trainings && db.trainings.length) {
+      var before = db.trainings.length;
+      db.trainings = db.trainings.filter(function(t) {
+        var n = (t.name || '').toLowerCase();
+        if (n.includes('electrical safety') && n.includes('animated safety videos')) return false;
+        if (n.includes('types of fire') && n.includes('extinguishing methods') && n.includes('complete safety guide')) return false;
+        return true;
+      });
+      if (db.trainings.length !== before) {
+        console.log('[SELF-CLEAN] Removed ' + (before - db.trainings.length) + ' ghost training(s)');
+        changed = true;
+      }
+    }
+
+    // 2) Build set of valid training names from cleaned trainings
+    var validTrnNames = new Set((db.trainings || []).map(function(t) { return t.name; }));
+
+    // 3) Remove orphaned test results (reference trainings that no longer exist)
+    if (db.testResults && db.testResults.length) {
+      var beforeTR = db.testResults.length;
+      db.testResults = db.testResults.filter(function(r) {
+        // Must have a valid training name that exists in our (cleaned) trainings list
+        if (!r.training || !validTrnNames.has(r.training)) return false;
+        // Must have valid employee reference
+        if (!r.empId || !r.empName) return false;
+        return true;
+      });
+      if (db.testResults.length !== beforeTR) {
+        console.log('[SELF-CLEAN] Removed ' + (beforeTR - db.testResults.length) + ' orphaned test result(s)');
+        changed = true;
+      }
+    }
+
+    // 4) Remove orphaned certificates (reference trainings that no longer exist)
+    if (db.certificates && db.certificates.length) {
+      var beforeCert = db.certificates.length;
+      db.certificates = db.certificates.filter(function(c) {
+        if (!c.training || !validTrnNames.has(c.training)) return false;
+        if (!c.empId || !c.empName || !c.num) return false;
+        return true;
+      });
+      if (db.certificates.length !== beforeCert) {
+        console.log('[SELF-CLEAN] Removed ' + (beforeCert - db.certificates.length) + ' orphaned certificate(s)');
+        changed = true;
+      }
+    }
+
+    // 5) Deduplicate test results by ID (keep first occurrence)
+    if (db.testResults && db.testResults.length > 1) {
+      var seenIds = new Set();
+      var beforeDup = db.testResults.length;
+      db.testResults = db.testResults.filter(function(r) {
+        if (seenIds.has(r.id)) return false;
+        seenIds.add(r.id);
+        return true;
+      });
+      if (db.testResults.length !== beforeDup) {
+        console.log('[SELF-CLEAN] Deduplicated ' + (beforeDup - db.testResults.length) + ' test result(s)');
+        changed = true;
+      }
+    }
+
+    // 6) Deduplicate certificates by cert number
+    if (db.certificates && db.certificates.length > 1) {
+      var seenNums = new Set();
+      var beforeDupC = db.certificates.length;
+      db.certificates = db.certificates.filter(function(c) {
+        if (seenNums.has(c.num)) return false;
+        seenNums.add(c.num);
+        return true;
+      });
+      if (db.certificates.length !== beforeDupC) {
+        console.log('[SELF-CLEAN] Deduplicated ' + (beforeDupC - db.certificates.length) + ' certificate(s)');
+        changed = true;
+      }
+    }
+
+    if (changed) {
       localStorage.setItem('pts_safety_db', JSON.stringify(db));
+      console.log('[SELF-CLEAN] localStorage cleaned successfully');
     }
   } catch(e) {}
 })();
@@ -1376,17 +1448,21 @@ function startAutoSync(){
         }
       }
       // STEP 1: Push all local data to cloud (now filtered — no deleted items)
-      await Promise.all([
+      // SAFETY: Skip pushing testResults/certificates if empty — they may not have
+      // loaded from Firestore yet (loadDB() clears them, loadDBFromFirestore() fills them).
+      // Empty push is a no-op in fbSaveCollection, but this also avoids confusing logs.
+      var syncPromises=[
         fbSaveCollection('employees',DB.employees,'id'),
         fbSaveCollection('trainings',DB.trainings,'id'),
         fbSaveCollection('sops',DB.sops,'id'),
-        fbSaveCollection('testResults',DB.testResults,'id'),
-        fbSaveCollection('certificates',DB.certificates,'num'),
+        DB.testResults.length>0?fbSaveCollection('testResults',DB.testResults,'id'):Promise.resolve({ok:true,count:0}),
+        DB.certificates.length>0?fbSaveCollection('certificates',DB.certificates,'num'):Promise.resolve({ok:true,count:0}),
         fbSaveCollection('notifications',DB.notifications,'id'),
         fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
         fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
         fbSaveSettings()
-      ]);
+      ];
+      await Promise.all(syncPromises);
       // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
       if(isAdmin){
         try{
@@ -4858,10 +4934,14 @@ function saveDB(){
       fbSaveCollection('employees',cleanEmployees,'id'),
       fbSaveCollection('admins',DB.admins,'username'),
       fbSaveCollection('trainings',cleanTrainings,'id'),
-      fbSaveCollection('testResults',cleanTestResults,'id'),
-      fbSaveCollection('certificates',cleanCerts,'num'),
-      fbSaveCollection('notifications',DB.notifications,'id'),
       fbSaveCollection('sops',cleanSops,'id'),
+      // SAFETY: Only push testResults/certificates if non-empty.
+      // They are cleared in loadDB() and filled by loadDBFromFirestore().
+      // Pushing empty arrays won't delete cloud data (fbSaveCollection is a no-op),
+      // but skipping avoids confusing logs and unnecessary Firebase calls.
+      cleanTestResults.length>0?fbSaveCollection('testResults',cleanTestResults,'id'):Promise.resolve({ok:true,count:0}),
+      cleanCerts.length>0?fbSaveCollection('certificates',cleanCerts,'num'):Promise.resolve({ok:true,count:0}),
+      fbSaveCollection('notifications',DB.notifications,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveCollection('feedbackForms',DB.feedbackForms||[],'id'),
@@ -5075,13 +5155,18 @@ function loadDB(){
   DB.settings.sheetAutoSync=true;
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
-  // CRITICAL: Trainings come from Firebase cloud (source of truth).
-  // Clear stale local trainings here — loadDBFromFirestore() will repopulate from cloud.
-  // This prevents ghost trainings from reappearing from stale localStorage.
+  // CRITICAL: Trainings, test results & certificates come from Firebase cloud (source of truth).
+  // Clear stale local data here — loadDBFromFirestore() will repopulate from cloud.
+  // This prevents ghost trainings, phantom test results, and stale certificates
+  // from reappearing from stale localStorage.
   var staleTrnCount=DB.trainings.length;
+  var staleTRCount=DB.testResults.length;
+  var staleCertCount=DB.certificates.length;
   DB.trainings=[];
-  if(staleTrnCount>0){
-    console.log('[loadDB] Cleared '+staleTrnCount+' local training(s) — waiting for cloud data');
+  DB.testResults=[];
+  DB.certificates=[];
+  if(staleTrnCount>0||staleTRCount>0||staleCertCount>0){
+    console.log('[loadDB] Cleared local data — '+staleTrnCount+' training(s), '+staleTRCount+' test result(s), '+staleCertCount+' certificate(s) — waiting for cloud data');
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   }
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
