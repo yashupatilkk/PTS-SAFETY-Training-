@@ -4983,14 +4983,23 @@ async function loadDBFromFirestore(){
     var df2=0;
     DB.trainings.forEach(function(t){if(!t.duration||t.duration==='--'||t.duration==='-'){t.duration='';df2++;}});
     if(df2>0)console.log('[Firestore] Fixed '+df2+' training(s) with broken duration');
-    // ONE-TIME CLEANUP: Remove old trainings after cloud load too
-    var cfn=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
-    var cfIds=[];
-    DB.trainings=DB.trainings.filter(function(t){
-      var m=cfn.some(function(n){return(t.name||'').indexOf(n)!==-1;});
-      if(m){cfIds.push(t.id);return false;}return true;
-    });
-    if(cfIds.length>0){console.log('[Firestore] Cleaned '+cfIds.length+' old training(s)');cfIds.forEach(function(tid){fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});});}
+    // ONE-TIME CLEANUP: Remove old trainings after cloud load
+    if(!window._trnCleanupDone2){
+      window._trnCleanupDone2=true;
+      var cfn=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
+      var cfIds=[];
+      DB.trainings=DB.trainings.filter(function(t){
+        var m=cfn.some(function(n){return(t.name||'').indexOf(n)!==-1;});
+        if(m){cfIds.push(t.id);return false;}return true;
+      });
+      if(cfIds.length>0){
+        console.log('[Firestore] Cleaned '+cfIds.length+' old training(s)');
+        if(!_deletedIds.trainings)_deletedIds.trainings=[];
+        cfIds.forEach(function(tid){if(!_deletedIds.trainings.includes(tid))_deletedIds.trainings.push(tid);});
+        try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e){}
+        cfIds.forEach(function(tid){fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});});
+      }
+    }
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
 
@@ -5059,18 +5068,31 @@ function loadDB(){
     console.log('[loadDB] Fixed '+durFixed+' training(s) with broken duration');
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   }
-  // ONE-TIME CLEANUP: Remove old/broken trainings that user wants deleted
-  var cleanupNames=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
-  var cleanIds=[];
-  DB.trainings=DB.trainings.filter(function(t){
-    var match=cleanupNames.some(function(n){return (t.name||'').indexOf(n)!==-1;});
-    if(match){cleanIds.push(t.id);return false;}
-    return true;
-  });
-  if(cleanIds.length>0){
-    console.log('[loadDB] Cleaned up '+cleanIds.length+' old training(s):',cleanIds);
-    if(firebaseReady){cleanIds.forEach(function(tid){fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});});}
-    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  // ONE-TIME CLEANUP: Remove old/broken trainings permanently
+  if(!window._trnCleanupDone){
+    window._trnCleanupDone=true;
+    var cleanupNames=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
+    var cleanIds=[];
+    DB.trainings=DB.trainings.filter(function(t){
+      var match=cleanupNames.some(function(n){return (t.name||'').indexOf(n)!==-1;});
+      if(match){cleanIds.push(t.id);return false;}
+      return true;
+    });
+    if(cleanIds.length>0){
+      console.log('[loadDB] Cleaned up '+cleanIds.length+' old training(s):',cleanIds);
+      // Add tombstones so they NEVER come back from any source
+      if(!_deletedIds.trainings)_deletedIds.trainings=[];
+      cleanIds.forEach(function(tid){if(!_deletedIds.trainings.includes(tid))_deletedIds.trainings.push(tid);});
+      try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e){}
+      // Delete from Firebase immediately
+      if(firebaseReady){
+        (async function(){
+          try{await authAsAdmin();}catch(e){}
+          cleanIds.forEach(function(tid){fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});});
+        })();
+      }
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    }
   }
   // Rebuild completed arrays from testResults (source of truth)
   reconcileTrainingsFromResults();
