@@ -899,6 +899,7 @@ let DB={
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
+  feedbackForms:[],   // post-test feedback from employees
   admins:[{username:"admin",password:"admin123",name:"Admin User",role:"admin"}]
 };
 
@@ -1966,7 +1967,7 @@ function renderEmpDashboard(){
               <div><div style="font-weight:700;font-size:13px;">${t.name}</div><div style="font-size:11px;color:var(--muted);">${t.cat} · ${t.trainer}</div></div>
               <span class="badge badge-${done?"active":"warning"}" style="margin-left:auto;">${done?"✅ Done":"⏳ Pending"}</span>
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${t.duration} · Pass: ${t.passing}%</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${t.duration||'Not set'} · Pass: ${t.passing}%</div>
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
             ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
           </div>`;
@@ -2512,8 +2513,9 @@ function renderTrainings(){
             <div class="training-meta">
               <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
-              <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration}</span>
+              <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration||'Not set'}</span>
             </div>
+            ${t.manager?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">supervisor_account</span> Manager: <b>${t.manager}</b></div>`:''}
             <div class="training-progress"><div class="fill" style="width:${pct}%"></div></div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span style="font-size:10.5px;color:var(--muted);">${completedCount}/${enrolledCount} completed (${pct}%)</span>
@@ -2566,7 +2568,7 @@ function renderEmpTrainings(){
             <div class="training-meta">
               <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
-              <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration}</span>
+              <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration||'Not set'}</span>
             </div>
             ${hasVideo?`
             <div id="trnVidPlayer_${t.id}" style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);width:100%;height:200px;"></div>
@@ -2627,6 +2629,7 @@ function openAddTrnModal(){
         <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="nt_dept"><option>All</option>${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="nt_trainer">${DB.settings.trainerList.map(t=>`<option>${t}</option>`).join("")}</select></div>
+        <div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="nt_manager" placeholder="e.g. Mr. Sharma, Site Manager"></div>
         <div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="nt_date" type="date" value="${today}"></div>
         <div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="nt_dur" placeholder="e.g. 30 min, 2 hrs"></div>
         <div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="nt_pass" type="number" value="75" min="0" max="100"></div>
@@ -2721,7 +2724,7 @@ async function saveTraining(){
   var ytId=extractYoutubeId(ytUrl);
   if(!ytUrl){toast('YouTube video link is required!','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,manager:(document.getElementById('nt_manager')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
 
   // 1. Add to local array
   DB.trainings.push(t);
@@ -2775,8 +2778,9 @@ function openTrainingDetail(id){
       `:""}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:12.5px;">
         <div><span style="color:var(--muted);">Trainer</span><div><b>${t.trainer}</b></div></div>
+        <div><span style="color:var(--muted);">Manager</span><div><b>${t.manager||'Not assigned'}</b></div></div>
         <div><span style="color:var(--muted);">Date</span><div><b>${formatDate(t.date)}</b></div></div>
-        <div><span style="color:var(--muted);">Duration</span><div><b>${t.duration}</b></div></div>
+        <div><span style="color:var(--muted);">Duration</span><div><b>${t.duration||'Not set'}</b></div></div>
         <div><span style="color:var(--muted);">Passing Marks</span><div><b>${t.passing}%</b></div></div>
         <div><span style="color:var(--muted);">Validity</span><div><b>${t.validity}</b></div></div>
         <div><span style="color:var(--muted);">Certificate</span><div><b>${t.cert?"Yes":"No"}</b></div></div>
@@ -3476,13 +3480,13 @@ function renderQuizActive(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${current>0?`<button class="btn btn-outline" onclick="prevQuestion()"><span class="mat-ico">arrow_back</span> Prev</button>`:""}
         ${current<questions.length-1?`<button class="btn btn-amber" onclick="nextQuestion()">Next <span class="mat-ico">arrow_forward</span></button>`:""}
-        <button class="btn btn-green" onclick="if(confirm('Submit test now?'))submitQuiz()"><span class="mat-ico">check_circle</span> Submit Test</button>
+        <button class="btn btn-green" onclick="handleSubmitTestClick()"><span class="mat-ico">check_circle</span> Submit Test</button>
         <button class="btn btn-red" onclick="if(confirm('Cancel quiz?')){clearInterval(quizState.timer);quizState={active:false};renderQuizMenu();}"><span class="mat-ico">cancel</span> Cancel</button>
       </div>
     </div>
   `;
 }
-function selectAnswer(i){if(!quizState.active)return;quizState.answers[quizState.current]=i;renderQuizActive();}
+function selectAnswer(i){if(!quizState.active)return;quizState.answers[quizState.current]=i;var allAnswered=quizState.answers.every(function(a){return a>=0;});if(allAnswered&&quizState.questions.length>0){renderQuizActive();setTimeout(function(){showFeedbackForm();},300);return;}renderQuizActive();}
 function nextQuestion(){if(quizState.current<quizState.questions.length-1){quizState.current++;renderQuizActive();}}
 function prevQuestion(){if(quizState.current>0){quizState.current--;renderQuizActive();}}
 function jumpToQuestion(i){quizState.current=i;renderQuizActive();}
@@ -3604,6 +3608,61 @@ function submitQuiz(){
   if(pass&&certNum)toast(`🏆 Congratulations! Passed with ${score}% — Certificate auto-generated!`,"success",5000);
   else if(pass)toast(`✅ Passed with ${score}%! Well done.`,"success",4000);
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
+}
+
+function handleSubmitTestClick(){var allAnswered=quizState.answers.every(function(a){return a>=0;});var unanswered=quizState.answers.filter(function(a){return a<0;}).length;if(unanswered>0){toast(unanswered+' question(s) not answered. Please answer all before submitting.','error');return;}showFeedbackForm();}
+function showFeedbackForm(){if(!quizState.active)return;var overlay=document.getElementById('feedbackOverlay');if(overlay){overlay.style.display='flex';return;}
+var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+div.innerHTML=`
+<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-lg);max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+  <div style="padding:20px 24px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:12px;">
+    <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,176,32,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span class="mat-ico" style="color:var(--amber);font-size:22px;">rate_review</span></div>
+    <div style="flex:1;"><div style="font-size:16px;font-weight:700;">Training Feedback</div><div style="font-size:12px;color:var(--muted);">${quizState.training} — Required before results</div></div>
+  </div>
+  <div style="padding:20px 24px;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:16px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">warning</span> Feedback is mandatory — your test will be submitted after</div>
+    <div style="margin-bottom:18px;">
+      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">1. How would you rate the training content quality?</label>
+      <div id="fb_content" style="display:flex;gap:6px;">${[1,2,3,4,5].map(function(n){return '<div class="fb-star" data-val="'+n+'" onclick="setFbRating(\'fb_content\','+n+')" style="cursor:pointer;font-size:28px;color:var(--bdr);transition:color .15s;">&#9733;</div>';}).join('')}</div>
+    </div>
+    <div style="margin-bottom:18px;">
+      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">2. How would you rate the trainer?</label>
+      <div id="fb_trainer" style="display:flex;gap:6px;">${[1,2,3,4,5].map(function(n){return '<div class="fb-star" data-val="'+n+'" onclick="setFbRating(\'fb_trainer\','+n+')" style="cursor:pointer;font-size:28px;color:var(--bdr);transition:color .15s;">&#9733;</div>';}).join('')}</div>
+    </div>
+    <div style="margin-bottom:18px;">
+      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">3. How clear was the training material?</label>
+      <div id="fb_clarity" style="display:flex;gap:6px;">${[1,2,3,4,5].map(function(n){return '<div class="fb-star" data-val="'+n+'" onclick="setFbRating(\'fb_clarity\','+n+')" style="cursor:pointer;font-size:28px;color:var(--bdr);transition:color .15s;">&#9733;</div>';}).join('')}</div>
+    </div>
+    <div style="margin-bottom:18px;">
+      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">4. Would you recommend this training to others?</label>
+      <div style="display:flex;gap:10px;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);"><input type="radio" name="fb_recommend" value="yes" checked> Yes</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);"><input type="radio" name="fb_recommend" value="no"> No</label>
+      </div>
+    </div>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">5. Any suggestions or comments? (Optional)</label>
+      <textarea id="fb_comments" rows="3" placeholder="Share your thoughts about this training..." style="width:100%;padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+    </div>
+  </div>
+  <div style="padding:14px 24px 20px;border-top:1px solid var(--bdr);display:flex;gap:10px;justify-content:flex-end;">
+    <button class="btn btn-green" onclick="submitFeedbackAndQuiz()"><span class="mat-ico">check_circle</span> Submit Feedback & Complete Test</button>
+  </div>
+</div>
+`;
+document.body.appendChild(div);}
+let _fbRatings={fb_content:0,fb_trainer:0,fb_clarity:0};
+function setFbRating(groupId,val){_fbRatings[groupId]=val;var stars=document.querySelectorAll('#'+groupId+' .fb-star');stars.forEach(function(s){s.style.color=parseInt(s.dataset.val)<=val?'var(--amber)':'var(--bdr)';});}
+function submitFeedbackAndQuiz(){
+if(_fbRatings.fb_content===0||_fbRatings.fb_trainer===0||_fbRatings.fb_clarity===0){toast('Please rate all three categories (content, trainer, clarity)','error');return;}
+var recommendEl=document.querySelector('input[name="fb_recommend"]:checked');var commentsEl=document.getElementById('fb_comments');
+var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',training:quizState.training,category:quizState.category,contentRating:_fbRatings.fb_content,trainerRating:_fbRatings.fb_trainer,clarityRating:_fbRatings.fb_clarity,recommend:recommendEl?recommendEl.value==='yes':true,comments:commentsEl?commentsEl.value.trim():'',date:new Date().toISOString().split('T')[0],timestamp:Date.now()};
+DB.feedbackForms.push(fb);
+var overlay=document.getElementById('feedbackOverlay');if(overlay)overlay.remove();
+_fbRatings={fb_content:0,fb_trainer:0,fb_clarity:0};
+if(firebaseReady){try{fbDB.collection('feedbackForms').doc(String(fb.id)).set({...fb},{merge:true});}catch(e){console.warn('Firebase feedback save error:',e);}}
+(function(){try{var sheetUrl=DB.settings.sheetUrl||'';if(!sheetUrl)return;var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_fb_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';inp.value=JSON.stringify({sheet:'Feedback',data:[{date:fb.date,empId:fb.empId,empName:fb.empName,dept:fb.dept,training:fb.training,category:fb.category,contentRating:fb.contentRating+'/5',trainerRating:fb.trainerRating+'/5',clarityRating:fb.clarityRating+'/5',recommend:fb.recommend?'Yes':'No',comments:fb.comments}]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);}catch(e){console.warn('Feedback sheet sync error:',e);}})();
+submitQuiz();
 }
 
 /* ============================================================
@@ -4276,7 +4335,7 @@ function buildTrainingPayload(){
     var enrolled=(t.enrolled||[]).length;
     var passResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
     var completed=Math.max((t.completed||[]).length,passResults.size);
-    return{id:t.id,name:t.name,cat:t.cat,trainer:t.trainer,date:t.date||"",duration:t.duration||"",enrolled:enrolled,completed:completed,passing:t.passing||70,certRequired:t.cert?"Yes":"No",questions:(t.questions||[]).length,youtubeLink:t.youtubeLink||""};
+    return{id:t.id,name:t.name,cat:t.cat,trainer:t.trainer,manager:t.manager||"",date:t.date||"",duration:t.duration||"Not set",enrolled:enrolled,completed:completed,passing:t.passing||70,certRequired:t.cert?"Yes":"No",questions:(t.questions||[]).length,youtubeLink:t.youtubeLink||""};
   });
 }
 function buildCertificatePayload(){
@@ -4364,9 +4423,6 @@ let _sheetSyncRunning=false;
 
 // Queue a sheet sync — call this after ANY data change (debounced automatically)
 function queueSheetSync(sheetNames){
-  // DEBUG: Show why auto-sync might be blocked
-  var debugMsg='isAdmin='+isAdmin+', sync='+(DB.settings.sheetAutoSync!==false?'ON':'OFF')+', url='+(DB.settings.sheetUrl?'YES':'NO');
-  toast('DEBUG: '+debugMsg,'info',4000);
   if(!isAdmin) return; // Only admin can sync
   if(DB.settings.sheetAutoSync===false) return; // Auto-sync OFF (default is ON)
   var url=DB.settings.sheetUrl||"";
@@ -4778,6 +4834,7 @@ function saveDB(){
       fbSaveCollection('sops',cleanSops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+      fbSaveCollection('feedbackForms',DB.feedbackForms||[],'id'),
       fbSaveSettings()
     ]).then(results=>{
       // Check if any collection FAILED to save to Firebase
@@ -4839,6 +4896,7 @@ function loadDBFromLocal(){
       });
       DB.customQuestions=saved.customQuestions;
     }
+    if(saved.feedbackForms&&Array.isArray(saved.feedbackForms))DB.feedbackForms=saved.feedbackForms;
     return true;
   }catch(e){console.warn("Local load failed:",e);return false;}
 }
@@ -4911,7 +4969,8 @@ async function loadDBFromFirestore(){
       ['notifications','id',d=>{if(d.size>0)DB.notifications=d.docs.map(x=>x.data());}],
       ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
       ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
-      ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}]
+      ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}],
+      ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}]
     ];
     const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
     // Load settings separately (it's a single doc, not a collection)
