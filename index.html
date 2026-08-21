@@ -5019,6 +5019,15 @@ function loadDB(){
   DB.settings.sheetAutoSync=true;
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
+  // CRITICAL: Trainings come from Firebase cloud (source of truth).
+  // Clear stale local trainings here — loadDBFromFirestore() will repopulate from cloud.
+  // This prevents ghost trainings from reappearing from stale localStorage.
+  var staleTrnCount=DB.trainings.length;
+  DB.trainings=[];
+  if(staleTrnCount>0){
+    console.log('[loadDB] Cleared '+staleTrnCount+' local training(s) — waiting for cloud data');
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  }
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
   var badTrnIds=[];
   DB.trainings=DB.trainings.filter(function(t){
