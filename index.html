@@ -1967,7 +1967,7 @@ function renderEmpDashboard(){
               <div><div style="font-weight:700;font-size:13px;">${t.name}</div><div style="font-size:11px;color:var(--muted);">${t.cat} · ${t.trainer}</div></div>
               <span class="badge badge-${done?"active":"warning"}" style="margin-left:auto;">${done?"✅ Done":"⏳ Pending"}</span>
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${t.duration||'Not set'} · Pass: ${t.passing}%</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${(t.duration&&t.duration!=='--')?t.duration:'Not set'} · Pass: ${t.passing}%</div>
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
             ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
           </div>`;
@@ -2513,7 +2513,7 @@ function renderTrainings(){
             <div class="training-meta">
               <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
-              <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration||'Not set'}</span>
+              <span><span class="mat-ico" style="font-size:12px;">timer</span>${(t.duration&&t.duration!=='--')?t.duration:'Not set'}</span>
             </div>
             ${t.manager?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">supervisor_account</span> Manager: <b>${t.manager}</b></div>`:''}
             <div class="training-progress"><div class="fill" style="width:${pct}%"></div></div>
@@ -2568,7 +2568,7 @@ function renderEmpTrainings(){
             <div class="training-meta">
               <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
-              <span><span class="mat-ico" style="font-size:12px;">timer</span>${t.duration||'Not set'}</span>
+              <span><span class="mat-ico" style="font-size:12px;">timer</span>${(t.duration&&t.duration!=='--')?t.duration:'Not set'}</span>
             </div>
             ${hasVideo?`
             <div id="trnVidPlayer_${t.id}" style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);width:100%;height:200px;"></div>
@@ -2780,7 +2780,7 @@ function openTrainingDetail(id){
         <div><span style="color:var(--muted);">Trainer</span><div><b>${t.trainer}</b></div></div>
         <div><span style="color:var(--muted);">Manager</span><div><b>${t.manager||'Not assigned'}</b></div></div>
         <div><span style="color:var(--muted);">Date</span><div><b>${formatDate(t.date)}</b></div></div>
-        <div><span style="color:var(--muted);">Duration</span><div><b>${t.duration||'Not set'}</b></div></div>
+        <div><span style="color:var(--muted);">Duration</span><div><b>${(t.duration&&t.duration!=='--')?t.duration:'Not set'}</b></div></div>
         <div><span style="color:var(--muted);">Passing Marks</span><div><b>${t.passing}%</b></div></div>
         <div><span style="color:var(--muted);">Validity</span><div><b>${t.validity}</b></div></div>
         <div><span style="color:var(--muted);">Certificate</span><div><b>${t.cert?"Yes":"No"}</b></div></div>
@@ -3941,7 +3941,7 @@ function exportAnalyticsExcel(){
 }
 function exportTrnReport(){
   const ws=XLSX.utils.json_to_sheet(DB.trainings.map(t=>({
-    "ID":t.id,"Name":t.name,"Category":t.cat,"Dept":t.dept,"Trainer":t.trainer,"Date":t.date,"Duration":t.duration,"Enrolled":t.enrolled?.length||0,"Completed":t.completed?.length||0,"Pass Marks":t.passing+"%"
+    "ID":t.id,"Name":t.name,"Category":t.cat,"Dept":t.dept,"Trainer":t.trainer,"Date":t.date,"Duration":(t.duration&&t.duration!=='--')?t.duration:'Not set',"Enrolled":t.enrolled?.length||0,"Completed":t.completed?.length||0,"Pass Marks":t.passing+"%"
   })));
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Trainings");
   XLSX.writeFile(wb,"trainings_report.xlsx");toast("Training report exported","success");
