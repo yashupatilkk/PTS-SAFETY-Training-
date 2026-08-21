@@ -2475,6 +2475,11 @@ function exportEmpExcel(){
 ============================================================ */
 function renderTrainings(){
   if(!isAdmin){renderEmpTrainings();return;}
+  // LIVE CLEANUP: Remove old trainings on every render
+  var _cn=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
+  var _had=false;
+  DB.trainings=DB.trainings.filter(function(t){var m=_cn.some(function(n){return(t.name||'').indexOf(n)!==-1;});if(m){_had=true;if(!_deletedIds.trainings)_deletedIds.trainings=[];if(!_deletedIds.trainings.includes(t.id))_deletedIds.trainings.push(t.id);try{fbDB.collection('trainings').doc(String(t.id)).delete().catch(function(){});}catch(e){}return false;}return true;});
+  if(_had){try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e2){}}catch(e){}}
   // Filter out any corrupted entries that slipped through
   const cleanTrainings=DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined'&&t.cat;});
   const filtered=cleanTrainings.filter(t=>{
@@ -4955,7 +4960,9 @@ async function loadDBFromFirestore(){
       ['trainings','id',d=>{
         const cloudTrns=d.docs.map(x=>x.data());
         const cloudIds=new Set(cloudTrns.map(t=>t.id));
-        const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id));
+        // Cloud is the single source of truth for trainings.
+        // Only restore local items added recently (< 1 hour) that haven't synced yet.
+        const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id)&&t._localAddedAt&&(Date.now()-t._localAddedAt)<3600000);
         DB.trainings=[...cloudTrns,...localOnly];
       }],
       ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
@@ -4983,41 +4990,14 @@ async function loadDBFromFirestore(){
     var df2=0;
     DB.trainings.forEach(function(t){if(!t.duration||t.duration==='--'||t.duration==='-'){t.duration='';df2++;}});
     if(df2>0)console.log('[Firestore] Fixed '+df2+' training(s) with broken duration');
-    // ONE-TIME CLEANUP: Remove old trainings after cloud load
-    if(!window._trnCleanupDone2){
-      window._trnCleanupDone2=true;
-      var cfn=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
-      var cfIds=[];
-      DB.trainings=DB.trainings.filter(function(t){
-        var m=cfn.some(function(n){return(t.name||'').indexOf(n)!==-1;});
-        if(m){cfIds.push(t.id);return false;}return true;
-      });
-      if(cfIds.length>0){
-        console.log('[Firestore] Cleaned '+cfIds.length+' old training(s)');
-        if(!_deletedIds.trainings)_deletedIds.trainings=[];
-        cfIds.forEach(function(tid){if(!_deletedIds.trainings.includes(tid))_deletedIds.trainings.push(tid);});
-        try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e){}
-        cfIds.forEach(function(tid){fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});});
-      }
-    }
+
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
 
-    // === AGGRESSIVE LOCAL MERGE: ensure NO local employee is ever lost ===
-    // Always merge local employees/trainings that cloud doesn't have (even without _localAddedAt)
-    ['employees','trainings','sops'].forEach(function(coll){
-      if(!Array.isArray(DB[coll]))return;
-      var currentIds=new Set(DB[coll].map(function(x){return x.id;}));
-      localSnapshot[coll].forEach(function(item){
-        if(!currentIds.has(item.id)){
-          var tombList=_deletedIds[coll]||[];
-          if(!tombList.includes(item.id)){
-            DB[coll].push(item);
-            console.warn('LOCAL MERGE: restored '+coll+' '+item.id+' ('+item.name+') from local data');
-          }
-        }
-      });
-    });
+    // NOTE: AGGRESSIVE LOCAL MERGE removed — it was restoring deleted trainings
+    // from stale localStorage snapshots. Cloud is now the single source of truth.
+    // Local-only items are still preserved via their _localAddedAt timestamp
+    // in the cloud merge logic above.
 
     // Save merged data to localStorage
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
@@ -5068,32 +5048,7 @@ function loadDB(){
     console.log('[loadDB] Fixed '+durFixed+' training(s) with broken duration');
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   }
-  // ONE-TIME CLEANUP: Remove old/broken trainings permanently
-  if(!window._trnCleanupDone){
-    window._trnCleanupDone=true;
-    var cleanupNames=['Safety Precautions For Electrical Safety | Animated Safety Videos','Fire Fighting'];
-    var cleanIds=[];
-    DB.trainings=DB.trainings.filter(function(t){
-      var match=cleanupNames.some(function(n){return (t.name||'').indexOf(n)!==-1;});
-      if(match){cleanIds.push(t.id);return false;}
-      return true;
-    });
-    if(cleanIds.length>0){
-      console.log('[loadDB] Cleaned up '+cleanIds.length+' old training(s):',cleanIds);
-      // Add tombstones so they NEVER come back from any source
-      if(!_deletedIds.trainings)_deletedIds.trainings=[];
-      cleanIds.forEach(function(tid){if(!_deletedIds.trainings.includes(tid))_deletedIds.trainings.push(tid);});
-      try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e){}
-      // Delete from Firebase immediately
-      if(firebaseReady){
-        (async function(){
-          try{await authAsAdmin();}catch(e){}
-          cleanIds.forEach(function(tid){fbDB.collection('trainings').doc(String(tid)).delete().catch(function(){});});
-        })();
-      }
-      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-    }
-  }
+
   // Rebuild completed arrays from testResults (source of truth)
   reconcileTrainingsFromResults();
   // Always ensure defaults exist
