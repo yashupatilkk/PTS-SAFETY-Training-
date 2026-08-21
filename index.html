@@ -4979,6 +4979,10 @@ async function loadDBFromFirestore(){
     await loadTombstonesFromCloud();
     // Rebuild completed arrays from testResults (source of truth)
     reconcileTrainingsFromResults();
+    // MIGRATION: Fix broken duration values after cloud load
+    var df2=0;
+    DB.trainings.forEach(function(t){if(!t.duration||t.duration==='--'||t.duration==='-'){t.duration='';df2++;}});
+    if(df2>0)console.log('[Firestore] Fixed '+df2+' training(s) with broken duration');
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
 
@@ -5036,6 +5040,15 @@ function loadDB(){
       });
     }
     // Save cleaned data immediately
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  }
+  // MIGRATION: Fix broken duration values on existing trainings
+  var durFixed=0;
+  DB.trainings.forEach(function(t){
+    if(!t.duration||t.duration==='--'||t.duration==='-'){t.duration='';durFixed++;}
+  });
+  if(durFixed>0){
+    console.log('[loadDB] Fixed '+durFixed+' training(s) with broken duration');
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   }
   // Rebuild completed arrays from testResults (source of truth)
