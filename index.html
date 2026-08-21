@@ -904,6 +904,31 @@ let DB={
 };
 
 /* ============================================================
+   SELF-CLEAN: Remove ghost trainings from localStorage BEFORE anything loads
+   This runs before loadDB() so stale data never reaches the UI.
+============================================================ */
+(function(){
+  try {
+    var raw = localStorage.getItem('pts_safety_db');
+    if (!raw) return;
+    var db = JSON.parse(raw);
+    if (!db.trainings || !db.trainings.length) return;
+    var before = db.trainings.length;
+    db.trainings = db.trainings.filter(function(t) {
+      var n = (t.name || '').toLowerCase();
+      // Block known ghost training names
+      if (n.includes('electrical safety') && n.includes('animated safety videos')) return false;
+      if (n.includes('types of fire') && n.includes('extinguishing methods') && n.includes('complete safety guide')) return false;
+      return true;
+    });
+    if (db.trainings.length !== before) {
+      console.log('[SELF-CLEAN] Removed ' + (before - db.trainings.length) + ' ghost training(s) from localStorage');
+      localStorage.setItem('pts_safety_db', JSON.stringify(db));
+    }
+  } catch(e) {}
+})();
+
+/* ============================================================
    FIREBASE CONFIG
 ============================================================ */
 const firebaseConfig={
@@ -4993,6 +5018,37 @@ async function loadDBFromFirestore(){
 
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
+
+    // Clean orphan test results & certificates (reference trainings that no longer exist)
+    var validTrnNames=new Set(DB.trainings.map(function(t){return t.name;}));
+    if(validTrnNames.size>0){
+      var beforeTR=DB.testResults.length;
+      DB.testResults=DB.testResults.filter(function(r){return validTrnNames.has(r.training);});
+      var beforeCert=DB.certificates.length;
+      DB.certificates=DB.certificates.filter(function(c){return validTrnNames.has(c.training);});
+      if(DB.testResults.length!==beforeTR||DB.certificates.length!==beforeCert){
+        console.log('[Firestore] Cleaned orphans: '+(beforeTR-DB.testResults.length)+' test(s), '+(beforeCert-DB.certificates.length)+' cert(s) for deleted trainings');
+        // Remove orphaned items from Firebase too
+        if(firebaseReady){
+          (async function(){
+            try{
+              await authAsAdmin();
+              var allSnap=await fbDB.collection('testResults').get();
+              var delBatch=fbDB.batch();
+              allSnap.docs.forEach(function(d){if(!validTrnNames.has(d.data().training))delBatch.delete(d.ref);});
+              if(delBatch._ops.length)await delBatch.commit();
+            }catch(e){}
+            try{
+              await authAsAdmin();
+              var certSnap=await fbDB.collection('certificates').get();
+              var delBatch2=fbDB.batch();
+              certSnap.docs.forEach(function(d){if(!validTrnNames.has(d.data().training))delBatch2.delete(d.ref);});
+              if(delBatch2._ops.length)await delBatch2.commit();
+            }catch(e){}
+          })();
+        }
+      }
+    }
 
     // NOTE: AGGRESSIVE LOCAL MERGE removed — it was restoring deleted trainings
     // from stale localStorage snapshots. Cloud is now the single source of truth.
