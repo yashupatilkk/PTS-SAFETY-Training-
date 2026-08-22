@@ -4926,7 +4926,7 @@ function buildTrainingPayload(){
     var completed=Math.max((t.completed||[]).length,passResults.size);
     var enrolledNames=(t.enrolled||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
     var completedNames=(t.completed||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
-    var retrainingCount=(t.retrainingRecords||[]).length;
+    var retrainedCount=(t.retrainingRecords||[]).length;
     var offlineCount=(t.offlineRecords||[]).length;
     return{Company:company,TrainingID:t.id,TrainingName:t.name,Category:t.cat,Department:t.dept||"All",Trainer:t.trainer,Manager:t.manager||"",TrainingDate:t.date||"",Duration:t.duration||"Not set",PassingMarks:t.passing||70,CertificateValidity:t.validity||"1 Year",CertificateRequired:t.cert?"Yes":"No",Description:t.desc||"",YouTubeLink:t.youtubeLink||"",TotalEnrolled:enrolled,TotalCompleted:completed,PassRate:enrolled>0?Math.round(completed/enrolled*100)+"%":"0%",CustomQuestions:(t.questions||[]).length,EnrolledEmployees:enrolledNames,CompletedEmployees:completedNames,RetrainedCount:retrainedCount,OfflineTrainingCount:offlineCount,CreatedDate:t.createdAt||"",CreatedBy:t.createdBy||"",ModifiedBy:t.modifiedBy||"",ModifiedDate:t.modifiedAt||"",CorrectiveActionCount:(t.retrainingRecords||[]).length+(t.offlineRecords||[]).length};
   });
