@@ -2878,6 +2878,7 @@ async function saveTraining(){
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
   const enrolledEmps=DB.employees.filter(e=>(t.enrolled||[]).includes(e.id));
+  const trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===t.name;});
   const ytLinkId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
   openModal(`
     <div class="modal-accent"></div>
@@ -2930,9 +2931,14 @@ function openTrainingDetail(id){
             <td><button class="btn btn-sm btn-red" onclick="removeEmployeeFromTraining('${t.id}','${e.id}','${e.name.replace(/'/g,"\\\'")}')" title="Remove from training"><span class="mat-ico" style="font-size:14px;">person_remove</span></button></td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)</div>
+      ${trnFeedbacks.length?`<div class="table-wrap" style="max-height:280px;overflow-y:auto;"><table>
+        <thead><tr><th>Emp ID</th><th>Name</th><th>Date</th><th>Overall</th><th>Q1-Q10 Avg</th><th>Enjoyed</th><th>Details</th></tr></thead>
+        <tbody>${trnFeedbacks.map(function(fb){var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=fb.overallRating||0;var olColor=overallScore>=4?'var(--green)':overallScore>=3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
     </div>
-  `,"800px");
+  `,"900px");
 }
+function showFeedbackDetail(fbId){var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});if(!fb){toast('Feedback not found','error');return;}var ratings=fb.ratings||{};var rows='';for(var i=1;i<=10;i++){var rk='q'+i;var r=ratings[rk];if(r){var color=r.score>=4?'var(--green)':r.score>=3?'var(--amber)':'var(--red)';rows+='<tr><td style="padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bdr);">'+i+'. '+r.text+'</td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);"><span style="color:'+color+';font-weight:700;">'+r.label+'</span></td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);">'+r.score+'/5</td></tr>';}}var olColor=(fb.overallRating||0)>=4?'var(--green)':(fb.overallRating||0)>=3?'var(--amber)':'var(--red)';openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Feedback Detail — '+fb.empName+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px;"><div><span style="color:var(--muted);">Employee</span><div><b>'+fb.empName+'</b> ('+fb.empId+')</div></div><div><span style="color:var(--muted);">Department</span><div><b>'+fb.dept+'</b></div></div><div><span style="color:var(--muted);">Designation</span><div><b>'+(fb.desig||'—')+'</b></div></div><div><span style="color:var(--muted);">Training</span><div><b>'+fb.training+'</b></div></div><div><span style="color:var(--muted);">Trainer</span><div><b>'+(fb.trainer||'—')+'</b></div></div><div><span style="color:var(--muted);">Date</span><div><b>'+fb.date+'</b></div></div></div><div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Responses</div><div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th style="text-align:left;">Statement</th><th>Rating</th><th>Score</th></tr></thead><tbody>'+rows+'</tbody></table></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;"><div><span style="font-size:12px;font-weight:700;color:var(--txt);">Overall Rating</span><div style="margin-top:4px;"><span class="badge" style="background:'+olColor+'20;color:'+olColor+';font-size:14px;padding:6px 14px;">'+fb.overallLabel+' ('+fb.overallRating+'/5)</span></div></div></div>'+(fb.enjoy?'<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:700;color:var(--txt);">What did you enjoy most?</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.enjoy+'</div></div>':'')+(fb.suggestions?'<div><span style="font-size:12px;font-weight:700;color:var(--txt);">Suggestions</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.suggestions+'</div></div>':'')+'</div>','700px');}
 function assignEmployees(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
   const available=DB.employees.filter(e=>!(t.enrolled||[]).includes(e.id));
@@ -3752,56 +3758,88 @@ function submitQuiz(){
 
 function handleSubmitTestClick(){var allAnswered=quizState.answers.every(function(a){return a>=0;});var unanswered=quizState.answers.filter(function(a){return a<0;}).length;if(unanswered>0){toast(unanswered+' question(s) not answered. Please answer all before submitting.','error');return;}showFeedbackForm();}
 function showFeedbackForm(){if(!quizState.active)return;var overlay=document.getElementById('feedbackOverlay');if(overlay){overlay.style.display='flex';return;}
-var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
+var today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+var empInfoRows=`<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);width:100px;"><b>Name:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.name||'—'}</td><td style="padding:4px 8px;font-size:12px;color:var(--muted);width:100px;"><b>Employee ID:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.id||'—'}</td></tr>
+<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Department:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.dept||'—'}</td><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Designation:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.desig||'—'}</td></tr>
+<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Date:</b></td><td style="padding:4px 8px;font-size:13px;">${today}</td><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Manager:</b></td><td style="padding:4px 8px;font-size:13px;">${trnMatch?trnMatch.manager||'Not assigned':'Not assigned'}</td></tr>
+<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Training:</b></td><td style="padding:4px 8px;font-size:13px;" colspan="3"><b style="color:var(--amber);">${quizState.training}</b></td></tr>
+<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Trainer:</b></td><td style="padding:4px 8px;font-size:13px;" colspan="3">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td></tr>`;
+var likertRows=FB_QUESTIONS.map(function(q,i){return '<tr><td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--bdr);">'+(i+1)+'. '+q+'</td>'
++FB_SCALE.map(function(label,li){var v=li+1;return '<td style="text-align:center;padding:6px 4px;border-bottom:1px solid var(--bdr);"><button class="fb_likert_'+i+' fb-likert-btn" data-val="'+v+'" onclick="setFbRating('+i+','+v+')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:11px;cursor:pointer;transition:all .15s;min-width:60px;">'+label+'</button></td>';}).join('')
++'</tr>';}).join('');
+var overallBtns=FB_OVERALL.map(function(label,i){var v=i+1;return '<button class="fb_overall_btn" data-val="'+v+'" onclick="setFbOverall('+v+')" style="padding:8px 16px;border-radius:8px;border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:12px;cursor:pointer;transition:all .15s;flex:1;text-align:center;">'+label+'</button>';}).join('');
+var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px;';
 div.innerHTML=`
-<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-lg);max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5);">
-  <div style="padding:20px 24px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:12px;">
+<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-lg);max-width:900px;width:100%;max-height:95vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+  <div style="padding:16px 20px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--sur);z-index:2;border-radius:var(--r-lg) var(--r-lg) 0 0;">
     <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,176,32,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span class="mat-ico" style="color:var(--amber);font-size:22px;">rate_review</span></div>
-    <div style="flex:1;"><div style="font-size:16px;font-weight:700;">Training Feedback</div><div style="font-size:12px;color:var(--muted);">${quizState.training} — Required before results</div></div>
+    <div style="flex:1;"><div style="font-size:15px;font-weight:700;">IMSP 29 F05 — Training Feedback Form</div><div style="font-size:11px;color:var(--muted);">${quizState.training} — Required before results</div></div>
   </div>
-  <div style="padding:20px 24px;">
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:16px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">warning</span> Feedback is mandatory — your test will be submitted after</div>
-    <div style="margin-bottom:18px;">
-      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">1. How would you rate the training content quality?</label>
-      <div id="fb_content" style="display:flex;gap:6px;">${[1,2,3,4,5].map(function(n){return '<div class="fb-star" data-val="'+n+'" onclick="setFbRating(\'fb_content\','+n+')" style="cursor:pointer;font-size:28px;color:var(--bdr);transition:color .15s;">&#9733;</div>';}).join('')}</div>
+  <div style="padding:16px 20px;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:12px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">warning</span> Feedback is mandatory — your test will be submitted after</div>
+    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px;">Employee Information</div>
+    <div class="table-wrap" style="margin-bottom:16px;"><table style="width:100%;border-collapse:collapse;">
+    ${empInfoRows}
+    </table></div>
+    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px;">Training Evaluation</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Please indicate your impressions of the items listed below.</div>
+    <div class="table-wrap" style="margin-bottom:16px;"><table style="width:100%;border-collapse:collapse;">
+    <thead><tr><th style="text-align:left;padding:6px 8px;font-size:11px;border-bottom:2px solid var(--amber);">Statement</th>${FB_SCALE.map(function(l){return '<th style="text-align:center;padding:6px 4px;font-size:10px;border-bottom:2px solid var(--amber);min-width:60px;">'+l+'</th>';}).join('')}</tr></thead>
+    <tbody>${likertRows}</tbody>
+    </table></div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:12px;font-weight:700;color:var(--txt);display:block;margin-bottom:8px;">How do you rate the training overall?</label>
+      <div style="display:flex;gap:6px;">${overallBtns}</div>
     </div>
-    <div style="margin-bottom:18px;">
-      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">2. How would you rate the trainer?</label>
-      <div id="fb_trainer" style="display:flex;gap:6px;">${[1,2,3,4,5].map(function(n){return '<div class="fb-star" data-val="'+n+'" onclick="setFbRating(\'fb_trainer\','+n+')" style="cursor:pointer;font-size:28px;color:var(--bdr);transition:color .15s;">&#9733;</div>';}).join('')}</div>
-    </div>
-    <div style="margin-bottom:18px;">
-      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">3. How clear was the training material?</label>
-      <div id="fb_clarity" style="display:flex;gap:6px;">${[1,2,3,4,5].map(function(n){return '<div class="fb-star" data-val="'+n+'" onclick="setFbRating(\'fb_clarity\','+n+')" style="cursor:pointer;font-size:28px;color:var(--bdr);transition:color .15s;">&#9733;</div>';}).join('')}</div>
-    </div>
-    <div style="margin-bottom:18px;">
-      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">4. Would you recommend this training to others?</label>
-      <div style="display:flex;gap:10px;">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);"><input type="radio" name="fb_recommend" value="yes" checked> Yes</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);"><input type="radio" name="fb_recommend" value="no"> No</label>
-      </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:12px;font-weight:700;color:var(--txt);display:block;margin-bottom:8px;">What did you enjoy most about the training?</label>
+      <textarea id="fb_enjoy" rows="2" placeholder="Share what you liked..." style="width:100%;padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:13px;resize:vertical;font-family:inherit;"></textarea>
     </div>
     <div style="margin-bottom:8px;">
-      <label style="font-size:12px;font-weight:600;color:var(--txt);display:block;margin-bottom:8px;">5. Any suggestions or comments? (Optional)</label>
-      <textarea id="fb_comments" rows="3" placeholder="Share your thoughts about this training..." style="width:100%;padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+      <label style="font-size:12px;font-weight:700;color:var(--txt);display:block;margin-bottom:8px;">Suggestions for improvement (Optional)</label>
+      <textarea id="fb_suggest" rows="2" placeholder="Any suggestions..." style="width:100%;padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:13px;resize:vertical;font-family:inherit;"></textarea>
     </div>
   </div>
-  <div style="padding:14px 24px 20px;border-top:1px solid var(--bdr);display:flex;gap:10px;justify-content:flex-end;">
+  <div style="padding:14px 20px 20px;border-top:1px solid var(--bdr);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--sur);border-radius:0 0 var(--r-lg) var(--r-lg);">
     <button class="btn btn-green" onclick="submitFeedbackAndQuiz()"><span class="mat-ico">check_circle</span> Submit Feedback & Complete Test</button>
   </div>
 </div>
 `;
 document.body.appendChild(div);}
-let _fbRatings={fb_content:0,fb_trainer:0,fb_clarity:0};
-function setFbRating(groupId,val){_fbRatings[groupId]=val;var stars=document.querySelectorAll('#'+groupId+' .fb-star');stars.forEach(function(s){s.style.color=parseInt(s.dataset.val)<=val?'var(--amber)':'var(--bdr)';});}
+let _fbRatings={};
+let _fbOverall=0;
+const FB_QUESTIONS=[
+  'The training met my expectations.',
+  'I will be able to apply the knowledge learned.',
+  'The training objectives for each topic were identified and followed.',
+  'The content was organized and easy to follow.',
+  'The materials distributed were pertinent and useful.',
+  'The trainer was knowledgeable.',
+  'The quality of instruction was good.',
+  'The trainer met the training objectives.',
+  'Class participation and interaction were encouraged.',
+  'Adequate time was provided for questions and discussion.'
+];
+const FB_SCALE=['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
+const FB_OVERALL=['Excellent','Good','Average','Poor','Very Poor'];
+function setFbRating(qIdx,val){_fbRatings[qIdx]=val;var btns=document.querySelectorAll('.fb_likert_'+qIdx);btns.forEach(function(b){b.style.background=parseInt(b.dataset.val)===val?'var(--amber)':'var(--sur2)';b.style.color=parseInt(b.dataset.val)===val?'#151515':'var(--txt)';b.style.borderColor=parseInt(b.dataset.val)===val?'var(--amber)':'var(--bdr)';});}
+function setFbOverall(val){_fbOverall=val;var btns=document.querySelectorAll('.fb_overall_btn');btns.forEach(function(b){b.style.background=parseInt(b.dataset.val)===val?'var(--amber)':'var(--sur2)';b.style.color=parseInt(b.dataset.val)===val?'#151515':'var(--txt)';b.style.borderColor=parseInt(b.dataset.val)===val?'var(--amber)':'var(--bdr)';});}
 function submitFeedbackAndQuiz(){
-if(_fbRatings.fb_content===0||_fbRatings.fb_trainer===0||_fbRatings.fb_clarity===0){toast('Please rate all three categories (content, trainer, clarity)','error');return;}
-var recommendEl=document.querySelector('input[name="fb_recommend"]:checked');var commentsEl=document.getElementById('fb_comments');
-var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',training:quizState.training,category:quizState.category,contentRating:_fbRatings.fb_content,trainerRating:_fbRatings.fb_trainer,clarityRating:_fbRatings.fb_clarity,recommend:recommendEl?recommendEl.value==='yes':true,comments:commentsEl?commentsEl.value.trim():'',date:new Date().toISOString().split('T')[0],timestamp:Date.now()};
+// Validate all 10 Likert questions answered
+for(var qi=0;qi<FB_QUESTIONS.length;qi++){if(!_fbRatings[qi]){toast('Please answer all feedback questions (question '+(qi+1)+' is missing)','error');return;}}
+if(!_fbOverall){toast('Please rate the training overall','error');return;}
+var enjoyEl=document.getElementById('fb_enjoy');var suggestEl=document.getElementById('fb_suggest');
+var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
+var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',desig:currentUser.desig||'',manager:trnMatch?trnMatch.manager||'':'',training:quizState.training,trainer:trnMatch?trnMatch.trainer||'':'',category:quizState.category,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),
+  ratings:{} ,overallRating:_fbOverall,overallLabel:FB_OVERALL[_fbOverall-1]||'',enjoy:enjoyEl?enjoyEl.value.trim():'',suggestions:suggestEl?suggestEl.value.trim():''};
+FB_QUESTIONS.forEach(function(q,i){fb.ratings['q'+(i+1)]={text:q,score:_fbRatings[i],label:FB_SCALE[_fbRatings[i]-1]||''};});
 DB.feedbackForms.push(fb);
 var overlay=document.getElementById('feedbackOverlay');if(overlay)overlay.remove();
-_fbRatings={fb_content:0,fb_trainer:0,fb_clarity:0};
-if(firebaseReady){try{fbDB.collection('feedbackForms').doc(String(fb.id)).set({...fb},{merge:true});}catch(e){console.warn('Firebase feedback save error:',e);}}
-(function(){try{var sheetUrl=DB.settings.sheetUrl||'';if(!sheetUrl)return;var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_fb_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';inp.value=JSON.stringify({sheet:'Feedback',data:[{date:fb.date,empId:fb.empId,empName:fb.empName,dept:fb.dept,training:fb.training,category:fb.category,contentRating:fb.contentRating+'/5',trainerRating:fb.trainerRating+'/5',clarityRating:fb.clarityRating+'/5',recommend:fb.recommend?'Yes':'No',comments:fb.comments}]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);}catch(e){console.warn('Feedback sheet sync error:',e);}})();
+_fbRatings={};_fbOverall=0;
+if(firebaseReady){try{fbDB.collection('feedbackForms').doc(String(fb.id)).set(JSON.parse(JSON.stringify(fb)),{merge:true});console.log('Feedback saved to Firebase');}catch(e){console.warn('Firebase feedback save error:',e);}}
+// Push to Google Sheet
+(function(){try{var sheetUrl=DB.settings.sheetUrl||'';if(!sheetUrl)return;var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_fb_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';var row={date:fb.date,empId:fb.empId,empName:fb.empName,dept:fb.dept,desig:fb.desig,manager:fb.manager,training:fb.training,trainer:fb.trainer};FB_QUESTIONS.forEach(function(q,i){row['Q'+(i+1)+' ('+q.substring(0,30)+')']=fb.ratings['q'+(i+1)].label;});row['Overall Rating']=fb.overallLabel;row['What did you enjoy most?']=fb.enjoy;row['Suggestions']=fb.suggestions;inp.value=JSON.stringify({sheet:'Feedback',data:[row]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);}catch(e){console.warn('Feedback sheet sync error:',e);}})();
 submitQuiz();
 }
 
