@@ -209,6 +209,19 @@ select option{background:var(--sur);}
 .notif-item.unread{background:var(--amber-light);}
 .notif-msg{font-size:12px;line-height:1.4;}
 .notif-time{font-size:10.5px;color:var(--muted);margin-top:2px;}
+/* NOTIFICATION REPLY */
+.notif-reply-area{margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr);}
+.notif-reply-input{display:flex;gap:6px;align-items:center;}
+.notif-reply-input input{flex:1;padding:6px 10px;font-size:12px;border-radius:6px;border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);outline:none;}
+.notif-reply-input input:focus{border-color:var(--amber);}
+.notif-reply-btn{padding:5px 12px;font-size:11px;font-weight:700;border-radius:6px;border:none;cursor:pointer;background:var(--amber);color:#151515;white-space:nowrap;}
+.notif-reply-btn:hover{opacity:.85;}
+.notif-replies{margin-top:6px;display:flex;flex-direction:column;gap:4px;}
+.notif-reply-bubble{padding:6px 10px;border-radius:8px;font-size:11.5px;line-height:1.4;background:var(--sur2);border:1px solid var(--bdr);}
+.notif-reply-bubble b{color:var(--amber);font-size:10px;}
+.notif-reply-bubble .reply-time{color:var(--muted);font-size:10px;margin-left:6px;}
+.btn-reply-icon{background:none;border:1px solid var(--bdr);color:var(--muted);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;display:inline-flex;align-items:center;gap:4px;transition:all .15s;}
+.btn-reply-icon:hover{border-color:var(--amber);color:var(--amber);}
 /* SHARED COMPONENTS */
 .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:8px;}
 .section-title{font-size:19px;text-transform:uppercase;font-weight:700;}
@@ -537,6 +550,7 @@ select.form-control-sm{background:var(--sur2);}
       <div class="nav-section-title">Admin</div>
       <button class="nav-item" data-view="settings" onclick="gotoView('settings')"><span class="mat-ico">settings</span><span>Settings</span></button>
       <button class="nav-item" data-view="adminaccess" onclick="gotoView('adminaccess')"><span class="mat-ico">admin_panel_settings</span><span>Admin Access</span></button>
+      <button class="nav-item" data-view="correctiveactions" onclick="gotoView('correctiveactions')"><span class="mat-ico">fact_check</span><span>Corrective Actions</span><span class="nav-badge" id="nb-ca" style="background:rgba(232,72,58,.2);color:var(--red)">0</span></button>
       <div class="nav-section-title">Statistics</div>
       <button class="nav-item" data-view="dashboard" onclick="gotoView('dashboard')"><span class="mat-ico">monitoring</span><span>Dashboard Stats</span></button>
       <button class="nav-item" data-view="reports" onclick="gotoView('reports')"><span class="mat-ico">query_stats</span><span>Training Analytics</span></button>
@@ -593,6 +607,7 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-reports"></div>
     <div class="view" id="view-trainstatus"></div>
     <div class="view" id="view-notifications"></div>
+    <div class="view" id="view-correctiveactions"></div>
     <div class="view" id="view-adminaccess"></div>
     <div class="view" id="view-settings"></div>
   </div>
@@ -893,6 +908,7 @@ let DB={
     {id:"SOP008",title:"Permit to Work — PTW System",cat:"Permit To Work",version:"v2.0",updated:"2025-06-10",pages:20,file:"",desc:"PTW system covering Hot Work, Cold Work, Electrical Isolation, Confined Space, Work at Height, Excavation.",keyPoints:["PTW mandatory for all non-routine hazardous work","Originator raises permit — Issuing authority approves","Valid max 1 shift (8 hrs) — revalidate if needed","Toolbox talk mandatory before work starts","All PTWs filed in Safety Office for 3 years"],hazards:"Unauthorized work; multiple energy sources; concurrent operations",reviewedBy:"Safety Officer",emergency:"PTW Control: Safety Office Ext 103"},
   ],
   notifications:[],
+  correctiveActions:[],
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"https://script.google.com/macros/s/AKfycbyn5NCt91JkixFDMG2-P86X30edpJUY5b0WYDF4-pGWRsf0d3gLsyk_p4rx4JsM0R6SXw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
@@ -1109,6 +1125,7 @@ async function forceSyncToCloud(){
       fbSaveCollection('sops',DB.sops,'id'),
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+      fbSaveCollection('correctiveActions',DB.correctiveActions||[],'id'),
       fbSaveSettings()
     ]);
     const failed=results.filter(r=>r&&r.ok===false);
@@ -1460,6 +1477,7 @@ function startAutoSync(){
         fbSaveCollection('notifications',DB.notifications,'id'),
         fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
         fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
+        fbSaveCollection('correctiveActions',DB.correctiveActions||[],'id'),
         fbSaveSettings()
       ];
       await Promise.all(syncPromises);
@@ -1833,8 +1851,11 @@ function updateBadges(){
   document.getElementById("nb-employees").textContent=DB.employees.length;
   document.getElementById("nb-trainings").textContent=DB.trainings.length;
   document.getElementById("nb-equipment").textContent=EQUIPMENT_DATA.length;
-  const unread=DB.notifications.filter(n=>!n.read).length;
+  var myNotifsForBadge=(typeof isAdmin!=='undefined'&&isAdmin)?DB.notifications:(typeof currentUser!=='undefined'&&currentUser)?DB.notifications.filter(function(n){return !n.forEmp||n.forEmp===currentUser.id;}):DB.notifications;
+  const unread=myNotifsForBadge.filter(n=>!n.read).length;
   document.getElementById("nb-notif").textContent=unread;
+  var caCount=(DB.correctiveActions||[]).length;
+  var caEl=document.getElementById("nb-ca");if(caEl)caEl.textContent=caCount;
   document.getElementById("notifDot").style.display=unread>0?"block":"none";
 }
 function updateLoginClock(){
@@ -1852,11 +1873,12 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
+  if(v==="dashboard"&&isAdmin){var ds=document.getElementById("view-dashboard");var ah=getBSCAuditHTML();if(ah&&ds){var oldSlot=ds.querySelector(".bsc-audit-slot");if(oldSlot)oldSlot.remove();var wrapper=document.createElement("div");wrapper.className="bsc-audit-slot";wrapper.innerHTML=ah;ds.appendChild(wrapper);}}
   closeSidebar();
 }
 function toggleSidebar(){
@@ -1878,21 +1900,98 @@ function toggleTheme(){
 }
 
 /* ============================================================
+   BSC AUDIT DASHBOARD SUMMARY
+============================================================ */
+function getBSCAuditHTML(){
+  if(!isAdmin)return '';
+  var allCA=DB.correctiveActions||[];
+  var totalTests=DB.testResults.length;
+  var passRate=totalTests>0?Math.round(DB.testResults.filter(function(r){return r.pass;}).length/totalTests*100):0;
+  var offlinePending=0;
+  DB.trainings.forEach(function(t){(t.offlineTrained||[]).forEach(function(eid){var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});if(!hasCert)offlinePending++;});});
+  var totalEmps=DB.employees.length;
+  var compRate=totalEmps>0?Math.round((totalEmps-offlinePending)/totalEmps*100):100;
+  var compColor=compRate>=90?'var(--green)':compRate>=70?'var(--amber)':'var(--red)';
+  return '<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-top:16px;border-left:4px solid '+compColor+';">'+
+    '<div style="font-size:13px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:12px;"><span class="mat-ico" style="font-size:16px;">gavel</span> BSC Audit Compliance</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;">'+
+    '<div style="text-align:center;padding:10px;background:var(--sur2);border-radius:var(--r-sm);"><div style="font-size:22px;font-weight:700;color:'+compColor+';">'+compRate+'%</div><div style="font-size:10px;color:var(--muted);">Compliance</div></div>'+
+    '<div style="text-align:center;padding:10px;background:var(--sur2);border-radius:var(--r-sm);"><div style="font-size:22px;font-weight:700;color:var(--green);">'+passRate+'%</div><div style="font-size:10px;color:var(--muted);">Pass Rate</div></div>'+
+    '<div style="text-align:center;padding:10px;background:var(--sur2);border-radius:var(--r-sm);"><div style="font-size:22px;font-weight:700;color:var(--amber);">'+allCA.length+'</div><div style="font-size:10px;color:var(--muted);">Corrective Actions</div></div>'+
+    '<div style="text-align:center;padding:10px;background:var(--sur2);border-radius:var(--r-sm);"><div style="font-size:22px;font-weight:700;color:'+(offlinePending>0?'var(--red)':'var(--green)')+';">'+offlinePending+'</div><div style="font-size:10px;color:var(--muted);">Offline Pending</div></div>'+
+    '</div>'+
+    (offlinePending>0?'<div style="margin-top:10px;padding:8px 12px;background:rgba(232,72,58,.08);border-radius:var(--r-sm);font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:13px;">warning</span> '+offlinePending+' employee(s) need offline training — <b>check Corrective Actions Log</b>.</div>':'<div style="margin-top:10px;padding:8px 12px;background:rgba(62,207,142,.08);border-radius:var(--r-sm);font-size:11px;color:var(--green);"><span class="mat-ico" style="font-size:13px;">verified</span> All employees compliant — no open corrective actions.</div>')+
+    '</div>';
+}
+/* ============================================================
    NOTIFICATION PANEL
 ============================================================ */
 function toggleNotifPanel(){document.getElementById("notifPanel").classList.toggle("open");}
 document.addEventListener("click",e=>{if(!e.target.closest("#notifPanel")&&!e.target.closest(".notif-btn"))document.getElementById("notifPanel").classList.remove("open");});
+function getMyNotifications(){
+  if(typeof currentUser==='undefined'||!currentUser)return DB.notifications;
+  if(isAdmin)return DB.notifications;
+  return DB.notifications.filter(n=>!n.forEmp||n.forEmp===currentUser.id);
+}
 function renderNotifPanel(){
   const list=document.getElementById("notifList");
-  list.innerHTML=DB.notifications.map(n=>`
-    <div class="notif-item${n.read?"":" unread"}" onclick="readNotif('${n.id}')">
+  const myNotifs=getMyNotifications();
+  list.innerHTML=myNotifs.slice(0,20).map(n=>{
+    const replyCount=(n.replies||[]).length;
+    return `<div class="notif-item${n.read?"":" unread"}" onclick="readNotif('${n.id}');renderNotifications();">
       <div style="color:var(--amber)"><span class="mat-ico" style="font-size:20px;">${n.icon}</span></div>
-      <div><div class="notif-msg">${n.msg}</div><div class="notif-time">${n.time}</div></div>
-    </div>
-  `).join("");
+      <div style="flex:1;min-width:0;"><div class="notif-msg">${n.msg}</div><div class="notif-time">${n.time}${n.fromEmp?' — from '+n.fromEmpName:''}</div>
+      ${replyCount?'<div style="font-size:10px;color:var(--blue);margin-top:2px;"><span class="mat-ico" style="font-size:10px;">chat_bubble</span> '+replyCount+' reply(ies)</div>':''}
+      </div>
+      <button class="btn-reply-icon" onclick="event.stopPropagation();openReplyBox('${n.id}',this)" title="Reply"><span class="mat-ico" style="font-size:14px;">reply</span></button>
+    </div>`;
+  }).join("");
+  if(!myNotifs.length)list.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">No notifications</div>';
 }
 function readNotif(id){const n=DB.notifications.find(x=>x.id===id);if(n){n.read=true;renderNotifPanel();updateBadges();saveDB();}}
 function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel();updateBadges();saveDB();}
+/* ============================================================
+   NOTIFICATION REPLY SYSTEM
+============================================================ */
+function openReplyBox(notifId,btnEl){
+  const n=DB.notifications.find(x=>x.id===notifId);if(!n)return;
+  const container=btnEl.closest('.activity-item,.notif-item');
+  const existing=container.querySelector('.notif-reply-area');
+  if(existing){existing.remove();return;}
+  const area=document.createElement('div');
+  area.className='notif-reply-area';
+  area.innerHTML='<div class="notif-replies">'+(n.replies||[]).map(r=>'<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>').join('')+'</div><div class="notif-reply-input"><input type="text" id="replyInput_'+notifId+'" placeholder="Type your reply..." onkeydown="if(event.key===\x27Enter\x27)sendReply(\x27'+notifId+'\x27)" /><button class="notif-reply-btn" onclick="sendReply(\x27'+notifId+'\x27)">Send</button></div>';
+  container.appendChild(area);
+  setTimeout(()=>{const inp=document.getElementById('replyInput_'+notifId);if(inp)inp.focus();},100);
+}
+function sendReply(notifId){
+  const inp=document.getElementById('replyInput_'+notifId);if(!inp)return;
+  const text=inp.value.trim();if(!text){toast('Please type a reply','warning');return;}
+  const n=DB.notifications.find(x=>x.id===notifId);if(!n)return;
+  if(!n.replies)n.replies=[];
+  n.replies.push({by:currentUser.name||currentUser.username,byId:currentUser.id||currentUser.username,text:text,time:new Date().toLocaleString('en-IN'),timestamp:Date.now()});
+  n.read=true;
+  saveDB();
+  toast('Reply sent','success',2000);
+  renderNotifPanel();renderNotifications();updateBadges();
+}
+function openSendMsgModal(){
+  if(!isAdmin)return;
+  const empOptions=DB.employees.map(e=>'<option value="'+e.id+'">'+e.name+' ('+e.id+')</option>').join('');
+  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Send Message to Employee</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div class="form-section"><div class="form-grid"><div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Select Employee *</label><select class="form-control-sm" id="msgEmpSelect">'+empOptions+'</select></div><div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Message *</label><textarea class="form-control-sm" id="msgText" rows="3" placeholder="Type your message..."></textarea></div></div></div></div><div class="modal-foot"><button class="btn btn-amber" onclick="sendEmployeeMessage()"><span class="mat-ico">send</span> Send Message</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','500px');
+}
+function sendEmployeeMessage(){
+  const empId=document.getElementById('msgEmpSelect').value;
+  const text=document.getElementById('msgText').value.trim();
+  if(!text){toast('Please type a message','error');return;}
+  const emp=DB.employees.find(e=>e.id===empId);
+  const empName=emp?emp.name:empId;
+  DB.notifications.unshift({id:genId('N'),msg:text,read:false,time:'Just now',icon:'mail',forEmp:empId,fromEmp:currentUser.id||'admin',fromEmpName:currentUser.name||'Admin'});
+  saveDB();closeModal();
+  toast('Message sent to '+empName,'success',3000);
+  renderNotifPanel();renderNotifications();updateBadges();
+}
+
 renderNotifPanel();
 
 /* ============================================================
@@ -2343,7 +2442,7 @@ async function saveEmployee(){
   var empJoin=document.getElementById('ne_join').value||new Date().toISOString().split('T')[0];
   var empLoc=document.getElementById('ne_loc').value||'Site';
   // 1. Add to local array
-  DB.employees.push({id:id,name:name,dept:empDept,desig:empDesig,shift:empShift,mobile:mobile,email:empEmail,status:'active',joining:empJoin,location:empLoc,password:empPw,company:DB.settings.companyName,photo:'',_localAddedAt:Date.now()});
+  DB.employees.push({id:id,name:name,dept:empDept,desig:empDesig,shift:empShift,mobile:mobile,email:empEmail,status:'active',joining:empJoin,location:empLoc,password:empPw,company:DB.settings.companyName,photo:'',_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||currentUser.username||'Admin'});
   // 2. ALWAYS remove tombstone for this ID (even if Firebase is not ready)
   //    This prevents applyTombstones() from filtering out a re-added employee on next reload
   try{removeFromTombstone('employees',id);}catch(e){console.warn('removeFromTombstone error:',e);}
@@ -2478,6 +2577,8 @@ function updateEmployee(id){
   e.dept=document.getElementById("ee_dept").value;e.desig=document.getElementById("ee_desig").value;
   e.shift=document.getElementById("ee_shift").value;e.status=document.getElementById("ee_status").value;
   e.location=document.getElementById("ee_loc").value;
+  e.modifiedAt=new Date().toISOString();
+  e.modifiedBy=currentUser.name||currentUser.username||'Admin';
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   closeModal();renderEmployees();saveDB();queueSheetSync(["Employees"]);toast("Employee updated","success");
 }
@@ -2846,7 +2947,7 @@ async function saveTraining(){
   var ytId=extractYoutubeId(ytUrl);
   if(!ytUrl){toast('YouTube video link is required!','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,manager:(document.getElementById('nt_manager')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now()};
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,manager:(document.getElementById('nt_manager')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||currentUser.username||'Admin',modifiedAt:new Date().toISOString(),modifiedBy:currentUser.name||currentUser.username||'Admin'};
 
   // 1. Add to local array
   DB.trainings.push(t);
@@ -3623,7 +3724,7 @@ function renderQuizMenu(){
       </div>
       <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
         <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-        <div>Click a category below to take an online test. For training-specific tests (with video), go to the <b>Trainings</b> page. Each training test is <b>one-time only</b> after 90% video watch.</div>
+        <div>Click a category below to take an online test. For training-specific tests (with video), go to the <b>Trainings</b> page. Training tests allow retakes after failure (BSC auto-retraining). 90% video watch required for training-specific tests.</div>
       </div>
       <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>Take a Test by Category</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:20px;">
@@ -3849,6 +3950,52 @@ function submitQuiz(){
       queueSheetSync(["Training Data","Certificates"]);
     }catch(e){console.warn('Google Sheets auto-sync error:',e);}
   })();
+
+      // === BSC AUDIT: AUTO-ESCALATION ON FAILURE (training tests only) ===
+      if(!pass && trnMatch){
+        (function(){
+          var t=trnMatch;var eid=empId;var ename=empName;
+          var allRes=DB.testResults.filter(function(r){return r.empId===eid&&r.training===t.name;});
+          var failCnt=allRes.filter(function(r){return !r.pass;}).length;
+          var bestSc=allRes.length?Math.max.apply(null,allRes.map(function(r){return r.score;})):0;
+          if(t.completed)t.completed=t.completed.filter(function(id){return id!==eid;});
+          if(t.completedDates)delete t.completedDates[eid];
+          if(failCnt>=3){
+            // 3rd FAILURE -> AUTO OFFLINE TRAINING
+            if(!t.offlineTrained)t.offlineTrained=[];
+            if(!t.offlineTrained.includes(eid)){
+              t.offlineTrained.push(eid);
+              if(!t.offlineRecords)t.offlineRecords=[];
+              var offRec={empId:eid,empName:ename,dept:dept,training:t.name,trainer:t.trainer||'',manager:t.manager||'',trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,passMark:t.passing||70,action:'Offline Training Assigned (Auto)',reason:'Failed online test '+failCnt+' times (best: '+bestSc+'% vs '+t.passing+'% pass mark). BSC corrective action Step 3.',doneBy:'System Auto-Escalation'};
+              t.offlineRecords.push(offRec);
+              DB.correctiveActions.push({id:genId('CA'),type:'offline',empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),failCount:failCnt,bestScore:bestSc,passMark:t.passing||70,action:'Offline Training Assigned',reason:'3rd failure auto-escalation.',doneBy:'System Auto'});
+              DB.notifications.unshift({id:genId('N'),msg:'OFFLINE TRAINING REQUIRED for '+t.name+'. You failed 3 times. Contact your manager for face-to-face training.',read:false,time:'Just now',icon:'warning',forEmp:eid});
+              toast('3rd failure - Offline training auto-assigned. Admin notified.','error',6000);
+              setTimeout(function(){uploadOfflineNCR_ToDrive(offRec,t,DB.employees.find(function(e){return e.id===eid;}));},800);
+            }
+          } else if(failCnt===2){
+            // 2nd FAILURE -> RE-RETRAIN + WARNING
+            if(!t.retrained)t.retrained=[];
+            if(!t.retrained.includes(eid))t.retrained.push(eid);
+            if(!t.retrainingRecords)t.retrainingRecords=[];
+            t.retrainingRecords.push({empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,action:'Re-Retraining (2nd Failure)',reason:'Failed 2nd attempt (score: '+score+'%, best: '+bestSc+'%). BSC corrective action.',doneBy:'System Auto-Escalation'});
+            DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),failCount:failCnt,bestScore:bestSc,passMark:t.passing||70,action:'Re-Retraining Warning',reason:'2nd failure. One more = offline training.',doneBy:'System Auto'});
+            DB.notifications.unshift({id:genId('N'),msg:'SECOND FAILURE WARNING: '+t.name+'. You have been reassigned. One more failure = offline training required.',read:false,time:'Just now',icon:'warning',forEmp:eid});
+            toast('2nd failure - Retraining reassigned. One more = offline training.','warning',6000);
+          } else {
+            // 1st FAILURE -> AUTO RETRAIN
+            if(!t.retrained)t.retrained=[];
+            if(!t.retrained.includes(eid))t.retrained.push(eid);
+            if(!t.retrainingRecords)t.retrainingRecords=[];
+            t.retrainingRecords.push({empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,action:'Retraining (1st Failure Auto)',reason:'Failed 1st attempt (score: '+score+'%). BSC corrective action Step 1.',doneBy:'System Auto-Escalation'});
+            DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),failCount:1,bestScore:bestSc,passMark:t.passing||70,action:'Auto-Retraining',reason:'1st failure. Employee auto-enrolled for retraining.',doneBy:'System Auto'});
+            DB.notifications.unshift({id:genId('N'),msg:'You failed '+t.name+' (Score: '+score+'%). You have been reassigned - retake after reviewing the material.',read:false,time:'Just now',icon:'replay',forEmp:eid});
+            toast('Failed - You have been reassigned for retraining.','warning',5000);
+          }
+          if(firebaseReady){(async function(){try{await authAsAdmin();await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('FB auto-escalation:',e);}})();}
+          saveDB();
+        })();
+      }
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
     <div class="quiz-wrap">
@@ -3884,7 +4031,7 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">block</span> One-time test completed — no retakes allowed</div>`}
+        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span> ${pass?"Test completed successfully":"You have been reassigned for retraining - go to Trainings to retake"}</div>`}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
     </div>
@@ -4387,23 +4534,82 @@ function clearAllTestResults(){
 }
 
 /* ============================================================
+   CORRECTIVE ACTIONS LOG (BSC Audit)
+============================================================ */
+function renderCorrectiveActions(){
+  if(!isAdmin){document.getElementById('view-correctiveactions').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var allCA=[];
+  DB.trainings.forEach(function(t){
+    (t.retrainingRecords||[]).forEach(function(r){allCA.push(Object.assign({},r,{type:'retraining',trnName:t.name,trainer:t.trainer||'',manager:t.manager||''}));});
+    (t.offlineRecords||[]).forEach(function(r){allCA.push(Object.assign({},r,{type:'offline',trnName:t.name,trainer:t.trainer||'',manager:t.manager||''}));});
+  });
+  (DB.correctiveActions||[]).forEach(function(r){allCA.push(r);});
+  allCA.sort(function(a,b){return (b.timestamp||0)-(a.timestamp||0);});
+  var retrainCount=allCA.filter(function(a){return a.type==='retraining';}).length;
+  var offlineCount=allCA.filter(function(a){return a.type==='offline';}).length;
+  var uniqueEmps=new Set(allCA.map(function(a){return a.empId;})).size;
+  var autoCount=allCA.filter(function(a){return (a.doneBy||'').indexOf('Auto')>=0;}).length;
+  var openItems=allCA.filter(function(a){var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});return !hasCert;});
+  var el=document.getElementById('view-correctiveactions');
+  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+allCA.length+'</div><div style="font-size:11px;color:var(--muted);">Total Actions</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+retrainCount+'</div><div style="font-size:11px;color:var(--muted);">Retraining</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:24px;font-weight:700;color:var(--red);">'+offlineCount+'</div><div style="font-size:11px;color:var(--muted);">Offline Training</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--purple);"><div style="font-size:24px;font-weight:700;color:var(--purple);">'+uniqueEmps+'</div><div style="font-size:11px;color:var(--muted);">Employees</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--blue);"><div style="font-size:24px;font-weight:700;color:var(--blue);">'+autoCount+'</div><div style="font-size:11px;color:var(--muted);">Auto-Escalated</div></div>';
+  var oColor=openItems.length>0?'var(--red)':'var(--green)';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);"><div style="font-size:24px;font-weight:700;color:'+oColor+';">'+openItems.length+'</div><div style="font-size:11px;color:var(--muted);">Open Items</div></div></div>';
+  h+='<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--red);font-size:20px;">gavel</span><div><b>BSC Audit Compliance:</b> 1st fail = retrain, 2nd = warning, 3rd = offline training + NCR.</div></div>';
+  h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">All Corrective Actions ('+allCA.length+')</div>';
+  if(allCA.length){
+    h+='<div class="table-wrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Training</th><th>Type</th><th>Fails</th><th>Best</th><th>Pass</th><th>Action</th><th>Done By</th><th>Status</th></tr></thead><tbody>';
+    allCA.forEach(function(a){
+      var emp=DB.employees.find(function(e){return e.id===a.empId;});
+      var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});
+      var sCls=hasCert?'active':a.type==='offline'?'info':'warning';
+      var sTxt=hasCert?'Resolved':'Open';
+      var tBadge=a.type==='offline'?'<span class="badge" style="background:var(--red)20;color:var(--red);">Offline</span>':'<span class="badge" style="background:var(--orange)20;color:var(--orange);">Retrain</span>';
+      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b></td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span></td></tr>';
+    });
+    h+='</tbody></table></div>';
+  }else{
+    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No Corrective Actions</h3><p>All employees are compliant.</p></div>';
+  }
+  el.innerHTML=h;
+}
+
+
+/* ============================================================
    NOTIFICATIONS
 ============================================================ */
 function renderNotifications(){
+  const myNotifs=getMyNotifications();
   document.getElementById("view-notifications").innerHTML=`
     <div class="section-header">
-      <div class="section-title">All <span>Notifications</span></div>
-      <button class="btn btn-outline btn-sm" onclick="markAllRead();renderNotifications();renderNotifPanel()">Mark All Read</button>
+      <div class="section-title">All <span>Notifications</span> ${isAdmin?"("+DB.notifications.length+")":"("+myNotifs.length+")"}</div>
+      <div style="display:flex;gap:6px;"><button class="btn btn-outline btn-sm" onclick="markAllRead();renderNotifications();renderNotifPanel()">Mark All Read</button>
+      ${isAdmin?`<button class="btn btn-sm btn-amber" onclick="openSendMsgModal()"><span class="mat-ico" style="font-size:12px;">send</span> Send Message</button>`:""}
+      </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;">
-      ${DB.notifications.map(n=>`
-        <div class="activity-item" style="${!n.read?"background:var(--amber-light);border-color:rgba(255,176,32,.3);":""}" onclick="readNotif('${n.id}');renderNotifications()">
+      ${myNotifs.map(n=>{
+        const replyCount=(n.replies||[]).length;
+        return`<div class="activity-item" style="${!n.read?"background:var(--amber-light);border-color:rgba(255,176,32,.3);":""};padding:14px;">
           <div class="activity-ico" style="background:rgba(255,176,32,.1)"><span class="mat-ico" style="color:var(--amber);font-size:16px;">${n.icon}</span></div>
-          <div class="activity-info"><div class="activity-title">${n.msg}</div><div class="activity-time">${n.time}</div></div>
-          ${!n.read?`<span class="badge badge-amber">New</span>`:""}
-        </div>
-      `).join("")}
-      ${!DB.notifications.length?`<div class="empty-state"><span class="mat-ico">notifications_none</span><h3>No notifications</h3></div>`:""}
+          <div class="activity-info" style="flex:1;min-width:0;">
+            <div class="activity-title">${n.msg}</div>
+            <div class="activity-time">${n.time}${n.fromEmp?' — <b>from: '+n.fromEmpName+'</b> ('+n.fromEmp+')':''}
+            ${n.forEmp&&isAdmin?' — <b style="color:var(--blue);">to: '+n.forEmp+'</b>':''}</div>
+            ${replyCount?'<div style="margin-top:6px;"><div style="font-size:10px;font-weight:700;color:var(--blue);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">chat_bubble</span> '+replyCount+' Reply(ies)</div><div class="notif-replies">'+n.replies.map(r=>'<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>').join('')+'</div></div>':''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
+            ${!n.read?`<span class="badge badge-amber">New</span>`:""}
+            <button class="btn-reply-icon" onclick="event.stopPropagation();openReplyBox('${n.id}',this)" title="Reply"><span class="mat-ico" style="font-size:14px;">reply</span> Reply</button>
+          </div>
+        </div>`;
+      }).join("")}
+      ${!myNotifs.length?`<div class="empty-state"><span class="mat-ico">notifications_none</span><h3>No notifications</h3></div>`:""}
     </div>
   `;
 }
@@ -4685,7 +4891,8 @@ function restoreData(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
   reader.readAsText(file);
-  reader.onload=(e)=>{try{const restored=JSON.parse(e.target.result);if(restored.employees)DB.employees=restored.employees;if(restored.admins)DB.admins=restored.admins;if(restored.trainings)DB.trainings=restored.trainings;if(restored.testResults)DB.testResults=restored.testResults;if(restored.certificates)DB.certificates=restored.certificates;if(restored.sops)DB.sops=restored.sops;if(restored.notifications)DB.notifications=restored.notifications;if(restored.settings)Object.assign(DB.settings,restored.settings);saveDB();renderSettings();updateBadges();toast('Data restored successfully','success');}catch{toast('Invalid backup file','error');}};
+  reader.onload=(e)=>{try{const restored=JSON.parse(e.target.result);if(restored.employees)DB.employees=restored.employees;if(restored.admins)DB.admins=restored.admins;if(restored.trainings)DB.trainings=restored.trainings;if(restored.testResults)DB.testResults=restored.testResults;if(restored.certificates)DB.certificates=restored.certificates;if(restored.sops)DB.sops=restored.sops;if(restored.notifications)DB.notifications=restored.notifications;
+            if(restored.correctiveActions)DB.correctiveActions=restored.correctiveActions;if(restored.settings)Object.assign(DB.settings,restored.settings);saveDB();renderSettings();updateBadges();toast('Data restored successfully','success');}catch{toast('Invalid backup file','error');}};
 }
 
 /* ============================================================
@@ -4721,7 +4928,7 @@ function buildTrainingPayload(){
     var completedNames=(t.completed||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
     var retrainingCount=(t.retrainingRecords||[]).length;
     var offlineCount=(t.offlineRecords||[]).length;
-    return{Company:company,TrainingID:t.id,TrainingName:t.name,Category:t.cat,Department:t.dept||"All",Trainer:t.trainer,Manager:t.manager||"",TrainingDate:t.date||"",Duration:t.duration||"Not set",PassingMarks:t.passing||70,CertificateValidity:t.validity||"1 Year",CertificateRequired:t.cert?"Yes":"No",Description:t.desc||"",YouTubeLink:t.youtubeLink||"",TotalEnrolled:enrolled,TotalCompleted:completed,PassRate:enrolled>0?Math.round(completed/enrolled*100)+"%":"0%",CustomQuestions:(t.questions||[]).length,EnrolledEmployees:enrolledNames,CompletedEmployees:completedNames,RetrainedCount:retrainedCount,OfflineTrainingCount:offlineCount};
+    return{Company:company,TrainingID:t.id,TrainingName:t.name,Category:t.cat,Department:t.dept||"All",Trainer:t.trainer,Manager:t.manager||"",TrainingDate:t.date||"",Duration:t.duration||"Not set",PassingMarks:t.passing||70,CertificateValidity:t.validity||"1 Year",CertificateRequired:t.cert?"Yes":"No",Description:t.desc||"",YouTubeLink:t.youtubeLink||"",TotalEnrolled:enrolled,TotalCompleted:completed,PassRate:enrolled>0?Math.round(completed/enrolled*100)+"%":"0%",CustomQuestions:(t.questions||[]).length,EnrolledEmployees:enrolledNames,CompletedEmployees:completedNames,RetrainedCount:retrainedCount,OfflineTrainingCount:offlineCount,CreatedDate:t.createdAt||"",CreatedBy:t.createdBy||"",ModifiedBy:t.modifiedBy||"",ModifiedDate:t.modifiedAt||"",CorrectiveActionCount:(t.retrainingRecords||[]).length+(t.offlineRecords||[]).length};
   });
 }
 function buildCertificatePayload(){
@@ -5229,6 +5436,7 @@ function saveDB(){
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveCollection('feedbackForms',DB.feedbackForms||[],'id'),
+      fbSaveCollection('correctiveActions',DB.correctiveActions||[],'id'),
       fbSaveSettings()
     ]).then(results=>{
       // Check if any collection FAILED to save to Firebase
@@ -5291,6 +5499,7 @@ function loadDBFromLocal(){
       DB.customQuestions=saved.customQuestions;
     }
     if(saved.feedbackForms&&Array.isArray(saved.feedbackForms))DB.feedbackForms=saved.feedbackForms;
+    if(saved.correctiveActions&&Array.isArray(saved.correctiveActions))DB.correctiveActions=saved.correctiveActions;
     return true;
   }catch(e){console.warn("Local load failed:",e);return false;}
 }
@@ -5320,7 +5529,8 @@ function reconcileTrainingsFromResults(){
   return updated;
 }
 
-async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      videos:['VID001','VID002','VID003','VID004','VID005','VID006','VID007','VID008','VID009','VID010','VID011','VID012','VID013','VID014','VID015','VID016','VID017','VID018','VID019','VID020','VID021','VID022','VID023'],      employees:['EMP001','EMP002','EMP003','EMP004','EMP005','EMP006','EMP007','EMP008'],      trainings:['TRN001','TRN002','TRN003','TRN004','TRN005','TRN006'],      testResults:['TST001','TST002','TST003','TST004','TST005'],      certificates:['CERT-2025-001','CERT-2025-002','CERT-2025-003','CERT-2025-004'],      notifications:['N001','N002','N003','N004','N005']    };    const batch=fbDB.batch();    let count=0;    for(const [coll,ids] of Object.entries(sampleIds)){      for(const id of ids){        const ref=fbDB.collection(coll).doc(id);        batch.delete(ref);        count++;      }    }    await batch.commit();    if(count>0)console.log('Cleaned up '+count+' sample docs from cloud');  }catch(e){console.warn('Sample data cleanup error:',e);}}
+async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      videos:['VID001','VID002','VID003','VID004','VID005','VID006','VID007','VID008','VID009','VID010','VID011','VID012','VID013','VID014','VID015','VID016','VID017','VID018','VID019','VID020','VID021','VID022','VID023'],      employees:['EMP001','EMP002','EMP003','EMP004','EMP005','EMP006','EMP007','EMP008'],      trainings:['TRN001','TRN002','TRN003','TRN004','TRN005','TRN006'],      testResults:['TST001','TST002','TST003','TST004','TST005'],      certificates:['CERT-2025-001','CERT-2025-002','CERT-2025-003','CERT-2025-004'],      notifications:['N001','N002','N003','N004','N005'],
+      correctiveActions:[]    };    const batch=fbDB.batch();    let count=0;    for(const [coll,ids] of Object.entries(sampleIds)){      for(const id of ids){        const ref=fbDB.collection(coll).doc(id);        batch.delete(ref);        count++;      }    }    await batch.commit();    if(count>0)console.log('Cleaned up '+count+' sample docs from cloud');  }catch(e){console.warn('Sample data cleanup error:',e);}}
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
@@ -5366,7 +5576,8 @@ async function loadDBFromFirestore(){
       ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
       ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
       ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}],
-      ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}]
+      ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
+      ['correctiveActions','id',d=>{if(d.size>0)DB.correctiveActions=d.docs.map(x=>x.data());}]
     ];
     const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
     // Load settings separately (it's a single doc, not a collection)
@@ -5497,7 +5708,7 @@ async function resetDBToDefault(){
   localStorage.removeItem(TOMBSTONE_KEY);
   if(firebaseReady&&confirm("Also clear Firebase cloud data?")){
     try{
-      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems','customEquipment','customQuestions'];
+      const cols=['employees','admins','trainings','testResults','certificates','notifications','videos','sops','config','deletedItems','customEquipment','customQuestions','correctiveActions'];
       for(const c of cols){
         const snap=await fbDB.collection(c).get();
         const batch=fbDB.batch();
@@ -5526,6 +5737,7 @@ async function freshStartSite(){
   DB.testResults=[];
   DB.certificates=[];
   DB.notifications=[];
+  DB.correctiveActions=[];
   DB.customQuestions=[];
   DB.sops=[];
   // Also clean customQuestions from QUESTION_BANK
