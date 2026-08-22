@@ -2067,15 +2067,20 @@ function renderEmpDashboard(){
           const myPassResult=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
           const done=!!myPassResult||(t.completed||[]).includes(empId);
           const myResult=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
-          return`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;border-left:4px solid ${done?"var(--green)":"var(--amber)"};">
+          var retrainedFlag=(t.retrained||[]).includes(currentUser.id);
+          var offlineFlag=(t.offlineTrained||[]).includes(currentUser.id);
+          var statusBadge2=done?'✅ Done':offlineFlag?'📧 Offline Training':retrainedFlag?'🔄 Retraining':'⏳ Pending';
+          var statusBadgeCls=done?'active':offlineFlag?'info':'warning';
+          return`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;border-left:4px solid ${done?"var(--green)":offlineFlag?"var(--blue)":"var(--amber)"};">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <span style="font-size:22px;">${CATEGORIES[t.cat]?.icon||"📚"}</span>
               <div><div style="font-weight:700;font-size:13px;">${t.name}</div><div style="font-size:11px;color:var(--muted);">${t.cat} · ${t.trainer}</div></div>
-              <span class="badge badge-${done?"active":"warning"}" style="margin-left:auto;">${done?"✅ Done":"⏳ Pending"}</span>
+              <span class="badge badge-${statusBadgeCls}" style="margin-left:auto;">${statusBadge2}</span>
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${(t.duration&&t.duration!=='--')?t.duration:'Not set'} · Pass: ${t.passing}%</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${(t.duration&&t.duration!=='--')?t.duration:'Not set'} · Pass: ${t.passing}%${myResults.length>1?' · Attempts: '+myResults.length:''}</div>
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
-            ${!done?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>`:`<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>`}
+            ${offlineFlag?'<div style="font-size:11px;color:var(--blue);margin-bottom:6px;">📞 Contact your manager for offline/face-to-face training schedule.</div>':''}
+            ${!done&&!offlineFlag?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> ${retrainedFlag?'Retake Test':'Take Test'}</button>`:done?'<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>':''}
           </div>`;
         }).join("")}
       </div>
@@ -2911,24 +2916,42 @@ function openTrainingDetail(id){
       </div>
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table>
-        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Completion Date</th><th>Score</th><th>Certificate</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Attempts</th><th>Score</th><th>Certificate</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
-          const bestResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
-          const anyResult=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
-          const doneFromResult=!!bestResult;
+          const bestPass=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+          const allResults=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
+          const doneFromResult=!!bestPass;
           const done=doneFromResult||(t.completed||[]).includes(e.id);
-          const completedDate=bestResult?bestResult.date:((t.completedDates||{})[e.id]||"");
-          const result=bestResult||anyResult;
+          const completedDate=bestPass?bestPass.date:((t.completedDates||{})[e.id]||"");
+          const result=bestPass||allResults[0];
+          const attempts=allResults.length;
+          const failed=allResults.length>0&&!bestPass;
+          const retrained=(t.retrained||[]).includes(e.id);
+          const offlineTrained=(t.offlineTrained||[]).includes(e.id);
+          const failCount=allResults.filter(r=>!r.pass).length;
+          var statusBadge,statusText;
+          if(done){statusBadge='active';statusText='✅ Completed';}
+          else if(offlineTrained){statusBadge='info';statusText='📧 Offline Training';}
+          else if(retrained){statusBadge='warning';statusText='🔄 Retrained';}
+          else if(failed){statusBadge='danger';statusText='❌ Failed ('+failCount+'x)';}
+          else{statusBadge='warning';statusText='⏳ Pending';}
+          var actionBtns='<button class=\'btn btn-sm btn-red\' onclick=\'removeEmployeeFromTraining(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Remove\'><span class=\'mat-ico\' style=\'font-size:14px;\'>person_remove</span></button>';
+          if(failed&&!done){
+            if(!retrained){actionBtns+='<button class=\'btn btn-sm btn-amber\' onclick=\'retrainEmployee(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 2: Retrain (allow retake)\'><span class=\'mat-ico\' style=\'font-size:11px;\'>replay</span></button>';}
+            else if(failCount>=2&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm\' style=\'background:var(--blue);color:#fff;\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>assignment_ind</span></button>';}
+            if(retrained&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm btn-outline\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>mail</span></button>';
+}
+          }
           const cert=DB.certificates.find(c=>c.empId===e.id&&c.training===t.name);
           return`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${e.id}</td>
             <td><b>${e.name}</b></td>
             <td><span class="badge badge-info">${e.dept}</span></td>
-            <td><span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed":"⏳ Pending"}</span></td>
-            <td style="font-weight:600;">${completedDate?formatDate(completedDate):"—"}</td>
+            <td><span class="badge badge-${statusBadge}">${statusText}</span></td>
+            <td style="font-weight:600;">${attempts>0?attempts:'—'}</td>
             <td>${result?`<b style="color:${result.pass?"var(--green)":"var(--red)"}">${result.score}%</b>`:"—"}</td>
             <td>${cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${cert.num}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span></button>`:"—"}</td>
-            <td><button class="btn btn-sm btn-red" onclick="removeEmployeeFromTraining('${t.id}','${e.id}','${e.name.replace(/'/g,"\\\'")}')" title="Remove from training"><span class="mat-ico" style="font-size:14px;">person_remove</span></button></td>
+            <td style="display:flex;gap:4px;">${actionBtns}</td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)</div>
@@ -3005,6 +3028,110 @@ function removeEmployeeFromTraining(trnId,empId,empName){
   // Re-render the training detail modal
   var trn=DB.trainings.find(function(x){return x.id===trnId;});
   if(trn)openTrainingDetail(trn.id);
+}
+function retrainEmployee(trnId,empId,empName){
+  var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
+  var allResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+  var failCount=allResults.filter(function(r){return !r.pass;}).length;
+  var bestScore=allResults.length?Math.max.apply(null,allResults.map(function(r){return r.score;})):0;
+  if(!confirm('STEP 2: RETRAINING\n\nEmployee: '+empName+' ('+empId+')\nTraining: '+t.name+'\nPrevious attempts: '+allResults.length+' (Best: '+bestScore+'%, Failed: '+failCount+'x)\n\nThis will allow the employee to retake the test.\\nFor BSC Audit: Corrective action — retraining assigned.\n\nProceed?'))return;
+  if(!t.retrained)t.retrained=[];
+  if(!t.retrained.includes(empId))t.retrained.push(empId);
+  // Add retraining record for audit
+  if(!t.retrainingRecords)t.retrainingRecords=[];
+  t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:allResults.length,previousBest:bestScore,action:'Retraining Assigned',reason:'Failed online test ('+failCount+'x). BSC corrective action Step 2.',doneBy:currentUser.name||'Admin'});
+  // Add notification for employee
+  DB.notifications.unshift({id:genId('N'),msg:'Retraining assigned: '+t.name+' — You can now retake the test.',read:false,time:'Just now',icon:'replay',forEmp:empId});
+  toast(empName+' marked for retraining. They can now retake the test.','success',5000);
+  updateBadges();saveDB();
+  // Save to Firebase
+  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});console.log('Retraining saved to Firebase');}catch(e){console.warn('Firebase retraining save error:',e);}})();}
+  // Sync to sheet
+  queueSheetSync(['Trainings']);
+  // Re-render
+  var trn=DB.trainings.find(function(x){return x.id===trnId;});
+  if(trn)setTimeout(function(){openTrainingDetail(trn.id);},300);
+}
+function sendOfflineNotice(trnId,empId,empName){
+  var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  var allResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+  var failCount=allResults.filter(function(r){return !r.pass;}).length;
+  var bestScore=allResults.length?Math.max.apply(null,allResults.map(function(r){return r.score;})):0;
+  if(!confirm('STEP 3: OFFLINE TRAINING NOTICE\n\nEmployee: '+empName+' ('+empId+')\nDepartment: '+(emp?emp.dept:'')+'\nTraining: '+t.name+'\nTrainer: '+t.trainer+'\nAttempts: '+allResults.length+' (Best: '+bestScore+'%, Failed: '+failCount+'x)\n\nThis will:\n1. Mark employee as "Offline Training" assigned\n2. Generate NCR PDF and upload to Google Drive\n3. Record corrective action for BSC audit\n\nProceed?'))return;
+  // Mark as offline trained
+  if(!t.offlineTrained)t.offlineTrained=[];
+  if(!t.offlineTrained.includes(empId))t.offlineTrained.push(empId);
+  // Record for audit
+  if(!t.offlineRecords)t.offlineRecords=[];
+  var offlineRecord={empId:empId,empName:empName,dept:emp?emp.dept:'',desig:emp?emp.desig:'',training:t.name,trainer:t.trainer,manager:t.manager||'',trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:allResults.length,previousBest:bestScore,passMark:t.passing||70,action:'Offline Training Assigned',reason:'Failed online test '+failCount+' times (max score: '+bestScore+'% against '+t.passing+'% pass mark). BSC corrective action Step 3 — offline/face-to-face training required.',doneBy:currentUser.name||'Admin'};
+  t.offlineRecords.push(offlineRecord);
+  DB.notifications.unshift({id:genId('N'),msg:'Offline training assigned for '+t.name+'. Contact your manager.',read:false,time:'Just now',icon:'assignment',forEmp:empId});
+  toast(empName+' — Offline training notice generated. Uploading to Drive...','info',5000);
+  updateBadges();saveDB();
+  // Save to Firebase
+  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});console.log('Offline training saved to Firebase');}catch(e){console.warn('Firebase offline training save error:',e);}})();}
+  // Generate and upload NCR PDF to Drive
+  setTimeout(function(){uploadOfflineNCR_ToDrive(offlineRecord,t,emp);},500);
+  queueSheetSync(['Trainings']);
+  // Re-render
+  var trn=DB.trainings.find(function(x){return x.id===trnId;});
+  if(trn)setTimeout(function(){openTrainingDetail(trn.id);},300);
+}
+function uploadOfflineNCR_ToDrive(rec,trn,emp){
+  try{
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Times New Roman,serif;font-size:11px;color:#000;padding:25px;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid #000;padding:5px 8px;vertical-align:top;}.header-table{width:100%;margin-bottom:12px;}.header-table td{border:none;vertical-align:middle;}.header-table td.logo-cell{width:80px;padding:4px;}.header-table td.logo-cell img{width:70px;height:70px;}.header-table td.title-cell{text-align:center;font-weight:bold;}.section-title{background:#d9d9d9;font-weight:bold;font-size:11px;padding:5px 8px;border:1px solid #000;text-align:center;}.label{font-weight:bold;font-size:10px;}.value{font-size:10px;border-bottom:1px solid #000;min-height:18px;}.severity-cell{background:#fff3cd;font-weight:bold;text-align:center;}.footer-note{margin-top:12px;font-size:8px;color:#666;text-align:center;}</style></head><body>';
+  html+='<table class="header-table"><tr>';
+  html+='<td class="logo-cell" rowspan="2"><img src="'+PTS_LOGO_B64+'" /></td>';
+  html+='<td class="title-cell" style="font-size:14px;">Prestige Office Management Private Limited</td>';
+  html+='<td style="font-size:9px;text-align:right;">Document Number:<br/><b>NCR-FORM-001</b></td>';
+  html+='</tr><tr>';
+  html+='<td class="title-cell" style="font-size:11px;">Integrated Management System</td>';
+  html+='<td style="font-size:9px;text-align:right;">Rev.01</td>';
+  html+='</tr></table>';
+  html+='<div style="text-align:center;font-size:14px;font-weight:bold;margin:8px 0;border:2px solid #000;padding:6px;">NON-CONFORMITY REPORT (NCR)<br/><span style="font-size:10px;">Corrective Action — Offline Training Assignment</span></div>';
+  html+='<table style="margin-bottom:10px;">';
+  html+='<tr><td colspan="4" class="section-title">NCR DETAILS</td></tr>';
+  html+='<tr><td class="label" style="width:18%;">NCR Date:</td><td class="value" style="width:32%;">'+rec.date+'</td><td class="label" style="width:18%;">NCR Reference:</td><td class="value" style="width:32%;">NCR-'+rec.timestamp.toString(36).toUpperCase()+'</td></tr>';
+  html+='<tr><td class="label">Training:</td><td class="value"><b>'+rec.training+'</b></td><td class="label">Trainer:</td><td class="value">'+rec.trainer+'</td></tr>';
+  html+='<tr><td class="label">Pass Mark:</td><td class="value">'+rec.passMark+'%</td><td class="label">Manager:</td><td class="value">'+rec.manager+'</td></tr>';
+  html+='</table>';
+  html+='<table style="margin-bottom:10px;">';
+  html+='<tr><td colspan="4" class="section-title">EMPLOYEE DETAILS</td></tr>';
+  html+='<tr><td class="label" style="width:18%;">Employee ID:</td><td class="value" style="width:32%;">'+rec.empId+'</td><td class="label" style="width:18%;">Name:</td><td class="value" style="width:32%;">'+rec.empName+'</td></tr>';
+  html+='<tr><td class="label">Department:</td><td class="value">'+rec.dept+'</td><td class="label">Designation:</td><td class="value">'+rec.desig+'</td></tr>';
+  html+='</table>';
+  html+='<table style="margin-bottom:10px;">';
+  html+='<tr><td colspan="4" class="section-title">NON-CONFORMITY DESCRIPTION</td></tr>';
+  html+='<tr><td class="label" style="width:18%;">Description:</td><td colspan="3" style="font-size:10px;padding:5px 8px;">Employee failed the online assessment for “'+rec.training+'” after '+rec.previousAttempts+' attempt(s). Highest score achieved: '+rec.previousBest+'% against required pass mark of '+rec.passMark+'%. As per BSC audit requirements, corrective action is initiated.</td></tr>';
+  html+='<tr><td class="label">Severity:</td><td colspan="3" class="severity-cell">MINOR — Training Gap Identified</td></tr>';
+  html+='</table>';
+  html+='<table style="margin-bottom:10px;">';
+  html+='<tr><td colspan="4" class="section-title">CORRECTIVE ACTION (STEP 3)</td></tr>';
+  html+='<tr><td class="label" style="width:18%;">Action:</td><td colspan="3" style="font-size:10px;padding:5px 8px;">Employee shall undergo <b>face-to-face / offline training</b> for “'+rec.training+'” conducted by the designated trainer. Post-training, competency shall be verified through practical assessment.</td></tr>';
+  html+='<tr><td class="label">Responsibility:</td><td style="font-size:10px;">'+(rec.trainer||'Trainer')+' / '+(rec.manager||'Manager')+'</td><td class="label">Target Date:</td><td class="value"></td></tr>';
+  html+='<tr><td class="label">Verified By:</td><td class="value"></td><td class="label">Verification Date:</td><td class="value"></td></tr>';
+  html+='<tr><td class="label">Remarks:</td><td colspan="3" class="value" style="min-height:40px;"></td></tr>';
+  html+='</table>';
+  html+='<table>';
+  html+='<tr><td colspan="4" class="section-title">ATTEMPT HISTORY</td></tr>';
+  var results=DB.testResults.filter(function(r){return r.empId===rec.empId&&r.training===rec.training;});
+  results.forEach(function(r,i){
+    html+='<tr><td style="font-size:10px;">Attempt '+(i+1)+'</td><td style="font-size:10px;">'+r.date+'</td><td style="font-size:10px;">'+r.score+'%</td><td style="font-size:10px;color:'+(r.pass?'green':'red')+';font-weight:bold;">'+(r.pass?'PASS':'FAIL')+'</td></tr>';
+  });
+  html+='</table>';
+  html+='<div class="footer-note">NCR-FORM-001 Rev.01 | BSC Audit Corrective Action | Generated: '+new Date().toLocaleString()+' | '+DB.settings.companyName+'</div>';
+  html+='</body></html>';
+  var fileName='NCR_OfflineTraining_'+rec.empName.replace(/\s+/g,'_')+'_'+rec.training.replace(/\s+/g,'_')+'_'+rec.date;
+  var payload={action:'createDoc',folderId:DRIVE_FOLDER_ID,fileName:fileName,html:html};
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST',DRIVE_PDF_SCRIPT_URL,true);
+  xhr.setRequestHeader('Content-Type','application/json');
+  xhr.onload=function(){if(xhr.status===200){try{var res=JSON.parse(xhr.responseText);if(res.status==='OK'){toast('NCR PDF saved to Drive: '+res.fileName,'success',5000);}else{toast('Drive: '+res.msg,'warning',5000);}}catch(e){toast('NCR PDF sent to Drive','success',3000);}}else{toast('Drive upload status: '+xhr.status,'warning',3000);}};
+  xhr.onerror=function(){toast('Drive upload failed','error',5000);};
+  xhr.send(JSON.stringify(payload));
+  console.log('NCR PDF upload initiated:',fileName);
+  }catch(e){console.warn('NCR upload error:',e);toast('NCR upload failed: '+e.message,'error',5000);}
 }
 async function deleteTraining(id){
   if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
@@ -3309,10 +3436,12 @@ function initTrnVideoTracker(ytVideoId,trnId,empId){
 function startQuizForTrn(trnId){
   var t=DB.trainings.find(function(x){return x.id===trnId;});
   if(!t){toast('Training not found','error');return;}
-  // Check if already tested
+  // Check if already tested (BSC: allow retake if retrained)
   var empId=currentUser.id;
+  var isRetrained2=(t.retrained||[]).includes(empId);
   var existingResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
-  if(existingResults.length>0){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only.','error');return;}
+  if(existingResults.length>0&&!isRetrained2){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only. Contact admin for retraining.','error');return;}
+  if(existingResults.length>0&&isRetrained2){var hasPass=existingResults.find(function(r){return r.pass;});if(hasPass){toast('You already passed this test (score: '+hasPass.score+'%). No retake needed.','success',3000);return;}toast('Retake allowed — previous attempt(s) failed. Give your best!','info',3000);}
   // Check video progress if YouTube link exists
   var ytId=extractYoutubeId(t.youtubeLink||'');
   if(ytId){
@@ -3544,12 +3673,20 @@ function renderQuizMenu(){
 }
 function startQuiz(category,trainingName){
   if(!currentUser){toast("Please login first","error");return;}
-  // ONE ATTEMPT PER TRAINING: Check if employee already took this test
+  // ONE ATTEMPT PER TRAINING: Check if employee already took this test (BSC: allow retake if retrained)
   if(trainingName){
-    var existingAttempt=DB.testResults.find(function(r){return r.empId===currentUser.id&&r.training===trainingName;});
-    if(existingAttempt){
-      toast("You have already attempted \""+trainingName+"\" (Score: "+existingAttempt.score+"%, "+(existingAttempt.pass?"Passed":"Failed")+"). Only one attempt is allowed.","warning",5000);
+    var trnMatch2=DB.trainings.find(function(t){return t.name===trainingName;});
+    var isRetrained=trnMatch2&&(trnMatch2.retrained||[]).includes(currentUser.id);
+    var existingResults2=DB.testResults.filter(function(r){return r.empId===currentUser.id&&r.training===trainingName;});
+    if(existingResults2.length>0&&!isRetrained){
+      var best2=existingResults2.sort(function(a,b){return b.score-a.score;})[0];
+      toast('You have already attempted \"'+trainingName+'\" (Score: '+best2.score+'%, '+(best2.pass?'Passed':'Failed')+'). Only one attempt is allowed. Contact admin for retraining.','warning',5000);
       return;
+    }
+    if(existingResults2.length>0&&isRetrained){
+      var passRes=existingResults2.find(function(r){return r.pass;});
+      if(passRes){toast('You already passed \"'+trainingName+'\" (Score: '+passRes.score+'%). No retake needed.','success',3000);return;}
+      toast('Retake allowed — previous attempt(s) failed. Give your best!','info',3000);
     }
   }
   closeModal();
@@ -4582,7 +4719,9 @@ function buildTrainingPayload(){
     var completed=Math.max((t.completed||[]).length,passResults.size);
     var enrolledNames=(t.enrolled||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
     var completedNames=(t.completed||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
-    return{Company:company,TrainingID:t.id,TrainingName:t.name,Category:t.cat,Department:t.dept||"All",Trainer:t.trainer,Manager:t.manager||"",TrainingDate:t.date||"",Duration:t.duration||"Not set",PassingMarks:t.passing||70,CertificateValidity:t.validity||"1 Year",CertificateRequired:t.cert?"Yes":"No",Description:t.desc||"",YouTubeLink:t.youtubeLink||"",TotalEnrolled:enrolled,TotalCompleted:completed,PassRate:enrolled>0?Math.round(completed/enrolled*100)+"%":"0%",CustomQuestions:(t.questions||[]).length,EnrolledEmployees:enrolledNames,CompletedEmployees:completedNames};
+    var retrainingCount=(t.retrainingRecords||[]).length;
+    var offlineCount=(t.offlineRecords||[]).length;
+    return{Company:company,TrainingID:t.id,TrainingName:t.name,Category:t.cat,Department:t.dept||"All",Trainer:t.trainer,Manager:t.manager||"",TrainingDate:t.date||"",Duration:t.duration||"Not set",PassingMarks:t.passing||70,CertificateValidity:t.validity||"1 Year",CertificateRequired:t.cert?"Yes":"No",Description:t.desc||"",YouTubeLink:t.youtubeLink||"",TotalEnrolled:enrolled,TotalCompleted:completed,PassRate:enrolled>0?Math.round(completed/enrolled*100)+"%":"0%",CustomQuestions:(t.questions||[]).length,EnrolledEmployees:enrolledNames,CompletedEmployees:completedNames,RetrainedCount:retrainedCount,OfflineTrainingCount:offlineCount};
   });
 }
 function buildCertificatePayload(){
