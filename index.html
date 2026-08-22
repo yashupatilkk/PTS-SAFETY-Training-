@@ -3695,7 +3695,8 @@ function submitQuiz(){
       if(!r)return;
       var trn=DB.trainings.find(function(t){return t.name===r.training;});
       var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
-      var row={date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
+      var emp=DB.employees.find(function(e){return e.id===r.empId;});
+      var row={Company:DB.settings.companyName||"PTS SAFETY",Date:r.date,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Designation:emp?emp.desig||"":"",TrainingName:r.training,Category:r.cat||"",Trainer:trn?trn.trainer||"":"",Manager:trn?trn.manager||"":"",Duration:trn?trn.duration||"":"",PassMark:trn?trn.passing||70:70,Validity:trn?trn.validity||"1 Year":"1 Year",Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Attempt:r.attempt,Result:r.pass?"PASS":"FAIL",CertRequired:trn?(trn.cert?"Yes":"No"):"Yes",CertNo:r.cert||"",CompletionDate:r.date,CertIssued:cert?cert.issued||"":"",CertExpiry:cert?cert.expiry||"":""};
       (function(){
       var f=document.createElement('form');
       f.method='POST';f.action=sheetUrl;f.target='_gsq_'+Date.now();
@@ -3839,7 +3840,7 @@ var overlay=document.getElementById('feedbackOverlay');if(overlay)overlay.remove
 _fbRatings={};_fbOverall=0;
 if(firebaseReady){try{fbDB.collection('feedbackForms').doc(String(fb.id)).set(JSON.parse(JSON.stringify(fb)),{merge:true});console.log('Feedback saved to Firebase');}catch(e){console.warn('Firebase feedback save error:',e);}}
 // Push to Google Sheet
-(function(){try{var sheetUrl=DB.settings.sheetUrl||'';if(!sheetUrl)return;var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_fb_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';var row={date:fb.date,empId:fb.empId,empName:fb.empName,dept:fb.dept,desig:fb.desig,manager:fb.manager,training:fb.training,trainer:fb.trainer};FB_QUESTIONS.forEach(function(q,i){row['Q'+(i+1)+' ('+q.substring(0,30)+')']=fb.ratings['q'+(i+1)].label;});row['Overall Rating']=fb.overallLabel;row['What did you enjoy most?']=fb.enjoy;row['Suggestions']=fb.suggestions;inp.value=JSON.stringify({sheet:'Feedback',data:[row]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);}catch(e){console.warn('Feedback sheet sync error:',e);}})();
+(function(){try{var sheetUrl=DB.settings.sheetUrl||'';if(!sheetUrl)return;var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_fb_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';var row={Company:DB.settings.companyName||"PTS SAFETY",Date:fb.date,EmployeeID:fb.empId,EmployeeName:fb.empName,Department:fb.dept,Designation:fb.desig,Manager:fb.manager,Training:fb.training,Trainer:fb.trainer,Category:fb.category||''};FB_QUESTIONS.forEach(function(q,i){row['Q'+(i+1)+' ('+q.substring(0,30)+')']=fb.ratings['q'+(i+1)].label+' ('+fb.ratings['q'+(i+1)].score+'/5)';});row['Overall Rating']=fb.overallLabel+' ('+fb.overallRating+'/5)';row['What did you enjoy most?']=fb.enjoy;row['Suggestions']=fb.suggestions;inp.value=JSON.stringify({sheet:'Feedback',data:[row]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);}catch(e){console.warn('Feedback sheet sync error:',e);}})();
 submitQuiz();
 }
 
@@ -4380,7 +4381,7 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
           <button class="btn btn-outline" onclick="testSheetConnection()"><span class="mat-ico">wifi_tethering</span> Test</button>
         </div>
         <div id="syncStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
-        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (quiz results), <b>Employees</b> (master list + stats), <b>Trainings</b> (all trainings + progress), <b>Certificates</b> (all issued certs), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures). Each sync replaces the sheet data to stay in sync.</div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (full test results with employee, trainer, manager, cert details), <b>Employees</b> (master list with stats), <b>Trainings</b> (all trainings + enrolled/completed employees), <b>Certificates</b> (all issued certs with trainer & validity), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback</b> (IMSP 29 F05 responses with scores). Each sync replaces the sheet data to stay in sync. All sheets include Company name for audit trail.</div>
       </div>
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">backup</span> Data Management</div>
@@ -4493,40 +4494,51 @@ function restoreData(input){
    GOOGLE SHEETS SYNC — Sends Test Results, Employees & Trainings
 ============================================================ */
 function buildSyncPayload(){
+  var company=DB.settings.companyName||"PTS SAFETY";
   return DB.testResults.map(r=>{
     const trn=DB.trainings.find(t=>t.name===r.training);
     const cert=DB.certificates.find(c=>c.empId===r.empId&&c.training===r.training);
-    return{date:r.date,empId:r.empId,empName:r.empName,dept:r.dept,training:r.training,cat:r.cat||"",score:r.score,correct:r.correct,wrong:r.wrong,total:r.total,result:r.pass?"PASS":"FAIL",certRequired:trn?(trn.cert?"Yes":"No"):"Yes",certNo:r.cert||"",completionDate:r.date};
+    const emp=DB.employees.find(e=>e.id===r.empId);
+    return{Company:company,Date:r.date,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Designation:emp?emp.desig||"":"",TrainingName:r.training,Category:r.cat||"",Trainer:trn?trn.trainer||"":"",Manager:trn?trn.manager||"":"",Duration:trn?trn.duration||"":"",PassMark:trn?trn.passing||70:70,Validity:trn?trn.validity||"1 Year":"1 Year",Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Attempt:r.attempt,Result:r.pass?"PASS":"FAIL",CertRequired:trn?(trn.cert?"Yes":"No"):"Yes",CertNo:r.cert||"",CompletionDate:r.date,CertIssued:cert?cert.issued||"":"",CertExpiry:cert?cert.expiry||"":""};
   });
 }
 function buildEmployeePayload(){
+  var company=DB.settings.companyName||"PTS SAFETY";
   return DB.employees.map(e=>{
     var testCount=DB.testResults.filter(r=>r.empId===e.id).length;
     var passCount=DB.testResults.filter(r=>r.empId===e.id&&r.pass).length;
     var certCount=DB.certificates.filter(c=>c.empId===e.id).length;
     var assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(e.id)).length;
-    return{id:e.id,name:e.name,dept:e.dept||"",desig:e.desig||"",phone:e.mobile||e.phone||"",email:e.email||"",shift:e.shift||"",status:e.status||"active",location:e.location||"",joining:e.joining||"",testsTaken:testCount,testsPassed:passCount,certificates:certCount,trainingsAssigned:assignedTrns};
+    var completedTrns=DB.trainings.filter(t=>(t.completed||[]).includes(e.id)).length;
+    return{Company:company,EmployeeID:e.id,FullName:e.name,Department:e.dept||"",Designation:e.desig||"",Mobile:e.mobile||e.phone||"",Email:e.email||"",Shift:e.shift||"",Status:e.status||"active",Location:e.location||"",JoiningDate:e.joining||"",TestsTaken:testCount,TestsPassed:passCount,Certificates:certCount,TrainingsAssigned:assignedTrns,TrainingsCompleted:completedTrns,Company:e.company||company};
   });
 }
 function buildTrainingPayload(){
+  var company=DB.settings.companyName||"PTS SAFETY";
   return DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined';}).map(t=>{
     var enrolled=(t.enrolled||[]).length;
     var passResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
     var completed=Math.max((t.completed||[]).length,passResults.size);
-    return{id:t.id,name:t.name,cat:t.cat,trainer:t.trainer,manager:t.manager||"",date:t.date||"",duration:t.duration||"Not set",enrolled:enrolled,completed:completed,passing:t.passing||70,certRequired:t.cert?"Yes":"No",questions:(t.questions||[]).length,youtubeLink:t.youtubeLink||""};
+    var enrolledNames=(t.enrolled||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
+    var completedNames=(t.completed||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
+    return{Company:company,TrainingID:t.id,TrainingName:t.name,Category:t.cat,Department:t.dept||"All",Trainer:t.trainer,Manager:t.manager||"",TrainingDate:t.date||"",Duration:t.duration||"Not set",PassingMarks:t.passing||70,CertificateValidity:t.validity||"1 Year",CertificateRequired:t.cert?"Yes":"No",Description:t.desc||"",YouTubeLink:t.youtubeLink||"",TotalEnrolled:enrolled,TotalCompleted:completed,PassRate:enrolled>0?Math.round(completed/enrolled*100)+"%":"0%",CustomQuestions:(t.questions||[]).length,EnrolledEmployees:enrolledNames,CompletedEmployees:completedNames};
   });
 }
 function buildCertificatePayload(){
+  var company=DB.settings.companyName||"PTS SAFETY";
   return DB.certificates.map(c=>{
     const emp=DB.employees.find(e=>e.id===c.empId);
-    return{certNo:c.num,empId:c.empId,empName:emp?emp.name:(c.empName||""),department:emp?emp.dept:(c.dept||""),training:c.training||"",issueDate:c.issueDate||c.date||"",expiryDate:c.expiry||"",score:c.score||"",status:c.status||"Active"};
+    const trn=DB.trainings.find(t=>t.name===c.training);
+    return{Company:company,CertificateNo:c.num,EmployeeID:c.empId,EmployeeName:emp?emp.name:(c.empName||""),Designation:emp?emp.desig||"":"",Department:emp?emp.dept:(c.dept||""),Training:c.training||"",Trainer:trn?trn.trainer||"":(c.trainer||""),Manager:trn?trn.manager||"":"",Score:c.score||"",CompletionDate:c.completedDate||c.issued||"",IssueDate:c.issued||c.date||"",ExpiryDate:c.expiry||"",Validity:trn?trn.validity||"1 Year":"1 Year",Status:c.status||"Active"};
   });
 }
 function buildEquipmentPayload(){
-  return EQUIPMENT_DATA.map(eq=>({name:eq.name,category:eq.category||"",checklist:(eq.checklist||[]).join(", "),type:eq.type||"Standard"}));
+  var company=DB.settings.companyName||"PTS SAFETY";
+  return EQUIPMENT_DATA.map(eq=>({Company:company,Name:eq.name,Category:eq.category||"",Checklist:(eq.checklist||[]).join(", "),Type:eq.type||"Standard"}));
 }
 function buildSopPayload(){
-  return DB.sops.map(s=>({id:s.id,title:s.title||s.name||"",category:s.cat||"",version:s.version||"1.0",created:s.created||"",applicableDept:(s.dept||"").toString(),status:s.status||"Active"}));
+  var company=DB.settings.companyName||"PTS SAFETY";
+  return DB.sops.map(s=>({Company:company,ID:s.id,Title:s.title||s.name||"",Category:s.cat||"",Version:s.version||"1.0",Created:s.created||"",ApplicableDept:(s.dept||"").toString(),Status:s.status||"Active"}));
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
