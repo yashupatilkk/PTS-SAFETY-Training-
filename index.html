@@ -1957,33 +1957,28 @@ function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel
 ============================================================ */
 function openReplyBox(notifId,btnEl){
   const n=DB.notifications.find(x=>x.id===notifId);if(!n)return;
-  const container=btnEl.closest('.activity-item,.notif-item');
-  // Find the text content area (flex:1 child) — NOT the flex container itself
-  // Otherwise display:flex makes the reply area a row item instead of below content
-  const infoArea=container.querySelector('.activity-info')||container.children[1];
-  const target=infoArea||container;
-  const existing=target.querySelector('.notif-reply-area');
-  if(existing){existing.remove();return;}
-  const area=document.createElement('div');
-  area.className='notif-reply-area';
-  area.style.width='100%';
-  area.style.boxSizing='border-box';
-  area.innerHTML='<div class="notif-replies">'+(n.replies||[]).map(r=>'<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>').join('')+'</div><div class="notif-reply-input"><input type="text" id="replyInput_'+notifId+'" placeholder="Type your reply..." onkeydown="if(event.key===\x27Enter\x27)sendReply(\x27'+notifId+'\x27)" /><button class="notif-reply-btn" onclick="sendReply(\x27'+notifId+'\x27)">Send</button></div>';
-  target.appendChild(area);
-  setTimeout(()=>{const inp=document.getElementById('replyInput_'+notifId);if(inp)inp.focus();},100);
+  // Use modal approach — guaranteed to work regardless of parent CSS layout
+  var existingReplies=(n.replies||[]).map(function(r){return '<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>';}).join('');
+  var replyHTML='<div class="modal-accent"></div><div class="modal-head"><h2>Reply to Notification</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">';
+  replyHTML+='<div style="font-size:13px;color:var(--muted);margin-bottom:12px;padding:10px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);">'+(n.msg||'')+'</div>';
+  if(existingReplies){replyHTML+='<div style="margin-bottom:12px;"><div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:6px;">Previous Replies</div><div class="notif-replies">'+existingReplies+'</div></div>';}
+  replyHTML+='<div class="form-group"><label class="form-label-sm">Your Reply</label><textarea class="form-control-sm" id="replyModalText" rows="3" placeholder="Type your reply..." onkeydown="if(event.key===\x27Enter\x27&&!event.shiftKey){event.preventDefault();sendReplyModal(\x27'+notifId+'\x27);}"></textarea></div>';
+  replyHTML+='</div><div class="modal-foot"><button class="btn btn-amber" onclick="sendReplyModal(\''+notifId+'\')"><span class="mat-ico">send</span> Send Reply</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>';
+  openModal(replyHTML,'500px');
+  setTimeout(function(){var ta=document.getElementById('replyModalText');if(ta)ta.focus();},200);
 }
-function sendReply(notifId){
-  const inp=document.getElementById('replyInput_'+notifId);if(!inp)return;
-  const text=inp.value.trim();if(!text){toast('Please type a reply','warning');return;}
-  const n=DB.notifications.find(x=>x.id===notifId);if(!n)return;
+function sendReplyModal(notifId){
+  var ta=document.getElementById('replyModalText');if(!ta)return;
+  var text=ta.value.trim();if(!text){toast('Please type a reply','warning');return;}
+  var n=DB.notifications.find(function(x){return x.id===notifId;});if(!n)return;
   if(!n.replies)n.replies=[];
   n.replies.push({by:currentUser.name||currentUser.username,byId:currentUser.id||currentUser.username,text:text,time:new Date().toLocaleString('en-IN'),timestamp:Date.now()});
   n.read=true;
   saveDB();
-  toast('Reply sent','success',2000);
+  closeModal();
+  toast('Reply sent successfully','success',2000);
   renderNotifPanel();renderNotifications();updateBadges();
-}
-function openSendMsgModal(){
+}function openSendMsgModal(){
   if(!isAdmin)return;
   const empOptions=DB.employees.map(e=>'<option value="'+e.id+'">'+e.name+' ('+e.id+')</option>').join('');
   openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Send Message to Employee</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div class="form-section"><div class="form-grid"><div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Select Employee *</label><select class="form-control-sm" id="msgEmpSelect">'+empOptions+'</select></div><div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Message *</label><textarea class="form-control-sm" id="msgText" rows="3" placeholder="Type your message..."></textarea></div></div></div></div><div class="modal-foot"><button class="btn btn-amber" onclick="sendEmployeeMessage()"><span class="mat-ico">send</span> Send Message</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','500px');
@@ -3960,7 +3955,9 @@ function submitQuiz(){
   })();
 
       // === BSC AUDIT: AUTO-ESCALATION ON FAILURE (training tests only) ===
+      console.log('[BSC CHECK] pass='+pass+' trnMatch='+(trnMatch?trnMatch.name:'NULL')+' score='+score);
       if(!pass && trnMatch){
+        toast('BSC Auto-Escalation triggered for '+trnMatch.name+' (fail #'+(DB.testResults.filter(function(r){return r.empId===empId&&!r.pass&&r.training===trnMatch.name;}).length)+')','error',4000);
         (function(){
           var t=trnMatch;var eid=empId;var ename=empName;
           var allRes=DB.testResults.filter(function(r){return r.empId===eid&&r.training===t.name;});
@@ -4572,13 +4569,14 @@ function renderCorrectiveActions(){
   });
   (DB.correctiveActions||[]).forEach(function(r){allCA.push(r);});
   allCA.sort(function(a,b){return (b.timestamp||0)-(a.timestamp||0);});
+  console.log('[CA] allCA.length='+allCA.length+' DB.correctiveActions='+(DB.correctiveActions||[]).length+' trainings with records:'+DB.trainings.filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;}).length);
   var retrainCount=allCA.filter(function(a){return a.type==='retraining';}).length;
   var offlineCount=allCA.filter(function(a){return a.type==='offline';}).length;
   var uniqueEmps=new Set(allCA.map(function(a){return a.empId;})).size;
   var autoCount=allCA.filter(function(a){return (a.doneBy||'').indexOf('Auto')>=0;}).length;
   var openItems=allCA.filter(function(a){var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});return !hasCert;});
   var el=document.getElementById('view-correctiveactions');
-  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div></div>';
+  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+allCA.length+'</div><div style="font-size:11px;color:var(--muted);">Total Actions</div></div>';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+retrainCount+'</div><div style="font-size:11px;color:var(--muted);">Retraining</div></div>';
@@ -4601,7 +4599,7 @@ function renderCorrectiveActions(){
     });
     h+='</tbody></table></div>';
   }else{
-    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No Corrective Actions</h3><p>All employees are compliant.</p></div>';
+    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No Corrective Actions Yet</h3><p>Corrective actions are auto-created when an employee fails a training test.<br/>1st fail = Auto-retraining, 2nd fail = Warning, 3rd fail = Offline training + NCR.</p><p style="margin-top:8px;">Total test results: '+DB.testResults.length+' | Failures: '+DB.testResults.filter(function(r){return !r.pass;}).length+'</p></div>';
   }
   el.innerHTML=h;
 }
