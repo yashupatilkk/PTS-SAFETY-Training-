@@ -542,6 +542,7 @@ select.form-control-sm{background:var(--sur2);}
     <button class="nav-item" data-view="msgadmin" onclick="gotoView('msgadmin')"><span class="mat-ico">mail</span><span>Message to Admin</span><span class="nav-badge" id="nb-msgadmin" style="background:rgba(62,160,232,.15);color:var(--blue);display:none;">0</span></button>
     </div>
     <button class="nav-item" data-view="trainings" onclick="gotoView('trainings')"><span class="mat-ico">school</span><span>Trainings</span><span class="nav-badge" id="nb-trainings">0</span></button>
+    <button class="nav-item" data-view="retraining" onclick="gotoView('retraining')"><span class="mat-ico">replay</span><span>Round 2 Training</span><span class="nav-badge" id="nb-retraining" style="background:rgba(240,136,62,.2);color:var(--orange)">0</span></button>
     <button class="nav-item" data-view="equipment" onclick="gotoView('equipment')"><span class="mat-ico">build</span><span>Equipment Library</span><span class="nav-badge" id="nb-equipment">0</span></button>
     <div class="nav-section-title">Resources</div>
     <button class="nav-item" data-view="sop" onclick="gotoView('sop')"><span class="mat-ico">description</span><span>SOP Library</span></button>
@@ -608,6 +609,7 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-employees"></div>
     <div class="view" id="view-empcards"></div>
     <div class="view" id="view-trainings"></div>
+    <div class="view" id="view-retraining"></div>
     <div class="view" id="view-equipment"></div>
     <div class="view" id="view-sop"></div>
     <div class="view" id="view-quiz"></div>
@@ -1871,6 +1873,21 @@ function updateBadges(){
   // Also count records nested inside trainings for badge consistency
   DB.trainings.forEach(function(t){caCount+=(t.retrainingRecords||[]).length;caCount+=(t.offlineRecords||[]).length;});
   var caEl=document.getElementById("nb-ca");if(caEl)caEl.textContent=caCount;
+  // Round 2 Training badge: count employees who failed and haven't passed
+  var r2Count=0;
+  var empIdSet2=DB.employees.map(function(e){return e.id;});
+  var r2TrnMap={};
+  DB.testResults.forEach(function(r){if(empIdSet2.indexOf(r.empId)<0)return;if(!r2TrnMap[r.training])r2TrnMap[r.training]=[];r2TrnMap[r.training].push(r);});
+  Object.keys(r2TrnMap).forEach(function(trnName){
+    var empAtt={};
+    r2TrnMap[trnName].forEach(function(r){if(!empAtt[r.empId])empAtt[r.empId]=[];empAtt[r.empId].push(r);});
+    Object.keys(empAtt).forEach(function(eid){
+      var hasPass=empAtt[eid].some(function(r){return r.pass;});
+      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===trnName;});
+      if(!hasPass&&!hasCert)r2Count++;
+    });
+  });
+  var r2El=document.getElementById("nb-retraining");if(r2El)r2El.textContent=r2Count;
   // Employee: show unread admin replies badge on Message to Admin
   if(!isAdmin&&currentUser&&currentUser.id){
     var adminRepliesUnread=DB.notifications.filter(function(n){return n.fromEmp===currentUser.id&&n.replies&&n.replies.some(function(r){return r.byId!==currentUser.id;});}).length;
@@ -1894,10 +1911,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",retraining:"Round 2 Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,retraining:renderRetraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   if(v==="dashboard"&&isAdmin){var ds=document.getElementById("view-dashboard");var ah=getBSCAuditHTML();if(ah&&ds){var oldSlot=ds.querySelector(".bsc-audit-slot");if(oldSlot)oldSlot.remove();var wrapper=document.createElement("div");wrapper.className="bsc-audit-slot";wrapper.innerHTML=ah;ds.appendChild(wrapper);}}
   closeSidebar();
@@ -5371,6 +5388,152 @@ function confirmCAAssignV2(){
   }
   closeModal();saveDB();updateBadges();renderCorrectiveActions();renderNotifPanel();
 }
+
+/* ============================================================
+   ROUND 2 TRAINING — Auto-populated for failed employees
+============================================================ */
+function renderRetraining(){
+  if(!isAdmin){document.getElementById('view-retraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var el=document.getElementById('view-retraining');
+  // === STEP 1: Find all employees who failed 1st attempt and haven't passed yet ===
+  var empIdSet=DB.employees.map(function(e){return e.id;});
+  var pendingList=[]; // {empId,empName,dept,desig,trnName,trnId,firstScore,firstDate,attemptCount,bestScore,trnObj}
+  var trnResultMap={}; // trnName -> [results]
+  DB.testResults.forEach(function(r){
+    if(empIdSet.indexOf(r.empId)<0)return;
+    if(!trnResultMap[r.training])trnResultMap[r.training]=[];
+    trnResultMap[r.training].push(r);
+  });
+  Object.keys(trnResultMap).forEach(function(trnName){
+    var results=trnResultMap[trnName];
+    // Group by employee
+    var empMap={};
+    results.forEach(function(r){if(!empMap[r.empId])empMap[r.empId]=[];empMap[r.empId].push(r);});
+    Object.keys(empMap).forEach(function(eid){
+      var attempts=empMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});
+      var hasPass=attempts.some(function(r){return r.pass;});
+      if(hasPass)return; // Already passed, skip
+      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===trnName;});
+      if(hasCert)return; // Has cert, skip
+      var emp=DB.employees.find(function(e){return e.id===eid;});
+      if(!emp)return;
+      var first=attempts[0];
+      var bestScore=0;attempts.forEach(function(r){if(r.score>bestScore)bestScore=r.score;});
+      var trnObj=DB.trainings.find(function(t){return t.name===trnName;});
+      pendingList.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,trnName:trnName,trnId:trnObj?trnObj.id:'',firstScore:first.score,firstDate:first.date,attemptCount:attempts.length,bestScore:bestScore,trnObj:trnObj,youtubeLink:trnObj?trnObj.youtubeLink||'':''});
+    });
+  });
+  // Group by training name
+  var byTraining={};
+  pendingList.forEach(function(p){if(!byTraining[p.trnName])byTraining[p.trnName]=[];byTraining[p.trnName].push(p);});
+  var trnNames=Object.keys(byTraining);
+  // === BUILD HTML ===
+  var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">Auto-populated: '+pendingList.length+' employee(s) need retraining</div>';
+  h+='<select id="r2TrnFilter" onchange="renderRetraining()" style="padding:7px 10px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:12px;">';
+  var r2Filter=document.getElementById('r2TrnFilter')?document.getElementById('r2TrnFilter').value:'All';
+  h+='<option value="All"'+(r2Filter==='All'?' selected':'')+'>All Trainings</option>';
+  trnNames.forEach(function(n){h+='<option value="'+n+'"'+(r2Filter===n?' selected':'')+'>'+n+'</option>';});
+  h+='</select></div></div>';
+  // Info banner
+  h+='<div style="background:rgba(240,136,62,.06);border:1px solid rgba(240,136,62,.2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--orange);font-size:20px;">replay</span><div><b>How it works:</b> Employees who <b>failed their 1st attempt</b> automatically appear here. Assign a training video, send them a message, and they can retake the test. Names auto-update when someone fails.</div></div>';
+  // Filter
+  var showTrns=r2Filter==='All'?trnNames:[r2Filter];
+  if(!pendingList.length){
+    h+='<div class="empty-state"><span class="mat-ico" style="font-size:48px;">check_circle</span><h3>All Clear!</h3><p>No employees need Round 2 training right now.<br/>When someone fails a test, their name will automatically appear here.</p></div>';
+  }else{
+    showTrns.forEach(function(trnName){
+      var list=byTraining[trnName];
+      if(!list||!list.length)return;
+      h+='<div style="margin-bottom:18px;">';
+      // Training header
+      var trnObj=list[0].trnObj;
+      h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;border-left:4px solid var(--orange);display:flex;align-items:center;gap:10px;">';
+      h+='<span class="mat-ico" style="font-size:24px;color:var(--orange);">school</span>';
+      h+='<div style="flex:1;"><div style="font-weight:700;font-size:14px;">'+trnName+'</div>';
+      h+='<div style="font-size:11px;color:var(--muted);">'+list.length+' employee(s) failed · Pass mark: '+(trnObj?trnObj.passing||70:70)+'%</div></div>';
+      h+='</div>';
+      // Employee cards
+      list.forEach(function(p,idx){
+        h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;margin-bottom:8px;border-left:4px solid var(--red);">';
+        // Row 1: Employee info + score
+        h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">';
+        h+='<div class="avatar" style="width:44px;height:44px;font-size:16px;background:'+avatarColor(p.empName)+';flex-shrink:0;">'+avatarInitials(p.empName)+'</div>';
+        h+='<div style="flex:1;min-width:150px;"><div style="font-weight:700;font-size:13px;">'+p.empName+'</div>';
+        h+='<div style="font-size:11px;color:var(--muted);">'+p.empId+' · '+p.dept+(p.desig?' · '+p.desig:'')+'</div></div>';
+        // Score badges
+        h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+        h+='<div style="background:rgba(232,72,58,.1);border-radius:var(--r-sm);padding:8px 12px;text-align:center;"><div style="font-size:10px;color:var(--muted);">1st Score</div><div style="font-size:18px;font-weight:700;color:var(--red);">'+p.firstScore+'%</div></div>';
+        h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:8px 12px;text-align:center;"><div style="font-size:10px;color:var(--muted);">Attempts</div><div style="font-size:18px;font-weight:700;color:var(--orange);">'+p.attemptCount+'</div></div>';
+        h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:8px 12px;text-align:center;"><div style="font-size:10px;color:var(--muted);">Best</div><div style="font-size:18px;font-weight:700;color:var(--blue);">'+p.bestScore+'%</div></div>';
+        h+='</div></div>';
+        // Row 2: Video assign + message + actions
+        h+='<div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+        // Video section
+        h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;">';
+        h+='<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">smart_display</span> Training Video</div>';
+        h+='<div style="display:flex;gap:4px;">';
+        h+='<input class="form-control-sm" id="r2yt_'+p.empId+'_'+idx+'" placeholder="Paste YouTube link for retraining..." value="'+(p.youtubeLink||'')+'" style="flex:1;font-size:11px;">';
+        h+='<button class="btn btn-sm" style="background:var(--red);color:#fff;" onclick="saveR2Video(\''+p.empId+'\',\''+trnName.replace(/'/g,"\\\'")+'\',\''+p.trnId+'\','+idx+')" title="Save video & notify employee"><span class="mat-ico" style="font-size:12px;">play_arrow</span> Assign</button>';
+        h+='</div>';
+        h+='<div id="r2preview_'+p.empId+'_'+idx+'"></div>';
+        if(p.youtubeLink){
+          h+='<div style="margin-top:6px;"><a href="'+p.youtubeLink+'" target="_blank" style="font-size:10px;color:var(--red);"><span class="mat-ico" style="font-size:11px;">smart_display</span> Current video</a></div>';
+        }
+        h+='</div>';
+        // Message section
+        h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;">';
+        h+='<div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">mail</span> Send Message</div>';
+        h+='<textarea class="form-control-sm" id="r2msg_'+p.empId+'_'+idx+'" rows="2" placeholder="Type retraining instruction for '+p.empName+'..." style="font-size:11px;width:100%;margin-bottom:4px;"></textarea>';
+        h+='<div style="display:flex;gap:4px;">';
+        h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;flex:1;" onclick="sendR2Message(\''+p.empId+'\',\''+p.empName.replace(/'/g,"\\\'")+'\',\''+trnName.replace(/'/g,"\\\'")+'\','+idx+')"><span class="mat-ico" style="font-size:12px;">send</span> Send Message</button>';
+        h+='<button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="openQuickMsgToEmp(\''+p.empId+'\')" title="Chat history"><span class="mat-ico" style="font-size:12px;">chat</span></button>';
+        h+='</div></div>';
+        h+='</div>'; // end grid
+        // Row 3: Action buttons
+        h+='<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">';
+        h+='<button class="btn btn-sm btn-amber" onclick="startQuizForTrn(\''+p.trnId+'\')" title="Let employee retake test now"><span class="mat-ico" style="font-size:12px;">quiz</span> Open Test</button>';
+        h+='<button class="btn btn-sm btn-outline" onclick="openEmpCardDetail(\''+p.empId+'\')" title="View full employee profile"><span class="mat-ico" style="font-size:12px;">badge</span> Profile</button>';
+        h+='<div style="flex:1;"></div>';
+        h+='<span style="font-size:10px;color:var(--muted);">Failed: '+formatDate(p.firstDate)+'</span>';
+        h+='</div>';
+        h+='</div>'; // end card
+      });
+      h+='</div>'; // end training group
+    });
+  }
+  el.innerHTML=h;
+}
+
+// Save video link for Round 2 training and notify employee
+function saveR2Video(empId,trnName,trnId,inputIdx){
+  var ytInput=document.getElementById('r2yt_'+empId+'_'+inputIdx);
+  var ytUrl=ytInput?ytInput.value.trim():'';
+  if(!ytUrl){toast('Please paste a YouTube link first','error');return;}
+  var ytId=extractYoutubeId(ytUrl);
+  if(!ytId){toast('Invalid YouTube URL','error');return;}
+  // Save to training object
+  var trn=DB.trainings.find(function(t){return t.id===trnId;});
+  if(trn){trn.youtubeLink=ytUrl;}
+  // Notify employee
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  var empName=emp?emp.name:empId;
+  DB.notifications.unshift({id:genId('N'),msg:'Round 2 Training video assigned: '+trnName+' — Watch the video and retake the test. '+ytUrl,read:false,time:'Just now',icon:'smart_display',forEmp:empId});
+  saveDB();updateBadges();
+  toast('Video assigned to '+empName+' & notification sent!','success');
+  renderRetraining();
+}
+
+// Send retraining message from Round 2 page
+function sendR2Message(empId,empName,trnName,inputIdx){
+  var msgInput=document.getElementById('r2msg_'+empId+'_'+inputIdx);
+  var msg=msgInput?msgInput.value.trim():'';
+  if(!msg){toast('Please type a message first','error');return;}
+  DB.notifications.unshift({id:genId('N'),msg:'[Round 2 Retraining — '+trnName+'] '+msg,read:false,time:'Just now',icon:'mail',forEmp:empId});
+  if(msgInput)msgInput.value='';
+  saveDB();renderNotifPanel();
+  toast('Message sent to '+empName,'success');
+}
+
 /* ============================================================
    CORRECTIVE ACTIONS LOG (BSC Audit)
 ============================================================ */
