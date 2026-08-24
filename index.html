@@ -4571,6 +4571,66 @@ function clearAllTestResults(){
   saveDB();renderReports();updateBadges();toast("All test results and certificates cleared","warning");
 }
 
+/* Backfill: scan existing failures and create corrective actions + notifications for them */
+function backfillCorrectiveActions(){
+  if(!DB.correctiveActions)DB.correctiveActions=[];
+  var today=new Date().toISOString().split('T')[0];
+  var created=0;
+  // Group failures by employee+training
+  var failGroups={};
+  (DB.testResults||[]).forEach(function(r){
+    if(r.pass)return;
+    var key=r.empId+'||'+r.training;
+    if(!failGroups[key])failGroups[key]={empId:r.empId,empName:r.empName,dept:r.dept||'',training:r.training,cat:r.cat||'',results:[]};
+    failGroups[key].results.push(r);
+  });
+  // Get existing CA IDs to avoid duplicates
+  var existingCAKeys=new Set((DB.correctiveActions||[]).map(function(ca){return ca.empId+'||'+ca.training+'||'+ca.timestamp;}));
+  Object.keys(failGroups).forEach(function(key){
+    var g=failGroups[key];
+    var failCnt=g.results.length;
+    var bestSc=Math.max.apply(null,g.results.map(function(r){return r.score;}));
+    var trnMatch=DB.trainings.find(function(t){return t.name===g.training;})||DB.trainings.find(function(t){return t.cat===g.cat;});
+    var passMark=trnMatch?(trnMatch.passing||70):70;
+    // Find the LATEST failure that doesn't already have a CA
+    var sortedResults=g.results.slice().sort(function(a,b){return (b.timestamp||b.date||'').toString().localeCompare((a.timestamp||a.date||'').toString());});
+    sortedResults.forEach(function(r,idx){
+      var caKey=r.empId+'||'+r.training+'||'+(r.timestamp||0);
+      if(existingCAKeys.has(caKey))return;
+      existingCAKeys.add(caKey);
+      var actionType=failCnt>=3?'offline':'retraining';
+      var actionText=failCnt>=3?'Offline Training Assigned (Backfill)':'Auto-Retraining (Backfill)';
+      var reasonText=failCnt>=3?'3rd failure auto-escalation (backfilled).':'1st/2nd failure backfilled from existing test results.';
+      DB.correctiveActions.push({id:genId('CA'),type:actionType,empId:g.empId,empName:g.empName,training:g.training,trnId:trnMatch?trnMatch.id:'CAT-'+g.cat,date:r.date||today,timestamp:r.timestamp||Date.now(),failCount:failCnt,bestScore:bestSc,passMark:passMark,action:actionText,reason:reasonText,doneBy:'System Backfill'});
+      created++;
+    });
+    // Also create a notification for this employee if none exists
+    var hasNotif=DB.notifications.find(function(n){return n.forEmp===g.empId&&n.msg.indexOf(g.training)>=0;});
+    if(!hasNotif){
+      var notifMsg=failCnt>=3?'OFFLINE TRAINING REQUIRED for '+g.training+'. You failed '+failCnt+' times. Contact your manager.':'You failed '+g.training+' ('+bestSc+'% best). You have been reassigned for retraining.';
+      DB.notifications.unshift({id:genId('N'),msg:notifMsg,read:false,time:'Backfilled',icon:failCnt>=3?'warning':'replay',forEmp:g.empId});
+    }
+    // Also update the training object if found
+    if(trnMatch){
+      if(failCnt>=3){
+        if(!trnMatch.offlineTrained)trnMatch.offlineTrained=[];
+        if(!trnMatch.offlineTrained.includes(g.empId))trnMatch.offlineTrained.push(g.empId);
+      }else{
+        if(!trnMatch.retrained)trnMatch.retrained=[];
+        if(!trnMatch.retrained.includes(g.empId))trnMatch.retrained.push(g.empId);
+      }
+    }
+  });
+  if(created>0){
+    saveDB();
+    renderCorrectiveActions();
+    updateBadges();
+    renderNotifPanel();
+    toast('Backfilled '+created+' corrective action(s) from existing failures!','success',5000);
+  }else{
+    toast('No unprocessed failures found — all already have corrective actions.','info',3000);
+  }
+}
 /* Create a test corrective action to verify rendering works */
 function createTestCA(){
   if(!DB.correctiveActions)DB.correctiveActions=[];
@@ -4607,7 +4667,7 @@ function renderCorrectiveActions(){
   var trnWithRecs=(DB.trainings||[]).filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;});
   debugInfo+=' | trainingsWithRecords='+trnWithRecs.length;
   console.log('[CA DEBUG] '+debugInfo);
-  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm" style="background:var(--sur2);border:1px solid var(--bdr);color:var(--blue);" onclick="createTestCA()"><span class="mat-ico" style="font-size:12px;">add_circle</span> Test CA</button></div></div>';
+  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill from Failures</button><button class="btn btn-sm" style="background:var(--sur2);border:1px solid var(--bdr);color:var(--blue);" onclick="createTestCA()"><span class="mat-ico" style="font-size:12px;">add_circle</span> Test CA</button></div></div>';
   // Debug banner (always visible, shows raw data counts)
   h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:10.5px;font-family:monospace;color:var(--muted);">'+debugInfo+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
@@ -6001,4 +6061,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
