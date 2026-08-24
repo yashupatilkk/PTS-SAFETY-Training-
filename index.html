@@ -5389,23 +5389,54 @@ function renderCorrectiveActions(){
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);"><div style="font-size:24px;font-weight:700;color:'+oColor+';">'+openItems.length+'</div><div style="font-size:11px;color:var(--muted);">Open Items</div></div></div>';
   h+='<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--red);font-size:20px;">gavel</span><div><b>BSC Audit Compliance:</b> 1st fail = retrain, 2nd = warning, 3rd = offline training + NCR.</div></div>';
   h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">All Corrective Actions ('+allCA.length+')</div>';
-  if(allCA.length){
-    h+='<div class="table-wrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Training</th><th>Type</th><th>Fails</th><th>Best</th><th>Pass</th><th>Action</th><th>Done By</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-    allCA.forEach(function(a,idx){
+  // Filter: only show CAs for real employees (exist in DB.employees)
+  var realCA=allCA.filter(function(a){return a.empId&&DB.employees.find(function(e){return e.id===a.empId;});});
+  if(realCA.length){
+    h+='<div class="table-wrap"><table><thead><tr><th style="min-width:90px;">Date</th><th style="min-width:160px;">Employee</th><th style="min-width:180px;">Training</th><th style="min-width:70px;">Type</th><th style="min-width:220px;">Attempt History & Scores</th><th style="min-width:150px;">Action Taken</th><th style="min-width:90px;">Done By</th><th style="min-width:70px;">Status</th><th style="min-width:60px;">Actions</th></tr></thead><tbody>';
+    realCA.forEach(function(a,idx){
+      // Find the actual index in allCA for the assignTrainingFromCA function
+      var actualIdx=allCA.indexOf(a);
+      if(actualIdx<0)actualIdx=idx;
       var emp=DB.employees.find(function(e){return e.id===a.empId;});
-      var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});
+      var trnName=a.training||a.trnName||'';
+      var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===trnName;});
       var sCls=hasCert?'active':a.type==='offline'?'info':'warning';
       var sTxt=hasCert?'Resolved':'Open';
-      var tBadge=a.type==='offline'?'<span class="badge" style="background:var(--red)20;color:var(--red);">Offline</span>':'<span class="badge" style="background:var(--orange)20;color:var(--orange);">Retrain</span>';
-      // Check if employee is already enrolled in any training matching this CA
-      var isEnrolled=DB.trainings.find(function(t){return (t.enrolled||[]).includes(a.empId)&&t.name===(a.training||a.trnName);});
-      var enrolledBadge=isEnrolled?'<span style="font-size:9px;color:var(--green);"><span class="mat-ico" style="font-size:10px;">check_circle</span> Assigned</span>':'';
+      var tBadge=a.type==='offline'?'<span class="badge" style="background:rgba(232,72,58,.15);color:var(--red);">Offline</span>':'<span class="badge" style="background:rgba(240,136,62,.15);color:var(--orange);">Retrain</span>';
+      var isEnrolled=DB.trainings.find(function(t){return (t.enrolled||[]).includes(a.empId)&&t.name===trnName;});
+      var enrolledBadge=isEnrolled?' <span style="font-size:9px;color:var(--green);"><span class="mat-ico" style="font-size:10px;">check_circle</span>Enrolled</span>':'';
       var trnLink='';
-      var matchingTrn=DB.trainings.find(function(t){return t.name===(a.training||a.trnName);});
+      var matchingTrn=DB.trainings.find(function(t){return t.name===trnName;});
       if(matchingTrn)trnLink=' <a href="#" onclick="event.stopPropagation();gotoView(\'trainings\');setTimeout(function(){openTrainingDetail(\''+matchingTrn.id+'\');},300);return false;" style="color:var(--blue);font-size:10px;margin-left:4px;" title="Open training details"><span class="mat-ico" style="font-size:11px;">open_in_new</span>View</a>';
       var ytBtn='';
-      if(matchingTrn&&matchingTrn.youtubeLink){ytBtn=' <a href="'+matchingTrn.youtubeLink+'" target="_blank" rel="noopener" style="color:var(--red);font-size:10px;margin-left:2px;" title="Watch training video on YouTube"><span class="mat-ico" style="font-size:11px;">smart_display</span>YouTube</a>';}
-      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b>'+trnLink+ytBtn+'</td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+idx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
+      if(matchingTrn&&matchingTrn.youtubeLink){ytBtn=' <a href="'+matchingTrn.youtubeLink+'" target="_blank" rel="noopener" style="color:var(--red);font-size:10px;margin-left:2px;" title="Watch training video"><span class="mat-ico" style="font-size:11px;">smart_display</span>YouTube</a>';}
+      // Build attempt history from actual test results
+      var allResults=DB.testResults.filter(function(r){return r.empId===a.empId&&r.training===trnName;}).sort(function(x,y){return x.date.localeCompare(y.date);});
+      var attemptHtml='<div style="display:flex;flex-direction:column;gap:3px;">';
+      if(allResults.length===0){
+        attemptHtml+='<div style="font-size:11px;color:var(--muted);"><span class="mat-ico" style="font-size:11px;">info</span> No test taken yet</div>';
+      }else{
+        allResults.forEach(function(r,i){
+          var num=i+1;
+          var isPass=r.pass;
+          var clr=isPass?'var(--green)':'var(--red)';
+          var ico=isPass?'check_circle':'cancel';
+          var lbl=isPass?'PASS':'FAIL';
+          var timeInfo=r.timeTakenStr?' ('+r.timeTakenStr+')':'';
+          attemptHtml+='<div style="font-size:11px;display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;color:'+clr+';">'+ico+'</span><b>#'+num+'</b>: <span style="color:'+clr+';font-weight:700;">'+r.score+'% '+lbl+'</span><span style="color:var(--muted);font-size:10px;">'+r.date+timeInfo+'</span></div>';
+          if(!isPass&&i<allResults.length-1){
+            attemptHtml+='<div style="font-size:10px;color:var(--amber);padding-left:18px;">↓ Retraining assigned → next attempt</div>';
+          }
+          if(!isPass&&i===allResults.length-1){
+            attemptHtml+='<div style="font-size:10px;color:var(--red);padding-left:18px;"><span class="mat-ico" style="font-size:10px;">warning</span> '+(allResults.length>=3?'3rd failure — Offline training + NCR required':'Pending retraining/retake')+'</div>';
+          }
+        });
+      }
+      attemptHtml+='</div>';
+      // Action column: show what was done
+      var actionHtml='<div style="font-size:11px;">'+(a.action||'—')+'</div>';
+      if(a.reason){actionHtml+='<div style="font-size:10px;color:var(--muted);margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+(a.reason||'').replace(/"/g,'&quot;')+'">'+(a.reason||'')+'</div>';}
+      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(trnName)+'</b>'+trnLink+ytBtn+'</td><td>'+tBadge+'</td><td>'+attemptHtml+'</td><td>'+actionHtml+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+actualIdx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
     });
     h+='</tbody></table></div>';
   }else{
