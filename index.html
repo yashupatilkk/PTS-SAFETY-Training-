@@ -1855,6 +1855,8 @@ function updateBadges(){
   const unread=myNotifsForBadge.filter(n=>!n.read).length;
   document.getElementById("nb-notif").textContent=unread;
   var caCount=(DB.correctiveActions||[]).length;
+  // Also count records nested inside trainings for badge consistency
+  DB.trainings.forEach(function(t){caCount+=(t.retrainingRecords||[]).length;caCount+=(t.offlineRecords||[]).length;});
   var caEl=document.getElementById("nb-ca");if(caEl)caEl.textContent=caCount;
   document.getElementById("notifDot").style.display=unread>0?"block":"none";
 }
@@ -1941,9 +1943,9 @@ function renderNotifPanel(){
     return `<div class="notif-item${n.read?"":" unread"}" onclick="readNotif('${n.id}');renderNotifications();">
       <div style="color:var(--amber)"><span class="mat-ico" style="font-size:20px;">${n.icon}</span></div>
       <div style="flex:1;min-width:0;"><div class="notif-msg">${n.msg}</div><div class="notif-time">${n.time}${n.fromEmp?' — from '+n.fromEmpName:''}</div>
-      ${replyCount?'<div style="font-size:10px;color:var(--blue);margin-top:2px;"><span class="mat-ico" style="font-size:10px;">chat_bubble</span> '+replyCount+' reply(ies)</div>':''}
+      ${replyCount?'<div style="margin-top:4px;"><div style="font-size:10px;font-weight:700;color:var(--blue);margin-bottom:3px;"><span class="mat-ico" style="font-size:11px;">chat_bubble</span> '+replyCount+' Reply(ies)</div><div class="notif-replies">'+n.replies.map(r=>'<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>').join('')+'</div></div>':''}
       </div>
-      <button class="btn-reply-icon" onclick="event.stopPropagation();openReplyBox('${n.id}',this)" title="Reply"><span class="mat-ico" style="font-size:14px;">reply</span></button>
+      <button class="btn-reply-icon" onclick="event.stopPropagation();openReplyBox('${n.id}',this)" title="Reply"><span class="mat-ico" style="font-size:14px;">reply</span> <span style="font-size:10px;">Reply</span></button>
     </div>`;
   }).join("");
   if(!myNotifs.length)list.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">No notifications</div>';
@@ -1956,12 +1958,18 @@ function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel
 function openReplyBox(notifId,btnEl){
   const n=DB.notifications.find(x=>x.id===notifId);if(!n)return;
   const container=btnEl.closest('.activity-item,.notif-item');
-  const existing=container.querySelector('.notif-reply-area');
+  // Find the text content area (flex:1 child) — NOT the flex container itself
+  // Otherwise display:flex makes the reply area a row item instead of below content
+  const infoArea=container.querySelector('.activity-info')||container.children[1];
+  const target=infoArea||container;
+  const existing=target.querySelector('.notif-reply-area');
   if(existing){existing.remove();return;}
   const area=document.createElement('div');
   area.className='notif-reply-area';
+  area.style.width='100%';
+  area.style.boxSizing='border-box';
   area.innerHTML='<div class="notif-replies">'+(n.replies||[]).map(r=>'<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>').join('')+'</div><div class="notif-reply-input"><input type="text" id="replyInput_'+notifId+'" placeholder="Type your reply..." onkeydown="if(event.key===\x27Enter\x27)sendReply(\x27'+notifId+'\x27)" /><button class="notif-reply-btn" onclick="sendReply(\x27'+notifId+'\x27)">Send</button></div>';
-  container.appendChild(area);
+  target.appendChild(area);
   setTimeout(()=>{const inp=document.getElementById('replyInput_'+notifId);if(inp)inp.focus();},100);
 }
 function sendReply(notifId){
@@ -3992,9 +4000,28 @@ function submitQuiz(){
             DB.notifications.unshift({id:genId('N'),msg:'You failed '+t.name+' (Score: '+score+'%). You have been reassigned - retake after reviewing the material.',read:false,time:'Just now',icon:'replay',forEmp:eid});
             toast('Failed - You have been reassigned for retraining.','warning',5000);
           }
-          if(firebaseReady){(async function(){try{await authAsAdmin();await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('FB auto-escalation:',e);}})();}
+          // Direct Firebase writes (independent of saveDB — guarantees cloud persistence)
+          if(firebaseReady){
+            (async function(){
+              try{
+                await authAsAdmin();
+                // Save training with updated retrainingRecords/offlineRecords
+                await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});
+                // Save each corrective action directly
+                var caDocs=DB.correctiveActions.filter(function(ca){return ca.trnId===t.id;});
+                for(var ci=0;ci<caDocs.length;ci++){await fbDB.collection('correctiveActions').doc(String(caDocs[ci].id)).set(JSON.parse(JSON.stringify(caDocs[ci])),{merge:true});}
+                // Save the new notification directly (it was unshifted to index 0)
+                var newNotif=DB.notifications.find(function(n){return n.forEmp===eid;});
+                if(newNotif)await fbDB.collection('notifications').doc(String(newNotif.id)).set(JSON.parse(JSON.stringify(newNotif)),{merge:true});
+                console.log('[BSC] Direct Firestore write OK: training + '+(caDocs.length)+' CA docs');
+              }catch(e){console.warn('FB auto-escalation:',e);}
+            })();
+          }
           saveDB();
+          console.log('[BSC Auto-Escalation] failCnt='+failCnt+' eid='+eid+' trn='+t.name+' CA total='+(DB.correctiveActions||[]).length);
         })();
+        updateBadges();
+        renderNotifPanel();
       }
   quizState.active=false;
   document.getElementById("view-quiz").innerHTML=`
@@ -5660,10 +5687,7 @@ function loadDB(){
   DB.trainings=[];
   DB.testResults=[];
   DB.certificates=[];
-  if(staleTrnCount>0||staleTRCount>0||staleCertCount>0){
-    console.log('[loadDB] Cleared local data — '+staleTrnCount+' training(s), '+staleTRCount+' test result(s), '+staleCertCount+' certificate(s) — waiting for cloud data');
-    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  }
+  console.log('[loadDB] Cleared local data — '+staleTrnCount+' training(s), '+staleTRCount+' test result(s), '+staleCertCount+' certificate(s) — waiting for cloud data');
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
   var badTrnIds=[];
   DB.trainings=DB.trainings.filter(function(t){
