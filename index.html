@@ -5229,14 +5229,20 @@ function assignTrainingFromCA(caIdx){
   m+='<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">New Training Name *</label><input class="form-control-sm" id="caNewTrnName" placeholder="e.g. Fire Safety - Reattempt 2"></div>';
   m+='<div class="form-group"><label class="form-label-sm">Category</label><select class="form-control-sm" id="caNewTrnCat">'+TRAINING_CATS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>';
   m+='<div class="form-group"><label class="form-label-sm">Passing %</label><input class="form-control-sm" id="caNewTrnPass" type="number" value="70" min="0" max="100"></div>';
+  m+='<div class="form-group"><label class="form-label-sm"><span class="mat-ico" style="font-size:12px;color:var(--blue);">schedule</span> Training Time</label><input class="form-control-sm" id="caNewTrnDuration" placeholder="e.g. 30 min, 1 hr, 2 hrs" value="30 min"></div>';
+  m+='<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm"><span class="mat-ico" style="font-size:12px;color:var(--red);">smart_display</span> YouTube Video Link</label><input class="form-control-sm" id="caNewTrnYtUrl" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." oninput="previewCATrainingVideo(this.value)"></div>';
+  m+='<div id="caTrnVideoPreview" style="display:none;grid-column:1/-1;margin-bottom:6px;"><iframe id="caTrnVideoFrame" style="width:100%;height:180px;border:none;border-radius:var(--r-sm);" allowfullscreen></iframe></div>';
   m+='</div>';
   m+='<div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;"><div style="font-size:12px;font-weight:700;color:var(--amber);">Custom Questions (10 for 2nd attempt)</div><button class="btn btn-sm btn-outline" onclick="addCAQuestions()"><span class="mat-ico" style="font-size:11px;">add</span> Add 10 Questions</button></div>';
   m+='<div id="caQuestionsList" style="max-height:300px;overflow-y:auto;margin-top:8px;"></div>';
   m+='</div>';
-  // PANEL 3: Retrain same
+  // PANEL 3: Retrain same training
   m+='<div id="caPanelRetrain" style="display:none;">';
-  m+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:14px;text-align:center;"><span class="mat-ico" style="font-size:32px;color:var(--orange);">replay</span><div style="font-size:13px;font-weight:700;margin-top:6px;">Retrain: '+failedTraining+'</div><div style="font-size:11px;color:var(--muted);margin-top:4px;">Employee will be marked for retraining and can retake the same test.</div></div>';
-  m+='</div>';
+  var retrainTrn=DB.trainings.find(function(x){return x.name===failedTraining;});
+  var retrainYtLink=retrainTrn?retrainTrn.youtubeLink||'':'';
+  var retrainDuration=retrainTrn?retrainTrn.duration||'':'';
+  m+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:14px;text-align:center;"><span class="mat-ico" style="font-size:32px;color:var(--orange);">replay</span><div style="font-size:13px;font-weight:700;margin-top:6px;">Retrain: '+failedTraining+'</div>'+(retrainYtLink?'<div style="margin-top:8px;"><a href="'+retrainYtLink+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:var(--r-sm);border:1px solid var(--red);color:var(--red);font-size:11px;font-weight:600;text-decoration:none;background:rgba(232,72,58,.06);"><span class="mat-ico" style="font-size:14px;">smart_display</span> Watch Training Video</a></div>':'')+'<div style="font-size:11px;color:var(--muted);margin-top:4px;">Employee will be marked for retraining and can retake the same test.'+(retrainDuration?' Duration: <b style="color:var(--txt);">'+retrainDuration+'</b>':'')+'</div></div>';
+  m+='</div';
   // Notify checkbox (common)
   m+='<div class="form-group" style="margin-top:12px;"><label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="checkbox" id="caAssignNotify" checked> Send notification to employee</label></div>';
   m+='</div>';
@@ -5275,6 +5281,7 @@ function addCAQuestions(){
   }
   toast('10 question slots added. Fill them and click Assign.','info',3000);
 }
+function previewCATrainingVideo(val){var ytId=extractYoutubeId(val);var wrap=document.getElementById('caTrnVideoPreview');var frame=document.getElementById('caTrnVideoFrame');if(ytId&&wrap&&frame){wrap.style.display='block';frame.src='https://www.youtube.com/embed/'+ytId+'?rel=0';}else if(wrap){wrap.style.display='none';}}
 function getCAQuestions(){
   var qs=[];
   for(var i=0;i<_caQCount;i++){
@@ -5316,7 +5323,9 @@ function confirmCAAssignV2(){
     var customQs=getCAQuestions();
     // Create the new training
     var trnId=genId('TRN');
-    var t={id:trnId,name:trnName,cat:cat,dept:emp?emp.dept:'All',trainer:DB.settings.trainerList[0]||'',manager:'',date:today,duration:'30 min',passing:passing,validity:'1 Year',cert:true,desc:'Retraining - 2nd attempt for '+empName+' (failed: '+(d.failedTraining||'')+')',enrolled:[empId],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:'',_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||'Admin',modifiedAt:new Date().toISOString(),modifiedBy:currentUser.name||'Admin'};
+    var caTrnDuration=document.getElementById('caNewTrnDuration').value.trim()||'30 min';
+    var caTrnYtUrl=document.getElementById('caNewTrnYtUrl').value.trim()||'';
+    var t={id:trnId,name:trnName,cat:cat,dept:emp?emp.dept:'All',trainer:DB.settings.trainerList[0]||'',manager:'',date:today,duration:caTrnDuration,passing:passing,validity:'1 Year',cert:true,desc:'Retraining - 2nd attempt for '+empName+' (failed: '+(d.failedTraining||'')+')',enrolled:[empId],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:caTrnYtUrl,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||'Admin',modifiedAt:new Date().toISOString(),modifiedBy:currentUser.name||'Admin'};
     DB.trainings.push(t);
     // Add questions to bank
     if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
