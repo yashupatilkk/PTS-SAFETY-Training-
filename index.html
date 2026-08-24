@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PTS SAFETY — Training Management System v2.7</title>
+<title>PTS SAFETY — Training Management System v2.8</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -891,7 +891,7 @@ TRAINING_CATS.forEach(cat=>{
 /* ============================================================
    DATABASE
 ============================================================ */
-console.log('[PTS SAFETY] v2.7 loaded — CA Assign Training button + Reply fix + backfill');
+console.log('[PTS SAFETY] v2.8 loaded — CA dedup + Create New Training with 10 questions + Clean Duplicates');
 let DB={
   employees:[],
   trainings:[],
@@ -4644,15 +4644,34 @@ function createTestCA(){
   updateBadges();
   toast('Test corrective action created! You should see 1 item now.','success',4000);
 }
+/* Remove duplicate corrective actions — keeps only ONE per empId+training */
+function cleanupDuplicateCAs(){
+  if(!DB.correctiveActions||!DB.correctiveActions.length){toast('No corrective actions to clean','info');return;}
+  var seen=new Set();
+  var before=DB.correctiveActions.length;
+  DB.correctiveActions=DB.correctiveActions.filter(function(ca){
+    var key=(ca.empId||'')+'||'+(ca.training||ca.trnName||'');
+    if(seen.has(key))return false;
+    seen.add(key);return true;
+  });
+  var removed=before-DB.correctiveActions.length;
+  if(removed>0){
+    saveDB();renderCorrectiveActions();updateBadges();
+    toast('Removed '+removed+' duplicate(s). Now: '+DB.correctiveActions.length+' unique corrective action(s).','success',5000);
+  }else{
+    toast('No duplicates found — all '+DB.correctiveActions.length+' items are unique.','info',3000);
+  }
+}
 /* Assign training to a failed employee from the Corrective Actions table */
+var _caQCount=0;
 function assignTrainingFromCA(caIdx){
   var ca=window._caList[caIdx];if(!ca){toast('Corrective action not found','error');return;}
-  var empId=ca.empId;
-  var empName=ca.empName||empId;
-  var failedTraining=ca.training||ca.trnName||'';
+  window._caAssignData={empId:ca.empId,empName:ca.empName||ca.empId,failedTraining:ca.training||ca.trnName||'',ca:ca};
+  _caQCount=0;
+  var empId=ca.empId;var empName=ca.empName||empId;var failedTraining=ca.training||ca.trnName||'';
   var emp=DB.employees.find(function(e){return e.id===empId;});
-  // Build training options - show which ones employee is already enrolled in
-  var trnOptions='';
+  // Build existing training options
+  var trnOptions='<option value="">-- Select Existing Training --</option>';
   DB.trainings.forEach(function(t){
     var isEnrolled=(t.enrolled||[]).includes(empId);
     var isMatch=t.name===failedTraining;
@@ -4660,10 +4679,10 @@ function assignTrainingFromCA(caIdx){
     var selected=isMatch?'selected':'';
     trnOptions+='<option value="'+t.id+'" '+(isEnrolled?'style="color:var(--green);"':'')+selected+'>'+label+'</option>';
   });
-  // Check which trainings the employee is currently enrolled in
+  // Currently enrolled
   var enrolledTrnNames=DB.trainings.filter(function(t){return (t.enrolled||[]).includes(empId);}).map(function(t){return t.name;});
   var enrolledInfo=enrolledTrnNames.length?'<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:12px;font-size:12px;"><div style="font-weight:700;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Currently Enrolled In:</div>'+enrolledTrnNames.map(function(n){return '<span class="badge badge-active" style="margin:2px;">'+n+'</span>';}).join('')+'</div>':'';
-  // Show failure info
+  // Failure info
   var failInfo='<div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;">';
   failInfo+='<div style="font-weight:700;color:var(--red);margin-bottom:6px;"><span class="mat-ico" style="font-size:14px;">warning</span> Failure Details</div>';
   failInfo+='<div style="font-size:12px;line-height:1.8;">';
@@ -4672,74 +4691,146 @@ function assignTrainingFromCA(caIdx){
   failInfo+='<b>Best Score:</b> '+(ca.bestScore||ca.previousBest||0)+'% / '+(ca.passMark||70)+'% pass mark<br>';
   failInfo+='<b>Fail Count:</b> '+(ca.failCount||ca.previousAttempts||0)+'<br>';
   failInfo+='</div></div>';
-  var modalHTML='<div class="modal-accent"></div>';
-  modalHTML+='<div class="modal-head"><h2><span class="mat-ico" style="color:var(--amber);">school</span> Assign Training to '+empName+'</h2>';
-  modalHTML+='<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>';
-  modalHTML+='<div class="modal-body">';
-  modalHTML+=failInfo;
-  modalHTML+=enrolledInfo;
-  modalHTML+='<div class="form-section"><div class="form-group">';
-  modalHTML+='<label class="form-label-sm">Select Training to Assign</label>';
-  modalHTML+='<select class="form-control-sm" id="caAssignTrnSelect" style="width:100%;">'+trnOptions+'</select>';
-  modalHTML+='</div>';
-  modalHTML+='<div class="form-group" style="margin-top:10px;">';
-  modalHTML+='<label class="form-label-sm">Assign Method</label>';
-  modalHTML+='<div style="display:flex;gap:8px;margin-top:4px;">';
-  modalHTML+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="radio" name="caAssignMethod" value="enroll" checked> <span class="mat-ico" style="font-size:14px;color:var(--blue);">person_add</span> Enroll (add to training list)</label>';
-  modalHTML+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="radio" name="caAssignMethod" value="retrain"> <span class="mat-ico" style="font-size:14px;color:var(--orange);">replay</span> Retrain (mark for retraining + allow retake)</label>';
-  modalHTML+='</div></div>';
-  modalHTML+='<div class="form-group" style="margin-top:10px;">';
-  modalHTML+='<label class="form-label-sm">Notify Employee?</label>';
-  modalHTML+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="checkbox" id="caAssignNotify" checked> Send notification to employee about the training assignment</label>';
-  modalHTML+='</div>';
-  modalHTML+='</div></div>';
-  modalHTML+='<div class="modal-foot">';
-  modalHTML+='<button class="btn btn-amber" onclick="confirmCAAssign(\''+empId+'\')"><span class="mat-ico">school</span> Assign Training</button>';
-  modalHTML+='<button class="btn btn-outline" onclick="closeModal()">Cancel</button>';
-  modalHTML+='</div>';
-  openModal(modalHTML,'600px');
+  var m='<div class="modal-accent"></div>';
+  m+='<div class="modal-head"><h2><span class="mat-ico" style="color:var(--amber);">school</span> Assign Training to '+empName+'</h2>';
+  m+='<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>';
+  m+='<div class="modal-body">';
+  m+=failInfo;
+  m+=enrolledInfo;
+  // ASSIGN METHOD: 3 options
+  m+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">';
+  m+='<div id="caMethodExisting" style="background:var(--sur2);border:2px solid var(--blue);border-radius:var(--r-sm);padding:12px;cursor:pointer;text-align:center;" onclick="selectCAMethod(\'existing\')"><span class="mat-ico" style="font-size:24px;color:var(--blue);">library_books</span><div style="font-size:11px;font-weight:700;margin-top:4px;">Existing Training</div><div style="font-size:9px;color:var(--muted);">Pick from list</div></div>';
+  m+='<div id="caMethodNew" style="background:var(--sur2);border:2px solid var(--bdr);border-radius:var(--r-sm);padding:12px;cursor:pointer;text-align:center;" onclick="selectCAMethod(\'new\')"><span class="mat-ico" style="font-size:24px;color:var(--purple);">add_circle</span><div style="font-size:11px;font-weight:700;margin-top:4px;">Create New Training</div><div style="font-size:9px;color:var(--muted);">With 10 custom questions</div></div>';
+  m+='<div id="caMethodRetrain" style="background:var(--sur2);border:2px solid var(--bdr);border-radius:var(--r-sm);padding:12px;cursor:pointer;text-align:center;" onclick="selectCAMethod(\'retrain\')"><span class="mat-ico" style="font-size:24px;color:var(--orange);">replay</span><div style="font-size:11px;font-weight:700;margin-top:4px;">Retrain Same</div><div style="font-size:9px;color:var(--muted);">Allow retake</div></div>';
+  m+='</div>';
+  // PANEL 1: Existing training
+  m+='<div id="caPanelExisting">';
+  m+='<div class="form-group"><label class="form-label-sm">Select Training</label><select class="form-control-sm" id="caAssignTrnSelect" style="width:100%;">'+trnOptions+'</select></div>';
+  m+='</div>';
+  // PANEL 2: Create new training with questions
+  m+='<div id="caPanelNew" style="display:none;">';
+  m+='<div class="form-grid">';
+  m+='<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">New Training Name *</label><input class="form-control-sm" id="caNewTrnName" placeholder="e.g. Fire Safety - Reattempt 2"></div>';
+  m+='<div class="form-group"><label class="form-label-sm">Category</label><select class="form-control-sm" id="caNewTrnCat">'+TRAINING_CATS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>';
+  m+='<div class="form-group"><label class="form-label-sm">Passing %</label><input class="form-control-sm" id="caNewTrnPass" type="number" value="70" min="0" max="100"></div>';
+  m+='</div>';
+  m+='<div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;"><div style="font-size:12px;font-weight:700;color:var(--amber);">Custom Questions (10 for 2nd attempt)</div><button class="btn btn-sm btn-outline" onclick="addCAQuestions()"><span class="mat-ico" style="font-size:11px;">add</span> Add 10 Questions</button></div>';
+  m+='<div id="caQuestionsList" style="max-height:300px;overflow-y:auto;margin-top:8px;"></div>';
+  m+='</div>';
+  // PANEL 3: Retrain same
+  m+='<div id="caPanelRetrain" style="display:none;">';
+  m+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:14px;text-align:center;"><span class="mat-ico" style="font-size:32px;color:var(--orange);">replay</span><div style="font-size:13px;font-weight:700;margin-top:6px;">Retrain: '+failedTraining+'</div><div style="font-size:11px;color:var(--muted);margin-top:4px;">Employee will be marked for retraining and can retake the same test.</div></div>';
+  m+='</div>';
+  // Notify checkbox (common)
+  m+='<div class="form-group" style="margin-top:12px;"><label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="checkbox" id="caAssignNotify" checked> Send notification to employee</label></div>';
+  m+='</div>';
+  m+='<div class="modal-foot"><button class="btn btn-amber" onclick="confirmCAAssignV2()"><span class="mat-ico">school</span> Assign Training</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>';
+  openModal(m,'700px');
 }
-function confirmCAAssign(empId){
-  var trnId=document.getElementById('caAssignTrnSelect').value;
-  var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t){toast('Training not found','error');return;}
-  var method=document.querySelector('input[name="caAssignMethod"]:checked').value;
+function selectCAMethod(method){
+  // Highlight selected
+  ['existing','new','retrain'].forEach(function(m){
+    var el=document.getElementById('caMethod'+m.charAt(0).toUpperCase()+m.slice(1));
+    if(el)el.style.borderColor=m===method?'var(--amber)':'var(--bdr)';
+    var panel=document.getElementById('caPanel'+m.charAt(0).toUpperCase()+m.slice(1));
+    if(panel)panel.style.display=m===method?'block':'none';
+  });
+  window._caAssignMethod=method;
+}
+function addCAQuestions(){
+  var container=document.getElementById('caQuestionsList');
+  container.innerHTML='';
+  _caQCount=0;
+  for(var i=0;i<10;i++){
+    var n=_caQCount++;
+    var div=document.createElement('div');
+    div.id='caq_'+n;
+    div.style.cssText='background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:8px;';
+    div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;font-weight:700;color:var(--amber);">Q'+(n+1)+'</span></div>'+
+    '<input class="form-control-sm" id="caq_q_'+n+'" placeholder="Enter question text..." style="width:100%;margin-bottom:6px;">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">'+
+    '<input class="form-control-sm" id="caq_o0_'+n+'" placeholder="Option A">'+
+    '<input class="form-control-sm" id="caq_o1_'+n+'" placeholder="Option B">'+
+    '<input class="form-control-sm" id="caq_o2_'+n+'" placeholder="Option C">'+
+    '<input class="form-control-sm" id="caq_o3_'+n+'" placeholder="Option D">'+
+    '</div>'+
+    '<div style="margin-top:6px;font-size:10px;color:var(--muted);">Correct: <select id="caq_a_'+n+'"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select></div>';
+    container.appendChild(div);
+  }
+  toast('10 question slots added. Fill them and click Assign.','info',3000);
+}
+function getCAQuestions(){
+  var qs=[];
+  for(var i=0;i<_caQCount;i++){
+    var el=document.getElementById('caq_'+i);if(!el)continue;
+    var q=document.getElementById('caq_q_'+i);if(!q)continue;q=q.value.trim();
+    var o0=document.getElementById('caq_o0_'+i);o0=o0?o0.value.trim():'';
+    var o1=document.getElementById('caq_o1_'+i);o1=o1?o1.value.trim():'';
+    var o2=document.getElementById('caq_o2_'+i);o2=o2?o2.value.trim():'';
+    var o3=document.getElementById('caq_o3_'+i);o3=o3?o3.value.trim():'';
+    var aEl=document.getElementById('caq_a_'+i);var a=aEl?parseInt(aEl.value):0;
+    if(q&&o0&&o1){var opts=[o0,o1,o2||'N/A',o3||'N/A'].filter(function(x){return x;});qs.push({q:q,o:opts,a:Math.min(a,opts.length-1)});}
+  }
+  return qs;
+}
+function confirmCAAssignV2(){
+  var d=window._caAssignData;if(!d){toast('Assignment data lost. Try again.','error');return;}
+  var empId=d.empId;var empName=d.empName;var ca=d.ca;
+  var method=window._caAssignMethod||'existing';
   var notify=document.getElementById('caAssignNotify').checked;
   var emp=DB.employees.find(function(e){return e.id===empId;});
-  var empName=emp?emp.name:empId;
-  if(method==='enroll'){
-    // Enroll employee in the training
+  empName=emp?emp.name:empName;
+  var today=new Date().toISOString().split('T')[0];
+  var assignedTrainingName='';
+  if(method==='existing'){
+    var trnId=document.getElementById('caAssignTrnSelect').value;
+    if(!trnId){toast('Please select a training','warning');return;}
+    var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t){toast('Training not found','error');return;}
     if(!t.enrolled)t.enrolled=[];
-    if(!t.enrolled.includes(empId)){
-      t.enrolled.push(empId);
-      // Update the CA status too
-      var ca=window._caList.find(function(c){return c.empId===empId;});
-      if(ca)ca._justAssigned=true;
-    }
+    if(!t.enrolled.includes(empId))t.enrolled.push(empId);
+    if(!t.retrainingRecords)t.retrainingRecords=[];
+    t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:trnId,date:today,timestamp:Date.now(),previousAttempts:ca.failCount||0,previousBest:ca.bestScore||0,action:'Training Assigned from CA Log',reason:'Admin assigned via Corrective Actions page.',doneBy:currentUser.name||'Admin'});
+    assignedTrainingName=t.name;
     toast(empName+' enrolled in "'+t.name+'"','success',4000);
-    // Log for audit
+  }else if(method==='new'){
+    var trnName=document.getElementById('caNewTrnName').value.trim();
+    if(!trnName){toast('Please enter a training name','warning');return;}
+    var cat=document.getElementById('caNewTrnCat').value;
+    var passing=parseInt(document.getElementById('caNewTrnPass').value)||70;
+    var customQs=getCAQuestions();
+    // Create the new training
+    var trnId=genId('TRN');
+    var t={id:trnId,name:trnName,cat:cat,dept:emp?emp.dept:'All',trainer:DB.settings.trainerList[0]||'',manager:'',date:today,duration:'30 min',passing:passing,validity:'1 Year',cert:true,desc:'Retraining - 2nd attempt for '+empName+' (failed: '+(d.failedTraining||'')+')',enrolled:[empId],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:'',_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||'Admin',modifiedAt:new Date().toISOString(),modifiedBy:currentUser.name||'Admin'};
+    DB.trainings.push(t);
+    // Add questions to bank
+    if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
+    customQs.forEach(function(cq){cq.customFor=trnName;QUESTION_BANK[cat].push(cq);});
+    // Audit record
     if(!t.retrainingRecords)t.retrainingRecords=[];
-    t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:0,previousBest:0,action:'Training Assigned from CA Log',reason:'Admin assigned training via Corrective Actions page.',doneBy:currentUser.name||'Admin'});
+    t.retrainingRecords.push({empId:empId,empName:empName,training:trnName,trnId:trnId,date:today,timestamp:Date.now(),previousAttempts:ca.failCount||0,previousBest:ca.bestScore||0,action:'New Training Created + Assigned (2nd Attempt)',reason:'Created with '+customQs.length+' custom questions for retraining. Failed: '+(d.failedTraining||'')+'.',doneBy:currentUser.name||'Admin'});
+    // Update the CA record
+    if(ca){ca.training=trnName;ca.trnId=trnId;ca.action='New Training Assigned (2nd Attempt): '+trnName;}
+    assignedTrainingName=trnName;
+    toast('New training "'+trnName+'" created with '+customQs.length+' questions! '+empName+' enrolled.','success',6000);
   }else{
-    // Retrain method - use existing retrainEmployee logic
-    if(!t.retrained)t.retrained=[];
-    if(!t.retrained.includes(empId))t.retrained.push(empId);
-    if(!t.retrainingRecords)t.retrainingRecords=[];
-    var allResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
-    var failCount=allResults.filter(function(r){return !r.pass;}).length;
-    var bestScore=allResults.length?Math.max.apply(null,allResults.map(function(r){return r.score;})):0;
-    t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:allResults.length,previousBest:bestScore,action:'Retraining Assigned from CA Log',reason:'Failed ('+failCount+'x, best '+bestScore+'%). Admin assigned via Corrective Actions page. BSC corrective action.',doneBy:currentUser.name||'Admin'});
-    toast(empName+' marked for retraining. They can retake "'+t.name+'".','success',5000);
+    // Retrain same training
+    var failedTraining=d.failedTraining;
+    var t=DB.trainings.find(function(x){return x.name===failedTraining;});
+    if(t){
+      if(!t.retrained)t.retrained=[];
+      if(!t.retrained.includes(empId))t.retrained.push(empId);
+      if(!t.retrainingRecords)t.retrainingRecords=[];
+      t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:ca.failCount||0,previousBest:ca.bestScore||0,action:'Retraining Assigned (Same Test)',reason:'Failed ('+(ca.failCount||0)+'x, best '+(ca.bestScore||0)+'%). Marked for retake.',doneBy:currentUser.name||'Admin'});
+      assignedTrainingName=t.name;
+    }
+    toast(empName+' marked for retraining on "'+failedTraining+'". They can retake the test.','success',5000);
   }
-  // Send notification if checked
-  if(notify){
-    var msg=method==='enroll'?'New training assigned: '+t.name+' — Please complete it at your earliest.':'Retraining assigned: '+t.name+' — You can now retake the test.';
-    DB.notifications.unshift({id:genId('N'),msg:msg,read:false,time:'Just now',icon:method==='enroll'?'school':'replay',forEmp:empId});
+  // Send notification
+  if(notify&&assignedTrainingName){
+    var msg=method==='new'?'New training assigned (2nd attempt): '+assignedTrainingName+' — Please complete it.':method==='retrain'?'Retraining assigned: '+assignedTrainingName+' — You can now retake the test.':'Training assigned: '+assignedTrainingName+' — Please complete it.';
+    DB.notifications.unshift({id:genId('N'),msg:msg,read:false,time:'Just now',icon:method==='new'?'add_circle':method==='retrain'?'replay':'school',forEmp:empId});
   }
-  closeModal();
-  saveDB();
-  updateBadges();
-  renderCorrectiveActions();
-  renderNotifPanel();
+  closeModal();saveDB();updateBadges();renderCorrectiveActions();renderNotifPanel();
 }
 /* ============================================================
    CORRECTIVE ACTIONS LOG (BSC Audit)
@@ -4753,6 +4844,9 @@ function renderCorrectiveActions(){
   });
   (DB.correctiveActions||[]).forEach(function(r){allCA.push(r);});
   allCA.sort(function(a,b){return (b.timestamp||0)-(a.timestamp||0);});
+  // Dedup allCA: keep only ONE per empId+training (show latest)
+  var dedupSeen=new Set();
+  allCA=allCA.filter(function(a){var k=(a.empId||'')+'||'+(a.training||a.trnName||'');if(dedupSeen.has(k))return false;dedupSeen.add(k);return true;});
   console.log('[CA] allCA.length='+allCA.length+' DB.correctiveActions='+(DB.correctiveActions||[]).length+' trainings with records:'+DB.trainings.filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;}).length);
   var retrainCount=allCA.filter(function(a){return a.type==='retraining';}).length;
   var offlineCount=allCA.filter(function(a){return a.type==='offline';}).length;
@@ -4767,7 +4861,7 @@ function renderCorrectiveActions(){
   var trnWithRecs=(DB.trainings||[]).filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;});
   debugInfo+=' | trainingsWithRecords='+trnWithRecs.length;
   console.log('[CA DEBUG] '+debugInfo);
-  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill from Failures</button><button class="btn btn-sm" style="background:var(--sur2);border:1px solid var(--bdr);color:var(--blue);" onclick="createTestCA()"><span class="mat-ico" style="font-size:12px;">add_circle</span> Test CA</button></div></div>';
+  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill</button><button class="btn btn-sm btn-outline" style="border-color:var(--red);color:var(--red);" onclick="cleanupDuplicateCAs()"><span class="mat-ico" style="font-size:12px;">delete_sweep</span> Clean Duplicates</button></div></div>';
   // Debug banner (always visible, shows raw data counts)
   h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:10.5px;font-family:monospace;color:var(--muted);">'+debugInfo+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
