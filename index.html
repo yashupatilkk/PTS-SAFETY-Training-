@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PTS SAFETY — Training Management System</title>
+<title>PTS SAFETY — Training Management System v2.6</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -891,6 +891,7 @@ TRAINING_CATS.forEach(cat=>{
 /* ============================================================
    DATABASE
 ============================================================ */
+console.log('[PTS SAFETY] v2.6 loaded — BSC auto-escalation now works for ALL quiz failures (not just training-linked)');
 let DB={
   employees:[],
   trainings:[],
@@ -4570,6 +4571,16 @@ function clearAllTestResults(){
   saveDB();renderReports();updateBadges();toast("All test results and certificates cleared","warning");
 }
 
+/* Create a test corrective action to verify rendering works */
+function createTestCA(){
+  if(!DB.correctiveActions)DB.correctiveActions=[];
+  var today=new Date().toISOString().split('T')[0];
+  DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:currentUser.id||'TEST',empName:currentUser.name||'Test User',training:'Test Training (Manual)',trnId:'TEST-'+Date.now(),date:today,timestamp:Date.now(),failCount:1,bestScore:45,passMark:70,action:'Test Corrective Action',reason:'Manually created for testing. Delete after verification.',doneBy:'Manual Test'});
+  saveDB();
+  renderCorrectiveActions();
+  updateBadges();
+  toast('Test corrective action created! You should see 1 item now.','success',4000);
+}
 /* ============================================================
    CORRECTIVE ACTIONS LOG (BSC Audit)
 ============================================================ */
@@ -4589,7 +4600,16 @@ function renderCorrectiveActions(){
   var autoCount=allCA.filter(function(a){return (a.doneBy||'').indexOf('Auto')>=0;}).length;
   var openItems=allCA.filter(function(a){var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});return !hasCert;});
   var el=document.getElementById('view-correctiveactions');
-  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button></div></div>';
+  // DEBUG: Show raw DB state to diagnose issues
+  var debugInfo='DB.correctiveActions='+(DB.correctiveActions||[]).length;
+  debugInfo+=' | testResults='+(DB.testResults||[]).length+' (fails:'+(DB.testResults||[]).filter(function(r){return !r.pass;}).length+')';
+  debugInfo+=' | trainings='+(DB.trainings||[]).length;
+  var trnWithRecs=(DB.trainings||[]).filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;});
+  debugInfo+=' | trainingsWithRecords='+trnWithRecs.length;
+  console.log('[CA DEBUG] '+debugInfo);
+  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm" style="background:var(--sur2);border:1px solid var(--bdr);color:var(--blue);" onclick="createTestCA()"><span class="mat-ico" style="font-size:12px;">add_circle</span> Test CA</button></div></div>';
+  // Debug banner (always visible, shows raw data counts)
+  h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:10.5px;font-family:monospace;color:var(--muted);">'+debugInfo+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+allCA.length+'</div><div style="font-size:11px;color:var(--muted);">Total Actions</div></div>';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+retrainCount+'</div><div style="font-size:11px;color:var(--muted);">Retraining</div></div>';
@@ -5981,4 +6001,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
