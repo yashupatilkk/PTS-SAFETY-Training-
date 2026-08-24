@@ -2643,7 +2643,7 @@ function renderEmpCards(){
   var q=_empCardsSearch.toLowerCase();
   var filtered=DB.employees.filter(function(e){return !q||e.name.toLowerCase().includes(q)||e.id.toLowerCase().includes(q)||e.dept.toLowerCase().includes(q);});
   var h='<div class="section-header"><div class="section-title">Employee <span>Cards</span></div>';
-  h+='<div style="display:flex;gap:8px;align-items:center;"><div class="search-wrap" style="width:200px;"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee..." oninput="_empCardsSearch=this.value;renderEmpCards();" value="'+_empCardsSearch+'"></div></div></div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;"><div class="search-wrap" style="width:200px;"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee..." oninput="_empCardsSearch=this.value;renderEmpCards();" value="'+_empCardsSearch+'"></div><button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="exportAllDataExcel()" title="Download all data as Excel/CSV"><span class="mat-ico" style="font-size:12px;">download</span> Export All</button></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;">';
   filtered.forEach(function(e){
     var results=DB.testResults.filter(function(r){return r.empId===e.id;});
@@ -2652,9 +2652,9 @@ function renderEmpCards(){
     var photo=e.photo||'';
     var avatarHTML=photo?'<img src="'+photo+'" style="width:60px;height:60px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:60px;height:60px;font-size:20px;background:'+avatarColor(e.name)+';">'+avatarInitials(e.name)+'</div>';
     var statusColor=e.status==='active'?'var(--green)':'var(--red)';
-    h+='<div class="card" style="cursor:pointer;position:relative;overflow:hidden;" onclick="openEmpCardDetail(\''+e.id+'\')">';
+    h+='<div class="card" style="position:relative;overflow:hidden;cursor:default;">';
     h+='<div style="position:absolute;top:8px;right:8px;width:10px;height:10px;border-radius:50%;background:'+statusColor+';"></div>';
-    h+='<div style="display:flex;flex-direction:column;align-items:center;padding:20px 14px 14px;">';
+    h+='<div style="display:flex;flex-direction:column;align-items:center;padding:20px 14px 10px;cursor:pointer;" onclick="openEmpCardDetail(\''+e.id+'\')">';
     h+=avatarHTML;
     h+='<div style="font-weight:700;font-size:13px;margin-top:10px;text-align:center;">'+e.name+'</div>';
     h+='<div style="font-size:10.5px;color:var(--amber);font-family:monospace;">'+e.id+'</div>';
@@ -2663,7 +2663,12 @@ function renderEmpCards(){
     h+='<div style="text-align:center;"><div style="font-weight:700;color:var(--green);font-size:16px;">'+passCount+'</div><div style="color:var(--muted);">Passed</div></div>';
     h+='<div style="text-align:center;"><div style="font-weight:700;color:var(--red);font-size:16px;">'+failCount+'</div><div style="color:var(--muted);">Failed</div></div>';
     h+='<div style="text-align:center;"><div style="font-weight:700;color:var(--blue);font-size:16px;">'+results.length+'</div><div style="color:var(--muted);">Total</div></div>';
-    h+='</div></div></div>';
+    h+='</div></div>';  // end clickable area
+    // Action buttons row
+    h+='<div style="display:flex;gap:4px;padding:0 10px 10px;">';
+    h+='<button class="btn btn-sm btn-amber" style="flex:1;font-size:10px;padding:5px 4px;" onclick="event.stopPropagation();openQuickMsgToEmp(\''+e.id+'\')" title="Send message"><span class="mat-ico" style="font-size:12px;">mail</span> Msg</button>';
+    h+='<button class="btn btn-sm btn-outline" style="flex:1;font-size:10px;padding:5px 4px;border-color:var(--red);color:var(--red);" onclick="event.stopPropagation();deleteEmp(\''+e.id+'\')" title="Delete employee"><span class="mat-ico" style="font-size:12px;">delete</span> Del</button>';
+    h+='</div></div>';
   });
   h+='</div>';
   if(!filtered.length)h+='<div class="empty-state"><span class="mat-ico">people_outline</span><h3>No employees found</h3></div>';
@@ -3025,6 +3030,101 @@ function sendEmpMsgToAdmin(){
   toast('Message sent to Admin successfully!','success',3000);
   renderEmpMsgAdmin();
   updateBadges();
+}
+
+/* ============================================================
+   ADMIN: QUICK MESSAGE TO EMPLOYEE FROM CARD
+============================================================ */
+function openQuickMsgToEmp(empId){
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  if(!emp){toast('Employee not found','error');return;}
+  // Show recent messages between admin and this employee
+  var recentMsgs=DB.notifications.filter(function(n){return (n.forEmp===empId)||(n.fromEmp===empId);}).slice(0,10);
+  var chatHTML='';
+  if(recentMsgs.length){
+    chatHTML+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;">Recent Messages</div>';
+    recentMsgs.forEach(function(n){
+      var isAdminMsg=n.forEmp===empId;
+      chatHTML+='<div style="padding:6px 8px;margin-bottom:4px;border-radius:6px;font-size:11px;'+(isAdminMsg?'background:rgba(255,176,32,.08);border-left:3px solid var(--amber);':'background:rgba(62,160,232,.08);border-left:3px solid var(--blue);')+'">';
+      chatHTML+='<b>'+(isAdminMsg?'Admin':(n.fromEmpName||emp.name))+'</b> <span style="color:var(--muted);font-size:9px;">'+n.time+'</span>';
+      chatHTML+='<div style="margin-top:2px;">'+n.msg+'</div>';
+      // Show replies
+      if(n.replies&&n.replies.length){
+        n.replies.forEach(function(r){
+          var isEmp=r.byId===empId||r.by===emp.name;
+          chatHTML+='<div style="padding:4px 6px;margin-top:3px;border-radius:4px;font-size:10px;'+(isEmp?'background:rgba(62,160,232,.1);':'background:var(--sur2);')+'">';
+          chatHTML+='<b>'+(r.by||'')+'</b> <span style="color:var(--muted);font-size:9px;">'+r.time+'</span><div style="margin-top:1px;">'+r.text+'</div></div>';
+        });
+      }
+      chatHTML+='</div>';
+    });
+  }else{chatHTML='<div style="text-align:center;color:var(--muted);padding:12px;font-size:11px;">No messages yet with '+emp.name+'</div>';}
+  var m='<div class="modal-accent"></div>';
+  m+='<div class="modal-head"><div class="modal-ico" style="background:rgba(62,160,232,.15)"><span class="mat-ico" style="color:var(--blue);font-size:22px;">chat</span></div>';
+  m+='<div><h2>Message '+emp.name+'</h2><div style="font-size:12px;color:var(--muted);">'+emp.id+' · '+emp.dept+'</div></div>';
+  m+='<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>';
+  m+='<div class="modal-body">';
+  m+='<div style="max-height:250px;overflow-y:auto;margin-bottom:12px;">'+chatHTML+'</div>';
+  m+='<div class="form-group"><label class="form-label-sm">Type your message</label>';
+  m+='<textarea class="form-control-sm" id="quickMsgText" rows="3" placeholder="Type message to '+emp.name+'..." onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendQuickMsg(\''+empId+'\');}"></textarea>';
+  m+='</div></div>';
+  m+='<div class="modal-foot"><button class="btn btn-amber" onclick="sendQuickMsg(\''+empId+'\')"><span class="mat-ico">send</span> Send</button>';
+  m+='<button class="btn btn-outline" onclick="closeModal()">Close</button></div>';
+  openModal(m,'520px');
+  setTimeout(function(){var ta=document.getElementById('quickMsgText');if(ta)ta.focus();},200);
+}
+function sendQuickMsg(empId){
+  var text=document.getElementById('quickMsgText').value.trim();
+  if(!text){toast('Please type a message','error');return;}
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  DB.notifications.unshift({id:genId('N'),msg:text,read:false,time:'Just now',icon:'mail',forEmp:empId,fromEmp:currentUser.id||'admin',fromEmpName:currentUser.name||'Admin'});
+  saveDB();
+  toast('Message sent to '+(emp?emp.name:empId),'success',3000);
+  openQuickMsgToEmp(empId); // refresh modal with new message
+  updateBadges();
+}
+
+/* ============================================================
+   EXCEL EXPORT ALL DATA
+============================================================ */
+function exportAllDataExcel(){
+  try{
+    var rows=[];
+    // Employees sheet
+    DB.employees.forEach(function(e){rows.push({Sheet:'Employees',ID:e.id,Name:e.name,Department:e.dept,Designation:e.desig,Shift:e.shift,Mobile:e.mobile,Email:e.email||'',Location:e.location||'',Status:e.status,Joining:e.joining||''});});
+    // Trainings sheet
+    DB.trainings.forEach(function(t){rows.push({Sheet:'Trainings',ID:t.id,Name:t.name,Category:t.cat,Department:t.dept,Trainer:t.trainer||'',Manager:t.manager||'',Date:t.date||'',Duration:t.duration||'',Passing:t.passing||70,Validity:t.validity||'',Certificate:t.cert?'Yes':'No',Enrolled:(t.enrolled||[]).length,Completed:(t.completed||[]).length,CustomQuestions:t.customQuestions||0});});
+    // Test Results sheet
+    DB.testResults.forEach(function(r){rows.push({Sheet:'TestResults',ID:r.id,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Training:r.training,Category:r.cat||'',Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Result:r.pass?'PASS':'FAIL',Attempt:r.attempt,Date:r.date,Certificate:r.cert||''});});
+    // Certificates sheet
+    DB.certificates.forEach(function(c){rows.push({Sheet:'Certificates',CertNo:c.num,EmployeeID:c.empId,EmployeeName:c.empName,Department:c.dept,Training:c.training,Score:c.score,Trainer:c.trainer||'',Issued:c.issued,Expiry:c.expiry});});
+    // Corrective Actions sheet
+    (DB.correctiveActions||[]).forEach(function(ca){rows.push({Sheet:'CorrectiveActions',ID:ca.id,EmployeeID:ca.empId,EmployeeName:ca.empName,Training:ca.training||'',Type:ca.type||'',FailCount:ca.failCount||0,BestScore:ca.bestScore||0,PassMark:ca.passMark||70,Action:ca.action||'',Reason:ca.reason||'',DoneBy:ca.doneBy||'',Date:ca.date||''});});
+    // Notifications sheet
+    DB.notifications.forEach(function(n){rows.push({Sheet:'Notifications',ID:n.id,Message:n.msg,Time:n.time,ForEmployee:n.forEmp||'',FromEmployee:n.fromEmp||'',FromName:n.fromEmpName||'',Read:n.read?'Yes':'No',Replies:(n.replies||[]).length});});
+    if(!rows.length){toast('No data to export','warning');return;}
+    // Build CSV content (Excel can open CSV)
+    var sheets={};
+    rows.forEach(function(r){var s=r.Sheet;delete r.Sheet;if(!sheets[s])sheets[s]=[];sheets[s].push(r);});
+    var allCSV='';
+    Object.keys(sheets).forEach(function(sheetName){
+      var data=sheets[sheetName];
+      var headers=Object.keys(data[0]);
+      var csv=headers.join(',')+'\n';
+      data.forEach(function(row){
+        csv+=headers.map(function(h){var v=''+(row[h]===undefined?'':row[h]);if(v.includes(',')||v.includes('"')||v.includes('\n'))v='"'+v.replace(/"/g,'""')+'"';return v;}).join(',')+'\n';
+      });
+      allCSV+=csv+'\n';
+    });
+    var blob=new Blob([allCSV],{type:'text/csv;charset=utf-8;'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;
+    a.download='PTS_Safety_AllData_'+new Date().toISOString().split('T')[0]+'.csv';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Excel export downloaded! ('+rows.length+' rows across '+Object.keys(sheets).length+' sheets)','success',5000);
+  }catch(err){console.error('Export error:',err);toast('Export failed: '+err.message,'error');}
 }
 
 function giveAdminAccess(empId){
@@ -5272,7 +5372,7 @@ function renderCorrectiveActions(){
   var trnWithRecs=(DB.trainings||[]).filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;});
   debugInfo+=' | trainingsWithRecords='+trnWithRecs.length;
   console.log('[CA DEBUG] '+debugInfo);
-  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill</button><button class="btn btn-sm btn-outline" style="border-color:var(--red);color:var(--red);" onclick="cleanupDuplicateCAs()"><span class="mat-ico" style="font-size:12px;">delete_sweep</span> Clean Duplicates</button></div></div>';
+  var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill</button><button class="btn btn-sm btn-outline" style="border-color:var(--red);color:var(--red);" onclick="cleanupDuplicateCAs()"><span class="mat-ico" style="font-size:12px;">delete_sweep</span> Clean Duplicates</button><button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="exportAllDataExcel()" title="Download all data as Excel/CSV"><span class="mat-ico" style="font-size:12px;">download</span> Export All</button></div></div>';
   // Debug banner (always visible, shows raw data counts)
   h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:10.5px;font-family:monospace;color:var(--muted);">'+debugInfo+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
@@ -5296,7 +5396,10 @@ function renderCorrectiveActions(){
       // Check if employee is already enrolled in any training matching this CA
       var isEnrolled=DB.trainings.find(function(t){return (t.enrolled||[]).includes(a.empId)&&t.name===(a.training||a.trnName);});
       var enrolledBadge=isEnrolled?'<span style="font-size:9px;color:var(--green);"><span class="mat-ico" style="font-size:10px;">check_circle</span> Assigned</span>':'';
-      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b></td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+idx+')" title="Assign/reassign training to this employee"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
+      var trnLink='';
+      var matchingTrn=DB.trainings.find(function(t){return t.name===(a.training||a.trnName);});
+      if(matchingTrn)trnLink=' <a href="#" onclick="event.stopPropagation();gotoView(\'trainings\');setTimeout(function(){openTrainingDetail(\''+matchingTrn.id+'\');},300);return false;" style="color:var(--blue);font-size:10px;margin-left:4px;" title="Open training details"><span class="mat-ico" style="font-size:11px;">open_in_new</span>View</a>';
+      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b>'+trnLink+'</td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+idx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
     });
     h+='</tbody></table></div>';
   }else{
@@ -5391,7 +5494,7 @@ function renderSettings(){
   const s=DB.settings;
   document.getElementById("view-settings").innerHTML=`
     <div class="section-header"><div class="section-title">System <span>Settings</span></div>
-      ${isAdmin?`<button class="btn btn-amber" onclick="saveSettings()"><span class="mat-ico">save</span> Save Settings</button>`:""}
+      ${isAdmin?`<div style="display:flex;gap:6px;"><button class="btn btn-amber" onclick="saveSettings()"><span class="mat-ico">save</span> Save Settings</button><button class="btn btn-outline" style="border-color:var(--green);color:var(--green);" onclick="exportAllDataExcel()" title="Download all data as Excel/CSV"><span class="mat-ico">download</span> Export All Data</button></div>`:""}
     </div>
     <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">cloud</span> Cloud Sync (Firebase)</div>
