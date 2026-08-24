@@ -3887,7 +3887,8 @@ function submitQuiz(){
   const wrong=answers.filter((a,i)=>a>=0&&a!==qs[i].a).length;
   const skipped=answers.filter(a=>a<0).length;
   const score=Math.round(correct/total*100);
-  const trnMatch=quizState.trnMatch||DB.trainings.find(t=>t.name===quizState.training&&t.cat===quizState.category);
+  // Find matching training: 1) direct match from quizState, 2) exact name+cat, 3) category match (for Online Tests page quizzes)
+  const trnMatch=quizState.trnMatch||DB.trainings.find(t=>t.name===quizState.training&&t.cat===quizState.category)||DB.trainings.find(t=>t.cat===quizState.category);
   const passing=trnMatch?.passing||70;
   const minCertScore=DB.settings.minCertScore||70;
   const pass=score>=passing;
@@ -3954,47 +3955,62 @@ function submitQuiz(){
     }catch(e){console.warn('Google Sheets auto-sync error:',e);}
   })();
 
-      // === BSC AUDIT: AUTO-ESCALATION ON FAILURE (training tests only) ===
+      // === BSC AUDIT: AUTO-ESCALATION ON FAILURE ===
       console.log('[BSC CHECK] pass='+pass+' trnMatch='+(trnMatch?trnMatch.name:'NULL')+' score='+score);
-      if(!pass && trnMatch){
-        toast('BSC Auto-Escalation triggered for '+trnMatch.name+' (fail #'+(DB.testResults.filter(function(r){return r.empId===empId&&!r.pass&&r.training===trnMatch.name;}).length)+')','error',4000);
+      if(!pass){
+        var bscTrnName=trnMatch?trnMatch.name:quizState.training;
+        var bscTrnId=trnMatch?trnMatch.id:null;
+        var bscTrnCat=quizState.category;
+        var bscTrnObj=trnMatch; // may be null for category-only quizzes
+        toast('BSC Auto-Escalation triggered for '+bscTrnName+' (fail #'+(DB.testResults.filter(function(r){return r.empId===empId&&!r.pass&&r.training===bscTrnName;}).length)+')','error',4000);
         (function(){
-          var t=trnMatch;var eid=empId;var ename=empName;
-          var allRes=DB.testResults.filter(function(r){return r.empId===eid&&r.training===t.name;});
+          var t=bscTrnObj;var eid=empId;var ename=empName;
+          var trnName=bscTrnName;var trnId=bscTrnId;
+          // Count failures for this training/category
+          var allRes=DB.testResults.filter(function(r){return r.empId===eid&&(r.training===trnName||(trnMatch&&r.training===trnMatch.name));});
           var failCnt=allRes.filter(function(r){return !r.pass;}).length;
           var bestSc=allRes.length?Math.max.apply(null,allRes.map(function(r){return r.score;})):0;
-          if(t.completed)t.completed=t.completed.filter(function(id){return id!==eid;});
-          if(t.completedDates)delete t.completedDates[eid];
+          // Remove from completed if training exists
+          if(t){
+            if(t.completed)t.completed=t.completed.filter(function(id){return id!==eid;});
+            if(t.completedDates)delete t.completedDates[eid];
+          }
           if(failCnt>=3){
             // 3rd FAILURE -> AUTO OFFLINE TRAINING
-            if(!t.offlineTrained)t.offlineTrained=[];
-            if(!t.offlineTrained.includes(eid)){
-              t.offlineTrained.push(eid);
-              if(!t.offlineRecords)t.offlineRecords=[];
-              var offRec={empId:eid,empName:ename,dept:dept,training:t.name,trainer:t.trainer||'',manager:t.manager||'',trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,passMark:t.passing||70,action:'Offline Training Assigned (Auto)',reason:'Failed online test '+failCnt+' times (best: '+bestSc+'% vs '+t.passing+'% pass mark). BSC corrective action Step 3.',doneBy:'System Auto-Escalation'};
-              t.offlineRecords.push(offRec);
-              DB.correctiveActions.push({id:genId('CA'),type:'offline',empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),failCount:failCnt,bestScore:bestSc,passMark:t.passing||70,action:'Offline Training Assigned',reason:'3rd failure auto-escalation.',doneBy:'System Auto'});
-              DB.notifications.unshift({id:genId('N'),msg:'OFFLINE TRAINING REQUIRED for '+t.name+'. You failed 3 times. Contact your manager for face-to-face training.',read:false,time:'Just now',icon:'warning',forEmp:eid});
-              toast('3rd failure - Offline training auto-assigned. Admin notified.','error',6000);
-              setTimeout(function(){uploadOfflineNCR_ToDrive(offRec,t,DB.employees.find(function(e){return e.id===eid;}));},800);
+            if(t){
+              if(!t.offlineTrained)t.offlineTrained=[];
+              if(!t.offlineTrained.includes(eid)){
+                t.offlineTrained.push(eid);
+                if(!t.offlineRecords)t.offlineRecords=[];
+                var offRec={empId:eid,empName:ename,dept:dept,training:trnName,trainer:t.trainer||'',manager:t.manager||'',trnId:trnId,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,passMark:trnMatch?t.passing||70:70,action:'Offline Training Assigned (Auto)',reason:'Failed online test '+failCnt+' times (best: '+bestSc+'% vs '+(trnMatch?t.passing||70:70)+'% pass mark). BSC corrective action Step 3.',doneBy:'System Auto-Escalation'};
+                t.offlineRecords.push(offRec);
+                setTimeout(function(){if(typeof uploadOfflineNCR_ToDrive==='function')uploadOfflineNCR_ToDrive(offRec,t,DB.employees.find(function(e){return e.id===eid;}));},800);
+              }
             }
+            DB.correctiveActions.push({id:genId('CA'),type:'offline',empId:eid,empName:ename,training:trnName,trnId:trnId||'CAT-'+bscTrnCat,date:today,timestamp:Date.now(),failCount:failCnt,bestScore:bestSc,passMark:trnMatch?t.passing||70:70,action:'Offline Training Assigned',reason:'3rd failure auto-escalation.',doneBy:'System Auto'});
+            DB.notifications.unshift({id:genId('N'),msg:'OFFLINE TRAINING REQUIRED for '+trnName+'. You failed 3 times. Contact your manager for face-to-face training.',read:false,time:'Just now',icon:'warning',forEmp:eid});
+            toast('3rd failure - Offline training auto-assigned. Admin notified.','error',6000);
           } else if(failCnt===2){
             // 2nd FAILURE -> RE-RETRAIN + WARNING
-            if(!t.retrained)t.retrained=[];
-            if(!t.retrained.includes(eid))t.retrained.push(eid);
-            if(!t.retrainingRecords)t.retrainingRecords=[];
-            t.retrainingRecords.push({empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,action:'Re-Retraining (2nd Failure)',reason:'Failed 2nd attempt (score: '+score+'%, best: '+bestSc+'%). BSC corrective action.',doneBy:'System Auto-Escalation'});
-            DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),failCount:failCnt,bestScore:bestSc,passMark:t.passing||70,action:'Re-Retraining Warning',reason:'2nd failure. One more = offline training.',doneBy:'System Auto'});
-            DB.notifications.unshift({id:genId('N'),msg:'SECOND FAILURE WARNING: '+t.name+'. You have been reassigned. One more failure = offline training required.',read:false,time:'Just now',icon:'warning',forEmp:eid});
+            if(t){
+              if(!t.retrained)t.retrained=[];
+              if(!t.retrained.includes(eid))t.retrained.push(eid);
+              if(!t.retrainingRecords)t.retrainingRecords=[];
+              t.retrainingRecords.push({empId:eid,empName:ename,training:trnName,trnId:trnId,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,action:'Re-Retraining (2nd Failure)',reason:'Failed 2nd attempt (score: '+score+'%, best: '+bestSc+'%). BSC corrective action.',doneBy:'System Auto-Escalation'});
+            }
+            DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:eid,empName:ename,training:trnName,trnId:trnId||'CAT-'+bscTrnCat,date:today,timestamp:Date.now(),failCount:failCnt,bestScore:bestSc,passMark:trnMatch?t.passing||70:70,action:'Re-Retraining Warning',reason:'2nd failure. One more = offline training.',doneBy:'System Auto'});
+            DB.notifications.unshift({id:genId('N'),msg:'SECOND FAILURE WARNING: '+trnName+'. You have been reassigned. One more failure = offline training required.',read:false,time:'Just now',icon:'warning',forEmp:eid});
             toast('2nd failure - Retraining reassigned. One more = offline training.','warning',6000);
           } else {
             // 1st FAILURE -> AUTO RETRAIN
-            if(!t.retrained)t.retrained=[];
-            if(!t.retrained.includes(eid))t.retrained.push(eid);
-            if(!t.retrainingRecords)t.retrainingRecords=[];
-            t.retrainingRecords.push({empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,action:'Retraining (1st Failure Auto)',reason:'Failed 1st attempt (score: '+score+'%). BSC corrective action Step 1.',doneBy:'System Auto-Escalation'});
-            DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:eid,empName:ename,training:t.name,trnId:t.id,date:today,timestamp:Date.now(),failCount:1,bestScore:bestSc,passMark:t.passing||70,action:'Auto-Retraining',reason:'1st failure. Employee auto-enrolled for retraining.',doneBy:'System Auto'});
-            DB.notifications.unshift({id:genId('N'),msg:'You failed '+t.name+' (Score: '+score+'%). You have been reassigned - retake after reviewing the material.',read:false,time:'Just now',icon:'replay',forEmp:eid});
+            if(t){
+              if(!t.retrained)t.retrained=[];
+              if(!t.retrained.includes(eid))t.retrained.push(eid);
+              if(!t.retrainingRecords)t.retrainingRecords=[];
+              t.retrainingRecords.push({empId:eid,empName:ename,training:trnName,trnId:trnId,date:today,timestamp:Date.now(),previousAttempts:allRes.length,previousBest:bestSc,action:'Retraining (1st Failure Auto)',reason:'Failed 1st attempt (score: '+score+'%). BSC corrective action Step 1.',doneBy:'System Auto-Escalation'});
+            }
+            DB.correctiveActions.push({id:genId('CA'),type:'retraining',empId:eid,empName:ename,training:trnName,trnId:trnId||'CAT-'+bscTrnCat,date:today,timestamp:Date.now(),failCount:1,bestScore:bestSc,passMark:trnMatch?t.passing||70:70,action:'Auto-Retraining',reason:'1st failure. Employee auto-enrolled for retraining.',doneBy:'System Auto'});
+            DB.notifications.unshift({id:genId('N'),msg:'You failed '+trnName+' (Score: '+score+'%). You have been reassigned - retake after reviewing the material.',read:false,time:'Just now',icon:'replay',forEmp:eid});
             toast('Failed - You have been reassigned for retraining.','warning',5000);
           }
           // Direct Firebase writes (independent of saveDB — guarantees cloud persistence)
@@ -4002,12 +4018,9 @@ function submitQuiz(){
             (async function(){
               try{
                 await authAsAdmin();
-                // Save training with updated retrainingRecords/offlineRecords
-                await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});
-                // Save each corrective action directly
-                var caDocs=DB.correctiveActions.filter(function(ca){return ca.trnId===t.id;});
+                if(t)await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});
+                var caDocs=DB.correctiveActions.filter(function(ca){return ca.trnId===(trnId||'CAT-'+bscTrnCat);});
                 for(var ci=0;ci<caDocs.length;ci++){await fbDB.collection('correctiveActions').doc(String(caDocs[ci].id)).set(JSON.parse(JSON.stringify(caDocs[ci])),{merge:true});}
-                // Save the new notification directly (it was unshifted to index 0)
                 var newNotif=DB.notifications.find(function(n){return n.forEmp===eid;});
                 if(newNotif)await fbDB.collection('notifications').doc(String(newNotif.id)).set(JSON.parse(JSON.stringify(newNotif)),{merge:true});
                 console.log('[BSC] Direct Firestore write OK: training + '+(caDocs.length)+' CA docs');
@@ -4015,7 +4028,7 @@ function submitQuiz(){
             })();
           }
           saveDB();
-          console.log('[BSC Auto-Escalation] failCnt='+failCnt+' eid='+eid+' trn='+t.name+' CA total='+(DB.correctiveActions||[]).length);
+          console.log('[BSC Auto-Escalation] failCnt='+failCnt+' eid='+eid+' trn='+trnName+' CA total='+(DB.correctiveActions||[]).length);
         })();
         updateBadges();
         renderNotifPanel();
@@ -4055,7 +4068,7 @@ function submitQuiz(){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
-        ${!quizState.trnMatch?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span> ${pass?"Test completed successfully":"You have been reassigned for retraining - go to Trainings to retake"}</div>`}
+        ${!quizState.trnMatch&&!pass?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:quizState.trnMatch&&!pass?`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span> You have been reassigned for retraining — go to Trainings to retake</div>`:pass?"":""}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
     </div>
