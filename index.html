@@ -1559,7 +1559,7 @@ async function seedFirestore(){
    APP STATE
 ============================================================ */
 let currentUser=null,isAdmin=false,currentView="dashboard";
-let quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0};
+let quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0,startTime:0};
 let equip_filter="All",equip_search="",emp_search="",trn_search="",sop_search="";
 let charts={};
 
@@ -1831,7 +1831,7 @@ function doLogout(){
   localStorage.removeItem("mep_user");
   fbAuth.signOut().catch(()=>{});
   if(quizState.timer)clearInterval(quizState.timer);
-  quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0};
+  quizState={active:false,training:null,questions:[],current:0,answers:[],timer:null,timeLeft:0,startTime:0};
   document.getElementById("loginPage").style.display="flex";
   document.getElementById("mainArea").style.display="none";
   document.getElementById("loginId").value="";
@@ -4102,7 +4102,7 @@ function startQuizForTrn(trnId){
   document.getElementById('pageTitle').textContent='Online Tests';
   document.getElementById('mainContent').scrollTop=0;
   var timeLimit=processedQs.length*90;
-  quizState={active:true,training:t.name,category:t.cat,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch:t};
+  quizState={active:true,training:t.name,category:t.cat,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch:t,startTime:Date.now()};
   renderQuizActive();
   quizState.timer=setInterval(function(){
     quizState.timeLeft--;
@@ -4330,7 +4330,7 @@ function startQuiz(category,trainingName){
   });
   const trnMatch=trainingName?DB.trainings.find(t=>t.name===trainingName):null;
   const timeLimit=processedQs.length*90;
-  quizState={active:true,training:trainingName||category+" Test",category,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch};
+  quizState={active:true,training:trainingName||category+" Test",category,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch,startTime:Date.now()};
   renderQuizActive();
   quizState.timer=setInterval(()=>{
     quizState.timeLeft--;
@@ -4412,8 +4412,10 @@ function submitQuiz(){
   const empName=currentUser.name||currentUser.username||"Admin";
   const dept=currentUser.dept||"Admin";
   const today=new Date().toISOString().split("T")[0];
+  const timeTakenSec=quizState.startTime?Math.round((Date.now()-quizState.startTime)/1000):0;
+  const timeTakenStr=timeTakenSec>=60?Math.floor(timeTakenSec/60)+'m '+String(timeTakenSec%60).padStart(2,'0')+'s':timeTakenSec+'s';
   const certNum=qualifiesForCert&&pass?"CERT-"+Date.now().toString(36).toUpperCase():"";
-  const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||""};
+  const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||"",timeTaken:timeTakenSec,timeTakenStr:timeTakenStr};
   DB.testResults.push(result);
   if(certNum){
     const expiry=new Date();
@@ -4453,7 +4455,7 @@ function submitQuiz(){
       var trn=DB.trainings.find(function(t){return t.name===r.training;});
       var cert=DB.certificates.find(function(c){return c.empId===r.empId&&c.training===r.training;});
       var emp=DB.employees.find(function(e){return e.id===r.empId;});
-      var row={Company:DB.settings.companyName||"PTS SAFETY",Date:r.date,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Designation:emp?emp.desig||"":"",TrainingName:r.training,Category:r.cat||"",Trainer:trn?trn.trainer||"":"",Manager:trn?trn.manager||"":"",Duration:trn?trn.duration||"":"",PassMark:trn?trn.passing||70:70,Validity:trn?trn.validity||"1 Year":"1 Year",Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Attempt:r.attempt,Result:r.pass?"PASS":"FAIL",CertRequired:trn?(trn.cert?"Yes":"No"):"Yes",CertNo:r.cert||"",CompletionDate:r.date,CertIssued:cert?cert.issued||"":"",CertExpiry:cert?cert.expiry||"":""};
+      var row={Company:DB.settings.companyName||"PTS SAFETY",Date:r.date,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Designation:emp?emp.desig||"":"",TrainingName:r.training,Category:r.cat||"",Trainer:trn?trn.trainer||"":"",Manager:trn?trn.manager||"":"",Duration:trn?trn.duration||"":"",PassMark:trn?trn.passing||70:70,Validity:trn?trn.validity||"1 Year":"1 Year",Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Attempt:r.attempt,Result:r.pass?"PASS":"FAIL",TimeTaken:r.timeTakenStr||"",CertRequired:trn?(trn.cert?"Yes":"No"):"Yes",CertNo:r.cert||"",CompletionDate:r.date,CertIssued:cert?cert.issued||"":"",CertExpiry:cert?cert.expiry||"":""};
       (function(){
       var f=document.createElement('form');
       f.method='POST';f.action=sheetUrl;f.target='_gsq_'+Date.now();
@@ -4564,6 +4566,7 @@ function submitQuiz(){
         </div>
         <div style="font-size:12px;color:var(--muted);">Employee: <b>${empName}</b> (${empId}) · Dept: ${dept}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:3px;">Date: ${formatDate(today)} · Pass Mark: ${passing}% · Cert Threshold: ${minCertScore}%</div>
+        <div style="font-size:12px;color:var(--blue);margin-top:3px;"><span class="mat-ico" style="font-size:13px;">schedule</span> Time Taken: <b>${timeTakenStr}</b> · Attempt: <b>${result.attempt}</b></div>
         ${pass&&certNum?`<div style="margin-top:10px;padding:10px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);font-size:12px;">
           <b style="color:var(--amber);">🏆 Certificate Generated!</b><br>
           Certificate No: <span class="mono">${certNum}</span>
@@ -4584,6 +4587,7 @@ function submitQuiz(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${pass&&certNum?`<button class="btn btn-amber" onclick="downloadCertificate('${certNum}')"><span class="mat-ico">workspace_premium</span> Download Certificate</button>`:""}
         ${!quizState.trnMatch&&!pass?`<button class="btn btn-outline" onclick="startQuiz('${quizState.category||"Fire Fighting"}',null)"><span class="mat-ico">refresh</span> Retake Test</button>`:quizState.trnMatch&&!pass?`<div style="padding:6px 14px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span> You have been reassigned for retraining — go to Trainings to retake</div>`:pass?"":""}
+        ${!pass&&trnMatch&&trnMatch.youtubeLink?`<a href="${trnMatch.youtubeLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--red);color:var(--red);font-size:12px;font-weight:600;text-decoration:none;background:rgba(232,72,58,.06);transition:all .2s;" onmouseover="this.style.background='rgba(232,72,58,.15)';" onmouseout="this.style.background='rgba(232,72,58,.06)';"><span class="mat-ico">smart_display</span> Watch Training Video on YouTube</a>`:pass?"":""}
         <button class="btn btn-outline" onclick="gotoView('quiz')"><span class="mat-ico">arrow_back</span> Back to Tests</button>
       </div>
     </div>
@@ -4874,7 +4878,7 @@ function renderReports(){
         </div>
       </div>
       <table>
-        <thead><tr><th>Date</th><th>Emp ID</th><th>Name</th><th>Dept</th><th>Training</th><th>Score</th><th>Correct</th><th>Wrong</th><th>Total Q</th><th>Attempt</th><th>Result</th><th>Certificate No</th></tr></thead>
+        <thead><tr><th>Date</th><th>Emp ID</th><th>Name</th><th>Dept</th><th>Training</th><th>Score</th><th>Correct</th><th>Wrong</th><th>Total Q</th><th>Attempt</th><th>Time Taken</th><th>Result</th><th>Certificate No</th></tr></thead>
         <tbody>
           ${DB.testResults.length?DB.testResults.map(r=>`<tr>
             <td>${formatDate(r.date)}</td>
@@ -4887,9 +4891,10 @@ function renderReports(){
             <td style="color:var(--red);">${r.wrong}</td>
             <td>${r.total}</td>
             <td>#${r.attempt}</td>
+            <td style="color:var(--blue);font-size:11px;">${r.timeTakenStr||'—'}</td>
             <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"✅ PASS":"❌ FAIL"}</span></td>
             <td class="mono" style="font-size:10px;color:var(--purple);">${r.cert||"—"}</td>
-          </tr>`).join(""):`<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:24px;">No test results yet</td></tr>`}
+          </tr>`).join(""):`<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:24px;">No test results yet</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -5024,10 +5029,10 @@ function exportTrnReport(){
 }
 function exportTestReport(){
   const rows=DB.testResults.map(r=>({
-    "Date Attended":r.date,"Employee ID":r.empId,"Employee Name":r.empName,"Department":r.dept,"Training Name":r.training,"Category":r.cat||"","Score (%)":r.score,"Correct":r.correct,"Wrong":r.wrong,"Total Qs":r.total,"Attempt":r.attempt,"Result":r.pass?"PASS":"FAIL","Certificate No":r.cert||"N/A"
+    "Date Attended":r.date,"Employee ID":r.empId,"Employee Name":r.empName,"Department":r.dept,"Training Name":r.training,"Category":r.cat||"","Score (%)":r.score,"Correct":r.correct,"Wrong":r.wrong,"Total Qs":r.total,"Attempt":r.attempt,"Time Taken":r.timeTakenStr||"","Result":r.pass?"PASS":"FAIL","Certificate No":r.cert||"N/A"
   }));
   const ws=XLSX.utils.json_to_sheet(rows);
-  ws["!cols"]=[{wch:14},{wch:12},{wch:22},{wch:16},{wch:30},{wch:18},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:8},{wch:20}];
+  ws["!cols"]=[{wch:14},{wch:12},{wch:22},{wch:16},{wch:30},{wch:18},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:20}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Test Results");
   XLSX.writeFile(wb,"MEP_Test_Results_"+new Date().toISOString().split("T")[0]+".xlsx");toast("Test results exported","success");
 }
@@ -5358,23 +5363,13 @@ function renderCorrectiveActions(){
   // Dedup allCA: keep only ONE per empId+training (show latest)
   var dedupSeen=new Set();
   allCA=allCA.filter(function(a){var k=(a.empId||'')+'||'+(a.training||a.trnName||'');if(dedupSeen.has(k))return false;dedupSeen.add(k);return true;});
-  console.log('[CA] allCA.length='+allCA.length+' DB.correctiveActions='+(DB.correctiveActions||[]).length+' trainings with records:'+DB.trainings.filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;}).length);
   var retrainCount=allCA.filter(function(a){return a.type==='retraining';}).length;
   var offlineCount=allCA.filter(function(a){return a.type==='offline';}).length;
   var uniqueEmps=new Set(allCA.map(function(a){return a.empId;})).size;
   var autoCount=allCA.filter(function(a){return (a.doneBy||'').indexOf('Auto')>=0;}).length;
   var openItems=allCA.filter(function(a){var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});return !hasCert;});
   var el=document.getElementById('view-correctiveactions');
-  // DEBUG: Show raw DB state to diagnose issues
-  var debugInfo='DB.correctiveActions='+(DB.correctiveActions||[]).length;
-  debugInfo+=' | testResults='+(DB.testResults||[]).length+' (fails:'+(DB.testResults||[]).filter(function(r){return !r.pass;}).length+')';
-  debugInfo+=' | trainings='+(DB.trainings||[]).length;
-  var trnWithRecs=(DB.trainings||[]).filter(function(t){return (t.retrainingRecords||[]).length+(t.offlineRecords||[]).length>0;});
-  debugInfo+=' | trainingsWithRecords='+trnWithRecs.length;
-  console.log('[CA DEBUG] '+debugInfo);
   var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div><button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill</button><button class="btn btn-sm btn-outline" style="border-color:var(--red);color:var(--red);" onclick="cleanupDuplicateCAs()"><span class="mat-ico" style="font-size:12px;">delete_sweep</span> Clean Duplicates</button><button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="exportAllDataExcel()" title="Download all data as Excel/CSV"><span class="mat-ico" style="font-size:12px;">download</span> Export All</button></div></div>';
-  // Debug banner (always visible, shows raw data counts)
-  h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:10.5px;font-family:monospace;color:var(--muted);">'+debugInfo+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:24px;font-weight:700;color:var(--amber);">'+allCA.length+'</div><div style="font-size:11px;color:var(--muted);">Total Actions</div></div>';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+retrainCount+'</div><div style="font-size:11px;color:var(--muted);">Retraining</div></div>';
@@ -5399,7 +5394,9 @@ function renderCorrectiveActions(){
       var trnLink='';
       var matchingTrn=DB.trainings.find(function(t){return t.name===(a.training||a.trnName);});
       if(matchingTrn)trnLink=' <a href="#" onclick="event.stopPropagation();gotoView(\'trainings\');setTimeout(function(){openTrainingDetail(\''+matchingTrn.id+'\');},300);return false;" style="color:var(--blue);font-size:10px;margin-left:4px;" title="Open training details"><span class="mat-ico" style="font-size:11px;">open_in_new</span>View</a>';
-      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b>'+trnLink+'</td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+idx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
+      var ytBtn='';
+      if(matchingTrn&&matchingTrn.youtubeLink){ytBtn=' <a href="'+matchingTrn.youtubeLink+'" target="_blank" rel="noopener" style="color:var(--red);font-size:10px;margin-left:2px;" title="Watch training video on YouTube"><span class="mat-ico" style="font-size:11px;">smart_display</span>YouTube</a>';}
+      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b>'+trnLink+ytBtn+'</td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+idx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
     });
     h+='</tbody></table></div>';
   }else{
@@ -5733,7 +5730,7 @@ function buildSyncPayload(){
     const trn=DB.trainings.find(t=>t.name===r.training);
     const cert=DB.certificates.find(c=>c.empId===r.empId&&c.training===r.training);
     const emp=DB.employees.find(e=>e.id===r.empId);
-    return{Company:company,Date:r.date,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Designation:emp?emp.desig||"":"",TrainingName:r.training,Category:r.cat||"",Trainer:trn?trn.trainer||"":"",Manager:trn?trn.manager||"":"",Duration:trn?trn.duration||"":"",PassMark:trn?trn.passing||70:70,Validity:trn?trn.validity||"1 Year":"1 Year",Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Attempt:r.attempt,Result:r.pass?"PASS":"FAIL",CertRequired:trn?(trn.cert?"Yes":"No"):"Yes",CertNo:r.cert||"",CompletionDate:r.date,CertIssued:cert?cert.issued||"":"",CertExpiry:cert?cert.expiry||"":""};
+    return{Company:company,Date:r.date,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Designation:emp?emp.desig||"":"",TrainingName:r.training,Category:r.cat||"",Trainer:trn?trn.trainer||"":"",Manager:trn?trn.manager||"":"",Duration:trn?trn.duration||"":"",PassMark:trn?trn.passing||70:70,Validity:trn?trn.validity||"1 Year":"1 Year",Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Attempt:r.attempt,TimeTaken:r.timeTakenStr||"",Result:r.pass?"PASS":"FAIL",CertRequired:trn?(trn.cert?"Yes":"No"):"Yes",CertNo:r.cert||"",CompletionDate:r.date,CertIssued:cert?cert.issued||"":"",CertExpiry:cert?cert.expiry||"":""};
   });
 }
 function buildEmployeePayload(){
