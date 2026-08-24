@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PTS SAFETY — Training Management System v2.6</title>
+<title>PTS SAFETY — Training Management System v2.7</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -891,7 +891,7 @@ TRAINING_CATS.forEach(cat=>{
 /* ============================================================
    DATABASE
 ============================================================ */
-console.log('[PTS SAFETY] v2.6 loaded — BSC auto-escalation now works for ALL quiz failures (not just training-linked)');
+console.log('[PTS SAFETY] v2.7 loaded — CA Assign Training button + Reply fix + backfill');
 let DB={
   employees:[],
   trainings:[],
@@ -1957,7 +1957,10 @@ function markAllRead(){DB.notifications.forEach(n=>n.read=true);renderNotifPanel
    NOTIFICATION REPLY SYSTEM
 ============================================================ */
 function openReplyBox(notifId,btnEl){
-  const n=DB.notifications.find(x=>x.id===notifId);if(!n)return;
+  console.log('[REPLY] openReplyBox called, id='+notifId);
+  // Close notification panel so it doesn't block the modal
+  document.getElementById('notifPanel').classList.remove('open');
+  const n=DB.notifications.find(x=>x.id===notifId);if(!n){console.warn('[REPLY] Notification not found:',notifId);return;}
   // Use modal approach — guaranteed to work regardless of parent CSS layout
   var existingReplies=(n.replies||[]).map(function(r){return '<div class="notif-reply-bubble"><b>'+r.by+'</b><span class="reply-time">'+r.time+'</span><br/>'+r.text+'</div>';}).join('');
   var replyHTML='<div class="modal-accent"></div><div class="modal-head"><h2>Reply to Notification</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">';
@@ -4572,6 +4575,7 @@ function clearAllTestResults(){
 }
 
 /* Backfill: scan existing failures and create corrective actions + notifications for them */
+/* ONE CA per person+training — clicking multiple times is safe (idempotent) */
 function backfillCorrectiveActions(){
   if(!DB.correctiveActions)DB.correctiveActions=[];
   var today=new Date().toISOString().split('T')[0];
@@ -4584,26 +4588,25 @@ function backfillCorrectiveActions(){
     if(!failGroups[key])failGroups[key]={empId:r.empId,empName:r.empName,dept:r.dept||'',training:r.training,cat:r.cat||'',results:[]};
     failGroups[key].results.push(r);
   });
-  // Get existing CA IDs to avoid duplicates
-  var existingCAKeys=new Set((DB.correctiveActions||[]).map(function(ca){return ca.empId+'||'+ca.training+'||'+ca.timestamp;}));
+  // Dedup key: ONE CA per empId+training — check existing CAs
+  var existingEmpTrnKeys=new Set((DB.correctiveActions||[]).map(function(ca){return (ca.empId||'')+'||'+(ca.training||ca.trnName||'');}));
   Object.keys(failGroups).forEach(function(key){
     var g=failGroups[key];
+    // Skip if a CA already exists for this person+training
+    if(existingEmpTrnKeys.has(key)){return;}
     var failCnt=g.results.length;
     var bestSc=Math.max.apply(null,g.results.map(function(r){return r.score;}));
+    // Use the LATEST failure date
+    var sortedResults=g.results.slice().sort(function(a,b){return (b.timestamp||0)-(a.timestamp||0);});
+    var latestResult=sortedResults[0];
     var trnMatch=DB.trainings.find(function(t){return t.name===g.training;})||DB.trainings.find(function(t){return t.cat===g.cat;});
     var passMark=trnMatch?(trnMatch.passing||70):70;
-    // Find the LATEST failure that doesn't already have a CA
-    var sortedResults=g.results.slice().sort(function(a,b){return (b.timestamp||b.date||'').toString().localeCompare((a.timestamp||a.date||'').toString());});
-    sortedResults.forEach(function(r,idx){
-      var caKey=r.empId+'||'+r.training+'||'+(r.timestamp||0);
-      if(existingCAKeys.has(caKey))return;
-      existingCAKeys.add(caKey);
-      var actionType=failCnt>=3?'offline':'retraining';
-      var actionText=failCnt>=3?'Offline Training Assigned (Backfill)':'Auto-Retraining (Backfill)';
-      var reasonText=failCnt>=3?'3rd failure auto-escalation (backfilled).':'1st/2nd failure backfilled from existing test results.';
-      DB.correctiveActions.push({id:genId('CA'),type:actionType,empId:g.empId,empName:g.empName,training:g.training,trnId:trnMatch?trnMatch.id:'CAT-'+g.cat,date:r.date||today,timestamp:r.timestamp||Date.now(),failCount:failCnt,bestScore:bestSc,passMark:passMark,action:actionText,reason:reasonText,doneBy:'System Backfill'});
-      created++;
-    });
+    var actionType=failCnt>=3?'offline':'retraining';
+    var actionText=failCnt>=3?'Offline Training Assigned (Backfill)':'Auto-Retraining (Backfill)';
+    var reasonText=failCnt>=3?'3rd failure auto-escalation (backfilled).':'1st/2nd failure backfilled from existing test results.';
+    DB.correctiveActions.push({id:genId('CA'),type:actionType,empId:g.empId,empName:g.empName,training:g.training,trnId:trnMatch?trnMatch.id:'CAT-'+g.cat,date:latestResult.date||today,timestamp:latestResult.timestamp||Date.now(),failCount:failCnt,bestScore:bestSc,passMark:passMark,action:actionText,reason:reasonText,doneBy:'System Backfill'});
+    existingEmpTrnKeys.add(key);
+    created++;
     // Also create a notification for this employee if none exists
     var hasNotif=DB.notifications.find(function(n){return n.forEmp===g.empId&&n.msg.indexOf(g.training)>=0;});
     if(!hasNotif){
@@ -4641,12 +4644,109 @@ function createTestCA(){
   updateBadges();
   toast('Test corrective action created! You should see 1 item now.','success',4000);
 }
+/* Assign training to a failed employee from the Corrective Actions table */
+function assignTrainingFromCA(caIdx){
+  var ca=window._caList[caIdx];if(!ca){toast('Corrective action not found','error');return;}
+  var empId=ca.empId;
+  var empName=ca.empName||empId;
+  var failedTraining=ca.training||ca.trnName||'';
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  // Build training options - show which ones employee is already enrolled in
+  var trnOptions='';
+  DB.trainings.forEach(function(t){
+    var isEnrolled=(t.enrolled||[]).includes(empId);
+    var isMatch=t.name===failedTraining;
+    var label=t.name+(isMatch?' ★ (Failed This)':'')+(isEnrolled?' ✓ Enrolled':'');
+    var selected=isMatch?'selected':'';
+    trnOptions+='<option value="'+t.id+'" '+(isEnrolled?'style="color:var(--green);"':'')+selected+'>'+label+'</option>';
+  });
+  // Check which trainings the employee is currently enrolled in
+  var enrolledTrnNames=DB.trainings.filter(function(t){return (t.enrolled||[]).includes(empId);}).map(function(t){return t.name;});
+  var enrolledInfo=enrolledTrnNames.length?'<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:12px;font-size:12px;"><div style="font-weight:700;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Currently Enrolled In:</div>'+enrolledTrnNames.map(function(n){return '<span class="badge badge-active" style="margin:2px;">'+n+'</span>';}).join('')+'</div>':'';
+  // Show failure info
+  var failInfo='<div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:12px;">';
+  failInfo+='<div style="font-weight:700;color:var(--red);margin-bottom:6px;"><span class="mat-ico" style="font-size:14px;">warning</span> Failure Details</div>';
+  failInfo+='<div style="font-size:12px;line-height:1.8;">';
+  failInfo+='<b>Employee:</b> '+empName+' ('+empId+')'+(emp?' — '+emp.dept:'')+'<br>';
+  failInfo+='<b>Failed Training:</b> '+failedTraining+'<br>';
+  failInfo+='<b>Best Score:</b> '+(ca.bestScore||ca.previousBest||0)+'% / '+(ca.passMark||70)+'% pass mark<br>';
+  failInfo+='<b>Fail Count:</b> '+(ca.failCount||ca.previousAttempts||0)+'<br>';
+  failInfo+='</div></div>';
+  var modalHTML='<div class="modal-accent"></div>';
+  modalHTML+='<div class="modal-head"><h2><span class="mat-ico" style="color:var(--amber);">school</span> Assign Training to '+empName+'</h2>';
+  modalHTML+='<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>';
+  modalHTML+='<div class="modal-body">';
+  modalHTML+=failInfo;
+  modalHTML+=enrolledInfo;
+  modalHTML+='<div class="form-section"><div class="form-group">';
+  modalHTML+='<label class="form-label-sm">Select Training to Assign</label>';
+  modalHTML+='<select class="form-control-sm" id="caAssignTrnSelect" style="width:100%;">'+trnOptions+'</select>';
+  modalHTML+='</div>';
+  modalHTML+='<div class="form-group" style="margin-top:10px;">';
+  modalHTML+='<label class="form-label-sm">Assign Method</label>';
+  modalHTML+='<div style="display:flex;gap:8px;margin-top:4px;">';
+  modalHTML+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="radio" name="caAssignMethod" value="enroll" checked> <span class="mat-ico" style="font-size:14px;color:var(--blue);">person_add</span> Enroll (add to training list)</label>';
+  modalHTML+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="radio" name="caAssignMethod" value="retrain"> <span class="mat-ico" style="font-size:14px;color:var(--orange);">replay</span> Retrain (mark for retraining + allow retake)</label>';
+  modalHTML+='</div></div>';
+  modalHTML+='<div class="form-group" style="margin-top:10px;">';
+  modalHTML+='<label class="form-label-sm">Notify Employee?</label>';
+  modalHTML+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;"><input type="checkbox" id="caAssignNotify" checked> Send notification to employee about the training assignment</label>';
+  modalHTML+='</div>';
+  modalHTML+='</div></div>';
+  modalHTML+='<div class="modal-foot">';
+  modalHTML+='<button class="btn btn-amber" onclick="confirmCAAssign(\''+empId+'\')"><span class="mat-ico">school</span> Assign Training</button>';
+  modalHTML+='<button class="btn btn-outline" onclick="closeModal()">Cancel</button>';
+  modalHTML+='</div>';
+  openModal(modalHTML,'600px');
+}
+function confirmCAAssign(empId){
+  var trnId=document.getElementById('caAssignTrnSelect').value;
+  var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t){toast('Training not found','error');return;}
+  var method=document.querySelector('input[name="caAssignMethod"]:checked').value;
+  var notify=document.getElementById('caAssignNotify').checked;
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  var empName=emp?emp.name:empId;
+  if(method==='enroll'){
+    // Enroll employee in the training
+    if(!t.enrolled)t.enrolled=[];
+    if(!t.enrolled.includes(empId)){
+      t.enrolled.push(empId);
+      // Update the CA status too
+      var ca=window._caList.find(function(c){return c.empId===empId;});
+      if(ca)ca._justAssigned=true;
+    }
+    toast(empName+' enrolled in "'+t.name+'"','success',4000);
+    // Log for audit
+    if(!t.retrainingRecords)t.retrainingRecords=[];
+    t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:0,previousBest:0,action:'Training Assigned from CA Log',reason:'Admin assigned training via Corrective Actions page.',doneBy:currentUser.name||'Admin'});
+  }else{
+    // Retrain method - use existing retrainEmployee logic
+    if(!t.retrained)t.retrained=[];
+    if(!t.retrained.includes(empId))t.retrained.push(empId);
+    if(!t.retrainingRecords)t.retrainingRecords=[];
+    var allResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+    var failCount=allResults.filter(function(r){return !r.pass;}).length;
+    var bestScore=allResults.length?Math.max.apply(null,allResults.map(function(r){return r.score;})):0;
+    t.retrainingRecords.push({empId:empId,empName:empName,training:t.name,trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:allResults.length,previousBest:bestScore,action:'Retraining Assigned from CA Log',reason:'Failed ('+failCount+'x, best '+bestScore+'%). Admin assigned via Corrective Actions page. BSC corrective action.',doneBy:currentUser.name||'Admin'});
+    toast(empName+' marked for retraining. They can retake "'+t.name+'".','success',5000);
+  }
+  // Send notification if checked
+  if(notify){
+    var msg=method==='enroll'?'New training assigned: '+t.name+' — Please complete it at your earliest.':'Retraining assigned: '+t.name+' — You can now retake the test.';
+    DB.notifications.unshift({id:genId('N'),msg:msg,read:false,time:'Just now',icon:method==='enroll'?'school':'replay',forEmp:empId});
+  }
+  closeModal();
+  saveDB();
+  updateBadges();
+  renderCorrectiveActions();
+  renderNotifPanel();
+}
 /* ============================================================
    CORRECTIVE ACTIONS LOG (BSC Audit)
 ============================================================ */
 function renderCorrectiveActions(){
   if(!isAdmin){document.getElementById('view-correctiveactions').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
-  var allCA=[];
+  window._caList=[];var allCA=window._caList;
   DB.trainings.forEach(function(t){
     (t.retrainingRecords||[]).forEach(function(r){allCA.push(Object.assign({},r,{type:'retraining',trnName:t.name,trainer:t.trainer||'',manager:t.manager||''}));});
     (t.offlineRecords||[]).forEach(function(r){allCA.push(Object.assign({},r,{type:'offline',trnName:t.name,trainer:t.trainer||'',manager:t.manager||''}));});
@@ -4681,14 +4781,17 @@ function renderCorrectiveActions(){
   h+='<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--red);font-size:20px;">gavel</span><div><b>BSC Audit Compliance:</b> 1st fail = retrain, 2nd = warning, 3rd = offline training + NCR.</div></div>';
   h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">All Corrective Actions ('+allCA.length+')</div>';
   if(allCA.length){
-    h+='<div class="table-wrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Training</th><th>Type</th><th>Fails</th><th>Best</th><th>Pass</th><th>Action</th><th>Done By</th><th>Status</th></tr></thead><tbody>';
-    allCA.forEach(function(a){
+    h+='<div class="table-wrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Training</th><th>Type</th><th>Fails</th><th>Best</th><th>Pass</th><th>Action</th><th>Done By</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+    allCA.forEach(function(a,idx){
       var emp=DB.employees.find(function(e){return e.id===a.empId;});
       var hasCert=DB.certificates.find(function(c){return c.empId===a.empId&&c.training===(a.training||a.trnName);});
       var sCls=hasCert?'active':a.type==='offline'?'info':'warning';
       var sTxt=hasCert?'Resolved':'Open';
       var tBadge=a.type==='offline'?'<span class="badge" style="background:var(--red)20;color:var(--red);">Offline</span>':'<span class="badge" style="background:var(--orange)20;color:var(--orange);">Retrain</span>';
-      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b></td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span></td></tr>';
+      // Check if employee is already enrolled in any training matching this CA
+      var isEnrolled=DB.trainings.find(function(t){return (t.enrolled||[]).includes(a.empId)&&t.name===(a.training||a.trnName);});
+      var enrolledBadge=isEnrolled?'<span style="font-size:9px;color:var(--green);"><span class="mat-ico" style="font-size:10px;">check_circle</span> Assigned</span>':'';
+      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(a.training||a.trnName||'')+'</b></td><td>'+tBadge+'</td><td style="font-weight:700;color:var(--red);">'+(a.failCount||a.previousAttempts||0)+'</td><td>'+(a.bestScore||a.previousBest||0)+'%</td><td>'+(a.passMark||70)+'%</td><td style="font-size:11px;">'+(a.action||'')+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+idx+')" title="Assign/reassign training to this employee"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
     });
     h+='</tbody></table></div>';
   }else{
@@ -6061,3 +6164,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
