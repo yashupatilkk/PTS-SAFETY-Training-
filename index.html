@@ -533,7 +533,14 @@ select.form-control-sm{background:var(--sur2);}
   <nav class="sidebar-nav" id="sidebarNav">
     <div class="nav-section-title">Main Menu</div>
     <button class="nav-item active" data-view="dashboard" onclick="gotoView('dashboard')"><span class="mat-ico">dashboard</span><span>Dashboard</span></button>
+    <div id="empManageNav">
     <button class="nav-item" data-view="employees" onclick="gotoView('employees')"><span class="mat-ico">people</span><span>Employees</span><span class="nav-badge" id="nb-employees">0</span></button>
+    <button class="nav-item" data-view="empcards" onclick="gotoView('empcards')"><span class="mat-ico">contact_page</span><span>Employee Cards</span></button>
+    </div>
+    <div id="empNav" style="display:none;">
+    <button class="nav-item" data-view="myprofile" onclick="gotoView('myprofile')"><span class="mat-ico">account_circle</span><span>My Profile</span></button>
+    <button class="nav-item" data-view="msgadmin" onclick="gotoView('msgadmin')"><span class="mat-ico">mail</span><span>Message to Admin</span><span class="nav-badge" id="nb-msgadmin" style="background:rgba(62,160,232,.15);color:var(--blue);display:none;">0</span></button>
+    </div>
     <button class="nav-item" data-view="trainings" onclick="gotoView('trainings')"><span class="mat-ico">school</span><span>Trainings</span><span class="nav-badge" id="nb-trainings">0</span></button>
     <button class="nav-item" data-view="equipment" onclick="gotoView('equipment')"><span class="mat-ico">build</span><span>Equipment Library</span><span class="nav-badge" id="nb-equipment">0</span></button>
     <div class="nav-section-title">Resources</div>
@@ -599,6 +606,7 @@ select.form-control-sm{background:var(--sur2);}
   <div class="content" id="mainContent">
     <div class="view active" id="view-dashboard"></div>
     <div class="view" id="view-employees"></div>
+    <div class="view" id="view-empcards"></div>
     <div class="view" id="view-trainings"></div>
     <div class="view" id="view-equipment"></div>
     <div class="view" id="view-sop"></div>
@@ -609,6 +617,8 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-notifications"></div>
     <div class="view" id="view-correctiveactions"></div>
     <div class="view" id="view-adminaccess"></div>
+    <div class="view" id="view-myprofile"></div>
+    <div class="view" id="view-msgadmin"></div>
     <div class="view" id="view-settings"></div>
   </div>
 </div>
@@ -1839,6 +1849,8 @@ function startApp(){
   document.getElementById("roleBadge").className="role-chip "+(isAdmin?"admin":"employee");
   document.getElementById("adminNav").style.display=isAdmin?"block":"none";
   document.getElementById("reportsNav").style.display=isAdmin?"block":"none";
+  document.getElementById("empManageNav").style.display=isAdmin?"block":"none";
+  document.getElementById("empNav").style.display=isAdmin?"none":"block";
   updateBadges();
   gotoView("dashboard");
   startAutoSync();
@@ -1859,6 +1871,12 @@ function updateBadges(){
   // Also count records nested inside trainings for badge consistency
   DB.trainings.forEach(function(t){caCount+=(t.retrainingRecords||[]).length;caCount+=(t.offlineRecords||[]).length;});
   var caEl=document.getElementById("nb-ca");if(caEl)caEl.textContent=caCount;
+  // Employee: show unread admin replies badge on Message to Admin
+  if(!isAdmin&&currentUser&&currentUser.id){
+    var adminRepliesUnread=DB.notifications.filter(function(n){return n.fromEmp===currentUser.id&&n.replies&&n.replies.some(function(r){return r.byId!==currentUser.id;});}).length;
+    var msgBadge=document.getElementById('nb-msgadmin');
+    if(msgBadge){msgBadge.style.display=adminRepliesUnread>0?'inline-flex':'none';msgBadge.textContent=adminRepliesUnread;}
+  }
   document.getElementById("notifDot").style.display=unread>0?"block":"none";
 }
 function updateLoginClock(){
@@ -1876,10 +1894,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   if(v==="dashboard"&&isAdmin){var ds=document.getElementById("view-dashboard");var ah=getBSCAuditHTML();if(ah&&ds){var oldSlot=ds.querySelector(".bsc-audit-slot");if(oldSlot)oldSlot.remove();var wrapper=document.createElement("div");wrapper.className="bsc-audit-slot";wrapper.innerHTML=ah;ds.appendChild(wrapper);}}
   closeSidebar();
@@ -2616,6 +2634,399 @@ function viewEmpHistory(id){
   `,"700px");
 }
 function resetPassword(id){const pw=prompt(`New password for ${id}:`);if(!pw)return;const e=DB.employees.find(x=>x.id===id);if(e){e.password=pw;saveDB();toast("Password changed. Use new password on next login.","success");}}
+/* ============================================================
+   EMPLOYEE CARDS VIEW (Admin) — Photo, full profile, messages
+============================================================ */
+var _empCardsSearch='';
+function renderEmpCards(){
+  if(!isAdmin){document.getElementById('view-empcards').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var q=_empCardsSearch.toLowerCase();
+  var filtered=DB.employees.filter(function(e){return !q||e.name.toLowerCase().includes(q)||e.id.toLowerCase().includes(q)||e.dept.toLowerCase().includes(q);});
+  var h='<div class="section-header"><div class="section-title">Employee <span>Cards</span></div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;"><div class="search-wrap" style="width:200px;"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee..." oninput="_empCardsSearch=this.value;renderEmpCards();" value="'+_empCardsSearch+'"></div></div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;">';
+  filtered.forEach(function(e){
+    var results=DB.testResults.filter(function(r){return r.empId===e.id;});
+    var passCount=results.filter(function(r){return r.pass;}).length;
+    var failCount=results.filter(function(r){return !r.pass;}).length;
+    var photo=e.photo||'';
+    var avatarHTML=photo?'<img src="'+photo+'" style="width:60px;height:60px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:60px;height:60px;font-size:20px;background:'+avatarColor(e.name)+';">'+avatarInitials(e.name)+'</div>';
+    var statusColor=e.status==='active'?'var(--green)':'var(--red)';
+    h+='<div class="card" style="cursor:pointer;position:relative;overflow:hidden;" onclick="openEmpCardDetail(\''+e.id+'\')">';
+    h+='<div style="position:absolute;top:8px;right:8px;width:10px;height:10px;border-radius:50%;background:'+statusColor+';"></div>';
+    h+='<div style="display:flex;flex-direction:column;align-items:center;padding:20px 14px 14px;">';
+    h+=avatarHTML;
+    h+='<div style="font-weight:700;font-size:13px;margin-top:10px;text-align:center;">'+e.name+'</div>';
+    h+='<div style="font-size:10.5px;color:var(--amber);font-family:monospace;">'+e.id+'</div>';
+    h+='<div style="font-size:10px;color:var(--muted);margin-top:2px;">'+e.dept+' · '+e.desig+'</div>';
+    h+='<div style="display:flex;gap:10px;margin-top:10px;font-size:10px;">';
+    h+='<div style="text-align:center;"><div style="font-weight:700;color:var(--green);font-size:16px;">'+passCount+'</div><div style="color:var(--muted);">Passed</div></div>';
+    h+='<div style="text-align:center;"><div style="font-weight:700;color:var(--red);font-size:16px;">'+failCount+'</div><div style="color:var(--muted);">Failed</div></div>';
+    h+='<div style="text-align:center;"><div style="font-weight:700;color:var(--blue);font-size:16px;">'+results.length+'</div><div style="color:var(--muted);">Total</div></div>';
+    h+='</div></div></div>';
+  });
+  h+='</div>';
+  if(!filtered.length)h+='<div class="empty-state"><span class="mat-ico">people_outline</span><h3>No employees found</h3></div>';
+  document.getElementById('view-empcards').innerHTML=h;
+}
+function openEmpCardDetail(empId){
+  var e=DB.employees.find(function(x){return x.id===empId;});if(!e)return;
+  var photo=e.photo||'';
+  var avatarHTML=photo?'<img src="'+photo+'" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:72px;height:72px;font-size:26px;background:'+avatarColor(e.name)+';">'+avatarInitials(e.name)+'</div>';
+  // Stats
+  var allResults=DB.testResults.filter(function(r){return r.empId===empId;});
+  var passCount=allResults.filter(function(r){return r.pass;}).length;
+  var failCount=allResults.filter(function(r){return !r.pass;}).length;
+  var certCount=DB.certificates.filter(function(c){return c.empId===empId;}).length;
+  var avgScore=allResults.length?Math.round(allResults.reduce(function(s,r){return s+r.score;},0)/allResults.length):0;
+  // Training-wise breakdown
+  var trnGroups={};
+  allResults.forEach(function(r){
+    if(!trnGroups[r.training])trnGroups[r.training]={pass:0,fail:0,best:0,results:[],cat:r.cat||''};
+    if(r.pass)trnGroups[r.training].pass++;else trnGroups[r.training].fail++;
+    if(r.score>trnGroups[r.training].best)trnGroups[r.training].best=r.score;
+    trnGroups[r.training].results.push(r);
+  });
+  // Retraining count
+  var retrainCount=0;
+  DB.trainings.forEach(function(t){
+    if((t.retrained||[]).includes(empId))retrainCount++;
+    (t.retrainingRecords||[]).forEach(function(rec){if(rec.empId===empId)retrainCount++;});
+    (t.offlineRecords||[]).forEach(function(rec){if(rec.empId===empId)retrainCount++;});
+  });
+  // Messages: sent TO employee + replies FROM employee
+  var msgsToEmp=DB.notifications.filter(function(n){return n.forEmp===empId;});
+  var msgsFromEmp=DB.notifications.filter(function(n){return n.fromEmp===empId;});
+  // Build HTML
+  var m='<div class="modal-accent"></div>';
+  m+='<div class="modal-head"><div class="modal-ico" style="background:rgba(62,160,232,.15)"><span class="mat-ico" style="color:var(--blue);font-size:22px;">badge</span></div>';
+  m+='<div><h2>'+e.name+'</h2><div style="font-size:12px;color:var(--muted);">'+e.id+' · '+e.dept+' · '+e.desig+'</div></div>';
+  m+='<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>';
+  m+='<div class="modal-body">';
+  // Photo + basic info
+  m+='<div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;background:var(--sur2);border-radius:var(--r);padding:16px;">';
+  m+='<div style="position:relative;">'+avatarHTML+'<button onclick="event.stopPropagation();uploadEmpPhoto(\''+empId+'\')" style="position:absolute;bottom:-2px;right:-2px;width:26px;height:26px;border-radius:50%;background:var(--amber);border:2px solid var(--sur);cursor:pointer;display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="font-size:14px;color:#151515;">camera_alt</span></button></div>';
+  m+='<div style="flex:1;"><div style="font-weight:700;font-size:16px;">'+e.name+'</div>';
+  m+='<div style="font-size:11px;color:var(--muted);">'+e.id+' · '+e.dept+' · '+e.desig+' · '+e.shift+'</div>';
+  m+='<div style="font-size:11px;color:var(--muted);">'+e.mobile+(e.location?' · '+e.location:'')+'</div>';
+  m+='<span class="badge badge-'+(e.status==='active'?'active':'danger')+'" style="margin-top:4px;">'+e.status+'</span></div></div>';
+  // Summary stats
+  m+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:16px;">';
+  m+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;border-top:3px solid var(--green);"><div style="font-size:22px;font-weight:700;color:var(--green);">'+passCount+'</div><div style="font-size:10px;color:var(--muted);">Passed</div></div>';
+  m+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:22px;font-weight:700;color:var(--red);">'+failCount+'</div><div style="font-size:10px;color:var(--muted);">Failed</div></div>';
+  m+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;border-top:3px solid var(--blue);"><div style="font-size:22px;font-weight:700;color:var(--blue);">'+allResults.length+'</div><div style="font-size:10px;color:var(--muted);">Total Tests</div></div>';
+  m+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:22px;font-weight:700;color:var(--amber);">'+retrainCount+'</div><div style="font-size:10px;color:var(--muted);">Retrainings</div></div>';
+  m+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;border-top:3px solid var(--purple);"><div style="font-size:22px;font-weight:700;color:var(--purple);">'+certCount+'</div><div style="font-size:10px;color:var(--muted);">Certificates</div></div>';
+  m+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:12px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:22px;font-weight:700;color:var(--orange);">'+avgScore+'%</div><div style="font-size:10px;color:var(--muted);">Avg Score</div></div>';
+  m+='</div>';
+  // TAB SECTIONS
+  m+='<div style="border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;">';
+  // Tab buttons
+  m+='<div style="display:flex;border-bottom:1px solid var(--bdr);background:var(--sur2);">';
+  m+='<button class="empdet-tab active" onclick="switchEmpDetTab(this,\'tab-trainings\')" style="flex:1;padding:10px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--amber);cursor:pointer;border-bottom:2px solid var(--amber);">Training History</button>';
+  m+='<button class="empdet-tab" onclick="switchEmpDetTab(this,\'tab-messages\')" style="flex:1;padding:10px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;">Messages & Replies</button>';
+  m+='<button class="empdet-tab" onclick="switchEmpDetTab(this,\'tab-retraining\')" style="flex:1;padding:10px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;">Retraining Log</button>';
+  m+='</div>';
+  // TAB 1: Training History (per topic)
+  m+='<div id="tab-trainings" style="padding:14px;max-height:350px;overflow-y:auto;">';
+  var trnKeys=Object.keys(trnGroups);
+  if(trnKeys.length){
+    trnKeys.forEach(function(trnName){
+      var g=trnGroups[trnName];
+      var passRate=g.results.length?Math.round(g.pass/g.results.length*100):0;
+      m+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:8px;">';
+      m+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-weight:700;font-size:12px;">'+trnName+'</div><div style="display:flex;gap:6px;"><span class="badge badge-active">'+g.pass+' Pass</span><span class="badge badge-danger">'+g.fail+' Fail</span><span class="badge" style="background:var(--blue)20;color:var(--blue);">Best: '+g.best+'%</span></div></div>';
+      m+='<div style="width:100%;height:4px;background:var(--bdr);border-radius:2px;margin-bottom:6px;"><div style="height:100%;width:'+passRate+'%;background:'+(passRate>=70?'var(--green)':'var(--red)')+';border-radius:2px;"></div></div>';
+      g.results.forEach(function(r){
+        m+='<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);padding:2px 0;border-bottom:1px solid var(--bdr);">';
+        m+='<span>'+formatDate(r.date)+'</span><span>Score: <b style="color:'+(r.pass?'var(--green)':'var(--red)')+';">'+r.score+'%</b> '+(r.pass?'PASS':'FAIL')+'</span></div>';
+      });
+      m+='</div>';
+    });
+  }else{m+='<div style="text-align:center;color:var(--muted);padding:20px;font-size:12px;">No test history</div>';}
+  m+='</div>';
+  // TAB 2: Messages & Replies
+  m+='<div id="tab-messages" style="padding:14px;max-height:350px;overflow-y:auto;display:none;">';
+  m+='<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Messages Sent to '+e.name+' ('+msgsToEmp.length+')</div>';
+  if(msgsToEmp.length){
+    msgsToEmp.slice(0,20).forEach(function(n){
+      var replyCount=(n.replies||[]).filter(function(r){return r.byId===empId||r.by===e.name;}).length;
+      m+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:6px;">';
+      m+='<div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-size:11px;"><b>'+n.msg+'</b></div><div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-left:8px;">'+n.time+'</div></div>';
+      if(n.fromEmpName)m+='<div style="font-size:9px;color:var(--muted);margin-top:2px;">From: '+(n.fromEmpName||'Admin')+'</div>';
+      if(replyCount)m+='<div style="font-size:9px;color:var(--green);margin-top:2px;"><span class="mat-ico" style="font-size:10px;">reply</span> '+replyCount+' reply(ies) from employee</div>';
+      if(n.replies&&n.replies.length){
+        m+='<div style="margin-top:6px;">';
+        n.replies.forEach(function(r){
+          var isEmpReply=(r.byId===empId||r.by===e.name);
+          m+='<div style="padding:6px 8px;margin-bottom:3px;border-radius:6px;font-size:10px;'+(isEmpReply?'background:rgba(62,160,232,.1);border-left:3px solid var(--blue);':'background:var(--sur);border-left:3px solid var(--amber);')+'">';
+          m+='<b>'+(r.by||'')+'</b> <span style="color:var(--muted);">'+r.time+'</span><div style="margin-top:2px;">'+r.text+'</div></div>';
+        });
+        m+='</div>';
+      }
+      m+='</div>';
+    });
+  }else{m+='<div style="text-align:center;color:var(--muted);padding:12px;font-size:11px;">No messages sent</div>';}
+  // Messages FROM employee (employee replies to admin)
+  m+='<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--blue);margin:12px 0 8px;">Replies/Message from '+e.name+' ('+msgsFromEmp.length+')</div>';
+  if(msgsFromEmp.length){
+    msgsFromEmp.slice(0,20).forEach(function(n){
+      m+='<div style="background:rgba(62,160,232,.06);border:1px solid rgba(62,160,232,.2);border-radius:var(--r-sm);padding:10px;margin-bottom:6px;">';
+      m+='<div style="font-size:11px;"><b>'+n.msg+'</b></div>';
+      m+='<div style="font-size:9px;color:var(--muted);margin-top:2px;">'+n.time+'</div>';
+      m+='</div>';
+    });
+  }else{m+='<div style="text-align:center;color:var(--muted);padding:12px;font-size:11px;">No messages from employee</div>';}
+  m+='</div>';
+  // TAB 3: Retraining Log
+  m+='<div id="tab-retraining" style="padding:14px;max-height:350px;overflow-y:auto;display:none;">';
+  var allRetrainRecords=[];
+  DB.trainings.forEach(function(t){
+    (t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId)allRetrainRecords.push(Object.assign({},r,{trnName:t.name}));});
+    (t.offlineRecords||[]).forEach(function(r){if(r.empId===empId)allRetrainRecords.push(Object.assign({},r,{trnName:t.name,type:'offline'}));});
+  });
+  (DB.correctiveActions||[]).forEach(function(ca){if(ca.empId===empId)allRetrainRecords.push(ca);});
+  allRetrainRecords.sort(function(a,b){return (b.timestamp||0)-(a.timestamp||0);});
+  if(allRetrainRecords.length){
+    allRetrainRecords.forEach(function(r){
+      m+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:6px;">';
+      m+='<div style="display:flex;justify-content:space-between;"><div style="font-weight:700;font-size:11px;">'+(r.training||r.trnName||'')+'</div><span class="badge badge-'+(r.type==='offline'?'danger':'warning')+'">'+(r.type==='offline'?'Offline':'Retrain')+'</span></div>';
+      m+='<div style="font-size:10px;color:var(--muted);margin-top:4px;">'+(r.action||'')+'</div>';
+      m+='<div style="font-size:10px;color:var(--muted);">'+(r.reason||'')+'</div>';
+      m+='<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:4px;"><span>'+(r.date||'')+'</span><span>By: '+(r.doneBy||'')+'</span></div>';
+      m+='</div>';
+    });
+  }else{m+='<div style="text-align:center;color:var(--muted);padding:20px;font-size:12px;">No retraining records</div>';}
+  m+='</div>'; // end tab-retraining
+  m+='</div>'; // end tab container
+  m+='</div>'; // end modal-body
+  m+='<div class="modal-foot"><button class="btn btn-amber" onclick="uploadEmpPhoto(\''+empId+'\')"><span class="mat-ico">camera_alt</span> Upload Photo</button><button class="btn btn-outline" onclick="closeModal()">Close</button></div>';
+  openModal(m,'780px');
+}
+function switchEmpDetTab(btn,tabId){
+  document.querySelectorAll('.empdet-tab').forEach(function(t){t.style.color='var(--muted)';t.style.borderBottom='2px solid transparent';});
+  btn.style.color='var(--amber)';btn.style.borderBottom='2px solid var(--amber)';
+  ['tab-trainings','tab-messages','tab-retraining'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display=id===tabId?'block':'none';});
+}
+function uploadEmpPhoto(empId){
+  var input=document.createElement('input');
+  input.type='file';
+  input.accept='image/*';
+  input.onchange=function(ev){
+    var file=ev.target.files[0];
+    if(!file)return;
+    if(file.size>2*1024*1024){toast('Photo must be under 2MB','error');return;}
+    var reader=new FileReader();
+    reader.onload=function(e){
+      var dataUrl=e.target.result;
+      var emp=DB.employees.find(function(x){return x.id===empId;});
+      if(!emp){toast('Employee not found','error');return;}
+      emp.photo=dataUrl;
+      saveDB();
+      toast('Photo updated for '+emp.name,'success',3000);
+      // Re-render current view
+      if(currentView==='empcards')renderEmpCards();
+      else if(currentView==='employees')renderEmployees();
+      // Also refresh the detail modal if open
+      var modalContent=document.querySelector('#modal .modal-body');
+      if(modalContent)openEmpCardDetail(empId);
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+/* ============================================================
+   EMPLOYEE: MY PROFILE VIEW
+============================================================ */
+function renderMyProfile(){
+  if(isAdmin||!currentUser||!currentUser.id){document.getElementById('view-myprofile').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Employee Only</h3><p>This page is for employees only.</p></div>';return;}
+  var empId=currentUser.id;
+  var emp=DB.employees.find(function(x){return x.id===empId;});
+  if(!emp){document.getElementById('view-myprofile').innerHTML='<div class="empty-state"><span class="mat-ico">error</span><h3>Profile Not Found</h3><p>Your employee record was not found. Contact admin.</p></div>';return;}
+  var photo=emp.photo||'';
+  var avatarHTML=photo?'<img src="'+photo+'" style="width:90px;height:90px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:90px;height:90px;font-size:30px;background:'+avatarColor(emp.name)+';">'+avatarInitials(emp.name)+'</div>';
+  var allResults=DB.testResults.filter(function(r){return r.empId===empId;});
+  var passCount=allResults.filter(function(r){return r.pass;}).length;
+  var failCount=allResults.filter(function(r){return !r.pass;}).length;
+  var certCount=DB.certificates.filter(function(c){return c.empId===empId;}).length;
+  var avgScore=allResults.length?Math.round(allResults.reduce(function(s,r){return s+r.score;},0)/allResults.length):0;
+  // Retraining count
+  var retrainCount=0;
+  DB.trainings.forEach(function(t){
+    if((t.retrained||[]).includes(empId))retrainCount++;
+    (t.retrainingRecords||[]).forEach(function(rec){if(rec.empId===empId)retrainCount++;});
+    (t.offlineRecords||[]).forEach(function(rec){if(rec.empId===empId)retrainCount++;});
+  });
+  // Training-wise breakdown
+  var trnGroups={};
+  allResults.forEach(function(r){
+    if(!trnGroups[r.training])trnGroups[r.training]={pass:0,fail:0,best:0,results:[],cat:r.cat||''};
+    if(r.pass)trnGroups[r.training].pass++;else trnGroups[r.training].fail++;
+    if(r.score>trnGroups[r.training].best)trnGroups[r.training].best=r.score;
+    trnGroups[r.training].results.push(r);
+  });
+  // Messages to/from
+  var msgsToEmp=DB.notifications.filter(function(n){return n.forEmp===empId;});
+  var msgsFromEmp=DB.notifications.filter(function(n){return n.fromEmp===empId;});
+  var h='<div class="section-header"><div class="section-title">My <span>Profile</span></div></div>';
+  // Profile card
+  h+='<div style="display:flex;align-items:center;gap:20px;background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:24px;margin-bottom:18px;">';
+  h+='<div style="position:relative;">'+avatarHTML;
+  h+='<button onclick="uploadMyPhoto()" style="position:absolute;bottom:-4px;right:-4px;width:32px;height:32px;border-radius:50%;background:var(--amber);border:3px solid var(--sur);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--sh-sm);"><span class="mat-ico" style="font-size:16px;color:#151515;">camera_alt</span></button></div>';
+  h+='<div style="flex:1;"><div style="font-weight:700;font-size:20px;">'+emp.name+'</div>';
+  h+='<div style="font-size:12px;color:var(--amber);font-family:monospace;">'+emp.id+'</div>';
+  h+='<div style="font-size:12px;color:var(--muted);margin-top:4px;">'+emp.dept+' · '+emp.desig+' · '+emp.shift+'</div>';
+  h+='<div style="font-size:12px;color:var(--muted);">'+emp.mobile+(emp.location?' · '+emp.location:'')+'</div>';
+  h+='<span class="badge badge-'+(emp.status==='active'?'active':'danger')+'" style="margin-top:6px;">'+emp.status+'</span></div>';
+  h+='<button class="btn btn-amber" onclick="gotoView(\'msgadmin\')"><span class="mat-ico">mail</span> Message Admin</button>';
+  h+='</div>';
+  // Summary stats
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px;">';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;border-top:3px solid var(--green);"><div style="font-size:26px;font-weight:700;color:var(--green);">'+passCount+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Tests Passed</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:26px;font-weight:700;color:var(--red);">'+failCount+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Tests Failed</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;border-top:3px solid var(--blue);"><div style="font-size:26px;font-weight:700;color:var(--blue);">'+allResults.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Tests</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:26px;font-weight:700;color:var(--amber);">'+retrainCount+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Retrainings</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;border-top:3px solid var(--purple);"><div style="font-size:26px;font-weight:700;color:var(--purple);">'+certCount+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Certificates</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:26px;font-weight:700;color:var(--orange);">'+avgScore+'%</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Avg Score</div></div>';
+  h+='</div>';
+  // Tab sections
+  h+='<div style="border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;">';
+  h+='<div style="display:flex;border-bottom:1px solid var(--bdr);background:var(--sur2);">';
+  h+='<button class="empdet-tab active" onclick="switchMyProfileTab(this,\'mytab-trainings\')" style="flex:1;padding:12px;font-size:12px;font-weight:700;border:none;background:transparent;color:var(--amber);cursor:pointer;border-bottom:2px solid var(--amber);">Training History</button>';
+  h+='<button class="empdet-tab" onclick="switchMyProfileTab(this,\'mytab-messages\')" style="flex:1;padding:12px;font-size:12px;font-weight:700;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;">Messages</button>';
+  h+='</div>';
+  // Tab 1: Training History per topic
+  h+='<div id="mytab-trainings" style="padding:14px;max-height:500px;overflow-y:auto;">';
+  var trnKeys=Object.keys(trnGroups);
+  if(trnKeys.length){
+    trnKeys.forEach(function(trnName){
+      var g=trnGroups[trnName];
+      var passRate=g.results.length?Math.round(g.pass/g.results.length*100):0;
+      h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;margin-bottom:10px;">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:700;font-size:13px;">'+trnName+'</div><div style="display:flex;gap:6px;"><span class="badge badge-active">'+g.pass+' Pass</span><span class="badge badge-danger">'+g.fail+' Fail</span><span class="badge" style="background:rgba(62,160,232,.15);color:var(--blue);">Best: '+g.best+'%</span></div></div>';
+      h+='<div style="width:100%;height:5px;background:var(--bdr);border-radius:3px;margin-bottom:8px;"><div style="height:100%;width:'+passRate+'%;background:'+(passRate>=70?'var(--green)':'var(--red)')+';border-radius:3px;"></div></div>';
+      g.results.forEach(function(r){
+        h+='<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--bdr);">';
+        h+='<span>'+formatDate(r.date)+'</span><span>Score: <b style="color:'+(r.pass?'var(--green)':'var(--red)')+';">'+r.score+'%</b> '+(r.pass?'<span style="color:var(--green);">PASS</span>':'<span style="color:var(--red);">FAIL</span>')+'</span></div>';
+      });
+      h+='</div>';
+    });
+  }else{h+='<div style="text-align:center;color:var(--muted);padding:30px;font-size:13px;"><span class="mat-ico" style="font-size:36px;display:block;margin-bottom:8px;">school</span>No test history yet. Take a test to see results here.</div>';}
+  h+='</div>';
+  // Tab 2: Messages
+  h+='<div id="mytab-messages" style="padding:14px;max-height:500px;overflow-y:auto;display:none;">';
+  h+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:10px;">Messages from Admin ('+msgsToEmp.length+')</div>';
+  if(msgsToEmp.length){
+    msgsToEmp.slice(0,30).forEach(function(n){
+      var replyCount=(n.replies||[]).filter(function(r){return r.byId===empId||r.by===emp.name;}).length;
+      h+='<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;margin-bottom:8px;">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-size:12px;"><b>'+n.msg+'</b></div><div style="font-size:10px;color:var(--muted);white-space:nowrap;margin-left:8px;">'+n.time+'</div></div>';
+      if(n.fromEmpName)h+='<div style="font-size:10px;color:var(--muted);margin-top:2px;">From: '+(n.fromEmpName||'Admin')+'</div>';
+      if(replyCount)h+='<div style="font-size:10px;color:var(--green);margin-top:2px;"><span class="mat-ico" style="font-size:11px;">reply</span> You replied '+replyCount+' time(s)</div>';
+      // Show replies
+      if(n.replies&&n.replies.length){
+        h+='<div style="margin-top:8px;">';
+        n.replies.forEach(function(r){
+          var isEmpReply=(r.byId===empId||r.by===emp.name);
+          h+='<div style="padding:6px 8px;margin-bottom:3px;border-radius:6px;font-size:10px;'+(isEmpReply?'background:rgba(62,160,232,.1);border-left:3px solid var(--blue);':'background:var(--sur);border-left:3px solid var(--amber);')+'">';
+          h+='<b>'+(r.by||'')+'</b> <span style="color:var(--muted);">'+r.time+'</span><div style="margin-top:2px;">'+r.text+'</div></div>';
+        });
+        h+='</div>';
+      }
+      h+='</div>';
+    });
+  }else{h+='<div style="text-align:center;color:var(--muted);padding:16px;font-size:12px;">No messages from admin yet.</div>';}
+  // Messages sent by employee
+  h+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--blue);margin:14px 0 10px;">Messages You Sent ('+msgsFromEmp.length+')</div>';
+  if(msgsFromEmp.length){
+    msgsFromEmp.slice(0,20).forEach(function(n){
+      h+='<div style="background:rgba(62,160,232,.06);border:1px solid rgba(62,160,232,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:8px;">';
+      h+='<div style="font-size:12px;"><b>'+n.msg+'</b></div>';
+      h+='<div style="font-size:10px;color:var(--muted);margin-top:4px;">'+n.time+'</div>';
+      h+='</div>';
+    });
+  }else{h+='<div style="text-align:center;color:var(--muted);padding:16px;font-size:12px;">You have not sent any messages yet. <a href="#" onclick="gotoView(\'msgadmin\');return false;" style="color:var(--amber);">Send one now</a>.</div>';}
+  h+='</div>'; // end tab-messages
+  h+='</div>'; // end tab container
+  document.getElementById('view-myprofile').innerHTML=h;
+}
+function switchMyProfileTab(btn,tabId){
+  document.querySelectorAll('.empdet-tab').forEach(function(t){t.style.color='var(--muted)';t.style.borderBottom='2px solid transparent';});
+  btn.style.color='var(--amber)';btn.style.borderBottom='2px solid var(--amber)';
+  ['mytab-trainings','mytab-messages'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display=id===tabId?'block':'none';});
+}
+function uploadMyPhoto(){
+  if(!currentUser||!currentUser.id)return;
+  var input=document.createElement('input');
+  input.type='file';input.accept='image/*';
+  input.onchange=function(ev){
+    var file=ev.target.files[0];if(!file)return;
+    if(file.size>2*1024*1024){toast('Photo must be under 2MB','error');return;}
+    var reader=new FileReader();
+    reader.onload=function(e){
+      var dataUrl=e.target.result;
+      var emp=DB.employees.find(function(x){return x.id===currentUser.id;});
+      if(!emp){toast('Employee not found','error');return;}
+      emp.photo=dataUrl;
+      saveDB();
+      toast('Photo updated successfully!','success',3000);
+      renderMyProfile();
+      // Update sidebar avatar
+      var sa=document.getElementById('sidebarAvatar');
+      sa.style.background='none';sa.style.backgroundImage='url('+dataUrl+')';sa.style.backgroundSize='cover';sa.style.backgroundPosition='center';sa.textContent='';
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+/* ============================================================
+   EMPLOYEE: MESSAGE TO ADMIN
+============================================================ */
+function renderEmpMsgAdmin(){
+  if(isAdmin||!currentUser||!currentUser.id){document.getElementById('view-msgadmin').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Employee Only</h3><p>This page is for employees only.</p></div>';return;}
+  var empId=currentUser.id;
+  var empName=currentUser.name;
+  var sentMsgs=DB.notifications.filter(function(n){return n.fromEmp===empId;});
+  var h='<div class="section-header"><div class="section-title">Message to <span>Admin</span></div></div>';
+  // Compose box
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:18px;margin-bottom:18px;">';
+  h+='<div style="font-weight:700;font-size:14px;margin-bottom:10px;"><span class="mat-ico" style="color:var(--amber);vertical-align:middle;">edit_note</span> Compose Message</div>';
+  h+='<textarea class="form-control-sm" id="empMsgText" rows="4" placeholder="Type your message to the admin here..." style="width:100%;resize:vertical;margin-bottom:10px;"></textarea>';
+  h+='<button class="btn btn-amber" onclick="sendEmpMsgToAdmin()"><span class="mat-ico">send</span> Send Message</button>';
+  h+='</div>';
+  // Sent messages history
+  h+='<div style="font-size:13px;font-weight:700;margin-bottom:10px;">Sent Messages ('+sentMsgs.length+')</div>';
+  if(sentMsgs.length){
+    sentMsgs.slice(0,30).forEach(function(n){
+      h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:14px;margin-bottom:8px;">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;"><div style="font-size:12px;flex:1;"><b>'+n.msg+'</b></div><div style="font-size:10px;color:var(--muted);white-space:nowrap;margin-left:10px;">'+n.time+'</div></div>';
+      // Show admin replies
+      if(n.replies&&n.replies.length){
+        h+='<div style="margin-top:8px;border-top:1px solid var(--bdr);padding-top:8px;">';
+        n.replies.forEach(function(r){
+          var isAdminReply=(r.byId!==empId&&r.by!==empName);
+          h+='<div style="padding:6px 8px;margin-bottom:3px;border-radius:6px;font-size:11px;'+(isAdminReply?'background:rgba(255,176,32,.08);border-left:3px solid var(--amber);':'background:rgba(62,160,232,.08);border-left:3px solid var(--blue);')+'">';
+          h+='<b>'+(r.by||'')+'</b> <span style="color:var(--muted);">'+r.time+'</span><div style="margin-top:2px;">'+r.text+'</div></div>';
+        });
+        h+='</div>';
+      }
+      h+='</div>';
+    });
+  }else{h+='<div style="text-align:center;color:var(--muted);padding:24px;font-size:12px;"><span class="mat-ico" style="font-size:32px;display:block;margin-bottom:8px;">outbox</span>No messages sent yet.</div>';}
+  document.getElementById('view-msgadmin').innerHTML=h;
+}
+function sendEmpMsgToAdmin(){
+  var text=document.getElementById('empMsgText').value.trim();
+  if(!text){toast('Please type a message','error');return;}
+  DB.notifications.unshift({id:genId('N'),msg:text,read:false,time:'Just now',icon:'mail',forEmp:'admin',fromEmp:currentUser.id,fromEmpName:currentUser.name});
+  saveDB();
+  toast('Message sent to Admin successfully!','success',3000);
+  renderEmpMsgAdmin();
+  updateBadges();
+}
+
 function giveAdminAccess(empId){
   var emp=DB.employees.find(function(e){return e.id===empId;});
   if(!emp){toast('Employee not found','error');return;}
