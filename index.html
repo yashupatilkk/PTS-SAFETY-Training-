@@ -5376,6 +5376,7 @@ function confirmCAAssignV2(){
 ============================================================ */
 function renderCorrectiveActions(){
   if(!isAdmin){document.getElementById('view-correctiveactions').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var el=document.getElementById('view-correctiveactions');
   window._caList=[];var allCA=window._caList;
   DB.trainings.forEach(function(t){
     (t.retrainingRecords||[]).forEach(function(r){allCA.push(Object.assign({},r,{type:'retraining',trnName:t.name,trainer:t.trainer||'',manager:t.manager||''}));});
