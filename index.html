@@ -5390,176 +5390,296 @@ function confirmCAAssignV2(){
 }
 
 /* ============================================================
-   ROUND 2 TRAINING — Same as Training Management but for retraining
+   ROUND 2 TRAINING — Failed employees per training with R2 assign
 ============================================================ */
 function renderRetraining(){
   if(!isAdmin){document.getElementById('view-retraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
   var el=document.getElementById('view-retraining');
-  // === Collect all trainings that have ANY retraining activity ===
-  var empIdSet=DB.employees.map(function(e){return e.id;});
-  var retrainingTrnIds=new Set();
-  // Trainings with retrainingRecords or offlineRecords
-  DB.trainings.forEach(function(t){
-    var hasRec=false;
-    (t.retrainingRecords||[]).forEach(function(r){if(empIdSet.indexOf(r.empId)>=0)hasRec=true;});
-    (t.offlineRecords||[]).forEach(function(r){if(empIdSet.indexOf(r.empId)>=0)hasRec=true;});
-    if((t.retrained||[]).some(function(eid){return empIdSet.indexOf(eid)>=0;}))hasRec=true;
-    // Also include if any employee failed this training and hasn't passed
-    var trnResults=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
-    var empMap={};
-    trnResults.forEach(function(r){if(!empMap[r.empId])empMap[r.empId]=[];empMap[r.empId].push(r);});
-    Object.keys(empMap).forEach(function(eid){
-      var hasPass=empMap[eid].some(function(r){return r.pass;});
-      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});
-      if(!hasPass&&!hasCert)hasRec=true;
-    });
-    if(hasRec)retrainingTrnIds.add(t.id);
-  });
-  // Also check DB.correctiveActions for trainings not in DB.trainings
-  (DB.correctiveActions||[]).forEach(function(ca){
-    if(ca.trnId&&empIdSet.indexOf(ca.empId)>=0)retrainingTrnIds.add(ca.trnId);
-  });
-  var retrainingTrns=DB.trainings.filter(function(t){return retrainingTrnIds.has(t.id);});
-  // Search
+  // Filter state
   if(typeof window._r2search==='undefined')window._r2search='';
+  if(typeof window._r2filter==='undefined')window._r2filter='has_open';
+  if(typeof window._r2deptFilter==='undefined')window._r2deptFilter='All';
   var q=window._r2search.toLowerCase();
-  var filtered=retrainingTrns.filter(function(t){
-    return !q||t.name.toLowerCase().includes(q)||(t.cat&&t.cat.toLowerCase().includes(q));
-  });
-  // === Summary counts ===
-  var totalAssigned=0;var totalResolved=0;var totalOpen=0;
-  retrainingTrns.forEach(function(t){
+  var filterStatus=window._r2filter;
+  var deptFilter=window._r2deptFilter;
+  var empIdSet=DB.employees.map(function(e){return e.id;});
+  // Build per-training failed-employee data
+  var allTrnData=[];
+  DB.trainings.forEach(function(t){
+    var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
+    if(!enrolled.length)return;
     var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
-    Object.keys(eMap).forEach(function(eid){
-      var att=eMap[eid];
-      var firstFail=!att[0].pass;
-      if(!firstFail)return;
-      totalAssigned++;
+    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
+    var failedEmps=[];var passedCount=0;var pendingCount=0;
+    enrolled.forEach(function(eid){
+      var emp=DB.employees.find(function(e){return e.id===eid;});
+      if(!emp)return;
+      var att=eMap[eid]||[];
       var hasPass=att.some(function(r){return r.pass;});
       var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});
-      if(hasPass||hasCert)totalResolved++;else totalOpen++;
+      if(hasPass||hasCert){passedCount++;return;}
+      if(att.length===0){pendingCount++;return;}
+      var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
+      var firstScore=att[0].score;
+      var lastScore=att[att.length-1].score;
+      var lastPass=att[att.length-1].pass;
+      var isOffline=(t.offlineTrained||[]).includes(eid);
+      var isRetrained=(t.retrained||[]).includes(eid);
+      // Check if R2 training already assigned
+      var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      var r2TrnName=r2Record?r2Record.r2TrnName:'';
+      failedEmps.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,firstScore:firstScore,attempts:att.length,best:best,lastScore:lastScore,lastPass:lastPass,lastDate:att[att.length-1].date,isOffline:isOffline,isRetrained:isRetrained,resolved:isOffline,r2TrnName:r2TrnName});
     });
+    var status='all_passed';
+    if(failedEmps.length>0){
+      var openCount=failedEmps.filter(function(d){return !d.resolved;}).length;
+      status=openCount>0?'has_open':'all_resolved';
+    }
+    if(pendingCount>0&&failedEmps.length===0)status='has_pending';
+    allTrnData.push({t:t,enrolled:enrolled,failedEmps:failedEmps,passedCount:passedCount,pendingCount:pendingCount,status:status,catInfo:CATEGORIES[t.cat]||{color:'#f0883e',icon:'\U0001F501'}});
   });
-  // === BUILD HTML (same style as Training Management) ===
+  // Apply filters
+  var filtered=allTrnData.filter(function(d){
+    if(filterStatus==='has_open'&&d.status!=='has_open')return false;
+    if(filterStatus==='all_resolved'&&d.status!=='all_resolved')return false;
+    if(filterStatus==='all_with_failures'&&d.failedEmps.length===0)return false;
+    if(deptFilter!=='All'){
+      var hasDeptMatch=d.failedEmps.some(function(e){return e.dept===deptFilter;});
+      if(!hasDeptMatch)return false;
+    }
+    if(q){var t=d.t;return t.name.toLowerCase().includes(q)||(t.cat&&t.cat.toLowerCase().includes(q))||(t.trainer&&t.trainer.toLowerCase().includes(q));}
+    return true;
+  });
+  // Summary counts
+  var totalTrns=allTrnData.length;
+  var totalFailed=0;var totalOpen=0;var totalResolved=0;
+  allTrnData.forEach(function(d){
+    totalFailed+=d.failedEmps.length;
+    d.failedEmps.forEach(function(e){if(e.resolved)totalResolved++;else totalOpen++;});
+  });
+  // Department list for filter
+  var allDepts=[];allTrnData.forEach(function(d){d.failedEmps.forEach(function(e){if(allDepts.indexOf(e.dept)<0)allDepts.push(e.dept);});});
+  allDepts.sort();
+  // === BUILD HTML ===
   var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;">';
   h+='<button class="btn btn-outline" onclick="exportR2Report()"><span class="mat-ico">download</span> Export</button>';
   h+='</div></div>';
   // Summary stat cards
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;">';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+retrainingTrns.length+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Trainings</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:24px;font-weight:700;color:var(--red);">'+totalAssigned+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Failed (Assigned)</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);"><div style="font-size:24px;font-weight:700;color:var(--green);">'+totalResolved+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Passed on Retry</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid '+(totalOpen>0?'var(--red)':'var(--green)')+';"><div style="font-size:24px;font-weight:700;color:'+(totalOpen>0?'var(--red)':'var(--green)')+';">'+totalOpen+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(totalOpen>0?'Still Open':'All Resolved')+'</div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;">';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--purple);"><div style="font-size:24px;font-weight:700;color:var(--purple);">'+totalTrns+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Trainings</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:24px;font-weight:700;color:var(--red);">'+totalFailed+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Failed</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:24px;font-weight:700;color:var(--orange);">'+totalOpen+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Still Open</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);"><div style="font-size:24px;font-weight:700;color:var(--green);">'+totalResolved+'</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Resolved</div></div>';
   h+='</div>';
-  // Search bar
+  // Search + filters row
   h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">';
-  h+='<div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search retraining trainings..." oninput="window._r2search=this.value;renderRetraining()" value="'+window._r2search+'"></div>';
-  h+='<span style="font-size:12px;color:var(--muted);">'+filtered.length+' of '+retrainingTrns.length+' trainings with retraining</span></div>';
+  h+='<div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search trainings..." oninput="window._r2search=this.value;renderRetraining()" value="'+window._r2search.replace(/"/g,'&quot;')+'"></div>';
+  h+='<select class="form-control-sm" style="width:auto;min-width:170px;font-size:12px;" onchange="window._r2filter=this.value;renderRetraining()">';
+  h+='<option value="has_open"'+(filterStatus==='has_open'?' selected':'')+'>Open Failures</option>';
+  h+='<option value="all_with_failures"'+(filterStatus==='all_with_failures'?' selected':'')+'>All With Failures</option>';
+  h+='<option value="all_resolved"'+(filterStatus==='all_resolved'?' selected':'')+'>All Resolved</option>';
+  h+='<option value="all"'+(filterStatus==='all'?' selected':'')+'>All Trainings</option>';
+  h+='</select>';
+  if(allDepts.length>0){
+    h+='<select class="form-control-sm" style="width:auto;min-width:130px;font-size:12px;" onchange="window._r2deptFilter=this.value;renderRetraining()">';
+    h+='<option value="All"'+(deptFilter==='All'?' selected':'')+'>All Departments</option>';
+    allDepts.forEach(function(d){h+='<option value="'+d+'"'+(deptFilter===d?' selected':'')+'>'+d+'</option>';});
+    h+='</select>';
+  }
+  h+='<span style="font-size:12px;color:var(--muted);">'+filtered.length+' of '+totalTrns+'</span></div>';
   // Info banner
-  h+='<div style="background:rgba(240,136,62,.06);border:1px solid rgba(240,136,62,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:14px;font-size:11px;display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="color:var(--orange);font-size:18px;">info</span><div>When employees <b>fail</b> a test in Training Management, that training <b>automatically appears here</b> with their names, scores, video & message options. Same type of view as Training Management above.</div></div>';
-  // Training cards (same training-card class as Training Management)
+  h+='<div style="background:rgba(240,136,62,.06);border:1px solid rgba(240,136,62,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:14px;font-size:11px;display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="color:var(--orange);font-size:18px;">info</span><div>Only <b>failed employees</b> are shown (passed people are hidden). For each failed person you can <b>assign a new Round 2 training</b> (different training), send a message, or assign a video. Use filters to find which person failed which training.</div></div>';
+  // Training cards
   h+='<div class="training-cards">';
-  filtered.forEach(function(t){
-    var catInfo=CATEGORIES[t.cat]||{color:'#f0883e',icon:'\U0001F501'};
-    // Get per-employee data for this training
-    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
-    var eMap={};
-    trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
-    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
-    // Count: total who failed 1st, passed on retry, still open
-    var failedFirst=0;var passedRetry=0;var stillOpen=0;var offlineSent=0;
-    var empDetails=[];
-    Object.keys(eMap).forEach(function(eid){
-      var att=eMap[eid];
-      if(att[0].pass)return; // passed 1st time, not retraining
-      var emp=DB.employees.find(function(e){return e.id===eid;});
-      if(!emp)return;
-      var hasPass=att.some(function(r){return r.pass;});
-      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});
-      var isOffline=(t.offlineRecords||[]).some(function(r){return r.empId===eid;});
-      var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
-      failedFirst++;
-      if(isOffline)offlineSent++;
-      if(hasPass||hasCert){passedRetry++;}
-      else{stillOpen++;}
-      empDetails.push({empId:eid,empName:emp.name,dept:emp.dept,firstScore:att[0].score,attempts:att.length,best:best,hasPass:hasPass,hasCert:hasCert,isOffline:isOffline,lastDate:att[att.length-1].date,lastScore:att[att.length-1].score,lastPass:att[att.length-1].pass});
-    });
-    var pct=failedFirst?Math.round(passedRetry/failedFirst*100):0;
-    // Card thumbnail
+  filtered.forEach(function(d){
+    var t=d.t;var catInfo=d.catInfo;
+    var enrolledCount=d.enrolled.length;
+    var pct=enrolledCount?Math.round((d.passedCount+d.failedEmps.filter(function(e){return e.resolved;}).length)/enrolledCount*100):0;
+    var openCount=d.failedEmps.filter(function(e){return !e.resolved;}).length;
+    // Card
     h+='<div class="training-card" style="cursor:default;">';
     h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)">';
     h+='<div class="overlay-grad"></div>';
-    h+='<span class="category-chip" style="background:rgba(240,136,62,.9);">'+t.cat+'</span>';
+    h+='<span class="category-chip" style="background:'+(openCount>0?'rgba(232,72,58,.9)':catInfo.color)+';">'+t.cat+'</span>';
     if(t.youtubeLink){h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> Video</span>';}
     h+='<span style="font-size:48px;">'+catInfo.icon+'</span>';
-    h+='<div style="position:absolute;bottom:8px;left:8px;"><span class="badge" style="background:rgba(240,136,62,.9);color:#fff;"><span class="mat-ico" style="font-size:10px;">replay</span> Round 2</span></div>';
+    if(d.failedEmps.length>0){h+='<div style="position:absolute;bottom:8px;left:8px;"><span class="badge badge-danger"><span class="mat-ico" style="font-size:10px;">warning</span> '+d.failedEmps.length+' Failed</span></div>';}
+    else if(d.status==='all_passed'){h+='<div style="position:absolute;bottom:8px;left:8px;"><span class="badge badge-active"><span class="mat-ico" style="font-size:10px;">check_circle</span> All Passed</span></div>';}
+    else if(d.pendingCount>0){h+='<div style="position:absolute;bottom:8px;left:8px;"><span class="badge badge-warning"><span class="mat-ico" style="font-size:10px;">schedule</span> '+d.pendingCount+' Pending</span></div>';}
     h+='</div>';
-    // Card body
+    // Body
     h+='<div class="training-body">';
     h+='<div class="training-title">'+t.name+'</div>';
     h+='<div class="training-meta">';
-    h+='<span><span class="mat-ico" style="font-size:12px;">person</span>'+(t.trainer||'—')+'</span>';
-    h+='<span><span class="mat-ico" style="font-size:12px;">timer</span>'+(t.duration&&t.duration!=='--'?t.duration:'Not set')+'</span>';
+    h+='<span><span class="mat-ico" style="font-size:12px;">person</span>'+(t.trainer||'\u2014')+'</span>';
+    h+='<span><span class="mat-ico" style="font-size:12px;">calendar_month</span>'+formatDate(t.date)+'</span>';
     h+='<span><span class="mat-ico" style="font-size:12px;">percent</span>Pass: '+(t.passing||70)+'%</span>';
     h+='</div>';
     // Progress bar
     h+='<div class="training-progress"><div class="fill" style="width:'+pct+'%;background:var(--green);"></div></div>';
     h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
-    h+='<span style="font-size:10.5px;color:var(--muted);">'+passedRetry+'/'+failedFirst+' passed on retry ('+pct+'%)</span>';
-    h+='<div style="display:flex;gap:4px;">';
-    if(stillOpen>0){h+='<span class="badge badge-danger">'+stillOpen+' Open</span>';}
-    if(offlineSent>0){h+='<span class="badge badge-info">'+offlineSent+' Offline</span>';}
-    if(stillOpen===0&&failedFirst>0){h+='<span class="badge badge-active">All Resolved</span>';}
-    h+='</div></div>';
-    // Per-employee score table
-    if(empDetails.length){
-      h+='<div class="table-wrap" style="margin-bottom:8px;"><table style="font-size:10px;"><thead><tr><th>Employee</th><th>1st Score</th><th>Attempts</th><th>Best</th><th>Last</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-      empDetails.forEach(function(d){
-        var stClr=d.hasPass||d.hasCert?'var(--green)':d.isOffline?'var(--blue)':'var(--red)';
-        var stTxt=d.hasPass||d.hasCert?'Passed':d.isOffline?'Offline':'Open';
-        h+='<tr><td><b>'+d.empName+'</b><br/><span style="color:var(--muted);font-size:9px;">'+d.empId+' · '+d.dept+'</span></td>';
-        h+='<td style="color:var(--red);font-weight:700;">'+d.firstScore+'%</td>';
-        h+='<td>'+d.attempts+'</td>';
-        h+='<td style="color:var(--blue);font-weight:700;">'+d.best+'%</td>';
-        h+='<td><span style="color:'+(d.lastPass?'var(--green)':'var(--red)')+';font-weight:700;">'+d.lastScore+'%</span><br/><span style="color:var(--muted);font-size:9px;">'+formatDate(d.lastDate)+'</span></td>';
-        h+='<td><span class="badge" style="background:'+stClr+'20;color:'+stClr+';font-size:9px;">'+stTxt+'</span></td>';
-        h+='<td><div style="display:flex;gap:3px;">';
-        if(!d.hasPass&&!d.hasCert){
-          h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;padding:3px 6px;font-size:9px;" onclick="openQuickMsgToEmp(\''+d.empId+'\')" title="Send message"><span class="mat-ico" style="font-size:10px;">mail</span></button>';
-        }
-        h+='<button class="btn btn-sm btn-outline" style="padding:3px 6px;font-size:9px;" onclick="openEmpCardDetail(\''+d.empId+'\')" title="Profile"><span class="mat-ico" style="font-size:10px;">badge</span></button>';
+    h+='<span style="font-size:10.5px;color:var(--muted);">'+d.passedCount+'/'+enrolledCount+' passed'+(d.failedEmps.length>0?' \u00b7 <b style="color:var(--red);">'+d.failedEmps.length+' failed</b>':'')+(d.pendingCount>0?' \u00b7 '+d.pendingCount+' pending':'')+'</span>';
+    if(openCount>0){h+='<span class="badge badge-danger">'+openCount+' Open</span>';}
+    h+='</div>';
+    // === FAILED EMPLOYEES TABLE ===
+    if(d.failedEmps.length>0){
+      h+='<div style="background:rgba(232,72,58,.04);border:1px solid rgba(232,72,58,.15);border-radius:var(--r-sm);padding:8px;margin-bottom:8px;">';
+      h+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--red);margin-bottom:6px;display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">person_off</span> Failed Employees ('+d.failedEmps.length+')</div>';
+      h+='<div class="table-wrap"><table style="font-size:10.5px;"><thead><tr><th>Employee</th><th>Dept</th><th>1st Score</th><th>Attempts</th><th>Best</th><th>Last</th><th>R2 Assigned</th><th>Actions</th></tr></thead><tbody>';
+      d.failedEmps.forEach(function(fd,i){
+        var stClr=fd.resolved?'var(--blue)':'var(--red)';
+        var stTxt=fd.isOffline?'\uD83D\uDCE7 Offline':'Open';
+        var r2Label=fd.r2TrnName?'<span style="color:var(--green);font-weight:600;"><span class="mat-ico" style="font-size:10px;">check_circle</span> '+fd.r2TrnName+'</span>':'<span style="color:var(--muted);">Not yet</span>';
+        h+='<tr>';
+        h+='<td><div style="display:flex;align-items:center;gap:5px;"><div style="width:24px;height:24px;border-radius:50%;background:'+avatarColor(fd.empName)+';display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700;">'+avatarInitials(fd.empName)+'</div><div><b>'+fd.empName+'</b><br/><span style="color:var(--muted);font-size:9px;">'+fd.empId+'</span></div></div></td>';
+        h+='<td><span class="badge badge-info" style="font-size:9px;">'+fd.dept+'</span></td>';
+        h+='<td style="color:var(--red);font-weight:700;">'+fd.firstScore+'%</td>';
+        h+='<td style="font-weight:600;">'+fd.attempts+'</td>';
+        h+='<td style="color:var(--blue);font-weight:700;">'+fd.best+'%</td>';
+        h+='<td><span style="color:'+(fd.lastPass?'var(--green)':'var(--red')+';font-weight:700;">'+fd.lastScore+'%</span></td>';
+        h+='<td style="font-size:9px;">'+r2Label+'</td>';
+        h+='<td><div style="display:flex;gap:3px;flex-wrap:wrap;">';
+        // Assign R2 Training button
+        h+='<button class="btn btn-sm" style="background:var(--amber);color:#000;padding:3px 6px;font-size:9px;" onclick="openAssignR2Modal(\''+t.id+'\',\''+fd.empId+'\',\''+fd.empName.replace(/'/g,"\\\'")+'\')" title="Assign Round 2 Training"><span class="mat-ico" style="font-size:10px;">school</span> R2</button>';
+        // Quick message button
+        h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;padding:3px 6px;font-size:9px;" onclick="openR2QuickMsg(\''+t.id+'\',\''+fd.empId+'\',\''+fd.empName.replace(/'/g,"\\\'")+'\')" title="Send Message"><span class="mat-ico" style="font-size:10px;">mail</span></button>';
+        // Chat history
+        h+='<button class="btn btn-sm btn-outline" style="padding:3px 6px;font-size:9px;" onclick="openQuickMsgToEmp(\''+fd.empId+'\')" title="Chat History"><span class="mat-ico" style="font-size:10px;">forum</span></button>';
+        // Profile
+        h+='<button class="btn btn-sm btn-outline" style="padding:3px 6px;font-size:9px;" onclick="openEmpCardDetail(\''+fd.empId+'\')" title="Profile"><span class="mat-ico" style="font-size:10px;">badge</span></button>';
         h+='</div></td></tr>';
       });
-      h+='</tbody></table></div>';
+      h+='</tbody></table></div></div>';
+    }else if(d.status==='all_passed'){
+      h+='<div style="background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);padding:10px;text-align:center;margin-bottom:8px;font-size:12px;color:var(--green);display:flex;align-items:center;justify-content:center;gap:6px;"><span class="mat-ico" style="font-size:18px;">check_circle</span> All enrolled employees passed this training!</div>';
+    }else if(d.pendingCount>0&&d.failedEmps.length===0){
+      h+='<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px;text-align:center;margin-bottom:8px;font-size:12px;color:var(--amber);display:flex;align-items:center;justify-content:center;gap:6px;"><span class="mat-ico" style="font-size:18px;">schedule</span> '+d.pendingCount+' employee(s) have not taken the test yet</div>';
     }
-    // Video + Message row
-    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">';
-    h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:8px;">';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">smart_display</span> Training Video</div>';
-    h+='<div style="display:flex;gap:3px;">';
-    h+='<input class="form-control-sm" id="r2yt_'+t.id+'" placeholder="YouTube link..." value="'+(t.youtubeLink||'')+'" style="flex:1;font-size:10px;">';
-    h+='<button class="btn btn-sm" style="background:var(--red);color:#fff;padding:4px 8px;font-size:10px;" onclick="saveR2Video(\''+t.id+'\')" title="Save & notify all"><span class="mat-ico" style="font-size:10px;">play_arrow</span></button>';
-    h+='</div>';
-    if(t.youtubeLink){h+='<a href="'+t.youtubeLink+'" target="_blank" style="font-size:9px;color:var(--red);margin-top:3px;display:inline-block;"><span class="mat-ico" style="font-size:10px;">open_in_new</span>Open video</a>';}
-    h+='</div>';
-    h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:8px;">';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--blue);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">mail</span> Message All Failed</div>';
-    h+='<textarea class="form-control-sm" id="r2msg_'+t.id+'" rows="1" placeholder="Type message for all failed employees..." style="font-size:10px;width:100%;margin-bottom:3px;"></textarea>';
-    h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;font-size:10px;" onclick="sendR2BulkMessage(\''+t.id+'\',\''+t.name.replace(/'/g,"\\\'")+'\')"><span class="mat-ico" style="font-size:10px;">send</span> Send to All</button>';
-    h+='</div></div>';
+    // Video + Bulk Message row (only show if there are failed employees)
+    if(d.failedEmps.length>0){
+      h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">';
+      h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:8px;">';
+      h+='<div style="font-size:10px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">smart_display</span> Assign / Update Video</div>';
+      h+='<div style="display:flex;gap:3px;">';
+      h+='<input class="form-control-sm" id="r2yt_'+t.id+'" placeholder="YouTube link..." value="'+(t.youtubeLink||'')+'" style="flex:1;font-size:10px;">';
+      h+='<button class="btn btn-sm" style="background:var(--red);color:#fff;padding:4px 8px;font-size:10px;" onclick="saveR2Video(\''+t.id+'\')" title="Save & notify all failed"><span class="mat-ico" style="font-size:10px;">play_arrow</span></button>';
+      h+='</div>';
+      if(t.youtubeLink){h+='<a href="'+t.youtubeLink+'" target="_blank" style="font-size:9px;color:var(--red);margin-top:3px;display:inline-block;"><span class="mat-ico" style="font-size:10px;">open_in_new</span> Open video</a>';}
+      h+='</div>';
+      h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:8px;">';
+      h+='<div style="font-size:10px;font-weight:700;color:var(--blue);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">mail</span> Message All Failed ('+d.failedEmps.length+')</div>';
+      h+='<textarea class="form-control-sm" id="r2msg_'+t.id+'" rows="1" placeholder="Type message for all failed employees..." style="font-size:10px;width:100%;margin-bottom:3px;"></textarea>';
+      h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;font-size:10px;" onclick="sendR2BulkMessage(\''+t.id+'\')"><span class="mat-ico" style="font-size:10px;">send</span> Send to All</button>';
+      h+='</div></div>';
+    }
     // Action buttons
     h+='<div style="display:flex;gap:5px;flex-wrap:wrap;">';
     h+='<button class="btn btn-sm btn-amber" onclick="openTrainingDetail(\''+t.id+'\')"><span class="mat-ico" style="font-size:11px;">visibility</span> View Training</button>';
-    h+='<button class="btn btn-sm btn-outline" onclick="assignEmployees(\''+t.id+'\')"><span class="mat-ico" style="font-size:11px;">person_add</span> Assign</button>';
     h+='</div>';
-    h+='</div></div>'; // end training-body, training-card
+    h+='</div></div>';
   });
   if(!filtered.length){
-    h+='<div class="empty-state" style="grid-column:1/-1;"><span class="mat-ico" style="font-size:48px;">check_circle</span><h3>No Retraining Needed</h3><p>When employees fail a test in Training Management, those trainings will automatically appear here with full details.</p></div>';
+    h+='<div class="empty-state" style="grid-column:1/-1;"><span class="mat-ico" style="font-size:48px;">check_circle</span><h3>'+(filterStatus==='has_open'?'No Open Failures':'No Trainings Found')+'</h3><p>'+(filterStatus==='has_open'?'Great! All employees have passed or been resolved.':'No trainings match your filter.')+'</p></div>';
   }
   h+='</div>';
   el.innerHTML=h;
+}
+
+// Assign a NEW Round 2 training to a specific failed employee
+function openAssignR2Modal(failedTrnId,empId,empName){
+  var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
+  if(!failedTrn)return;
+  var otherTrainings=DB.trainings.filter(function(t){return t.id!==failedTrnId;});
+  var opts='';
+  otherTrainings.forEach(function(t){
+    var alreadyEnrolled=(t.enrolled||[]).includes(empId);
+    var statusChip=alreadyEnrolled?'<span style="color:var(--green);font-size:9px;margin-left:4px;">\u2705 Already Enrolled</span>':'';
+    opts+='<option value="'+t.id+'">'+t.name+statusChip+'</option>';
+  });
+  openModal('<div class="modal-accent" style="background:linear-gradient(135deg,var(--amber),var(--orange));"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">school</span></div><h2>Assign Round 2 Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">'+
+    '<div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">person_off</span> Failed Employee</div>'+
+    '<div style="display:flex;align-items:center;gap:8px;">'+
+    '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
+    '<div><b style="font-size:14px;">'+empName+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:var(--red);">Failed: '+failedTrn.name+'</span></div>'+
+    '</div></div>'+
+    '<div style="margin-bottom:12px;">'+
+    '<label class="form-label-sm" style="margin-bottom:6px;display:block;">Select Round 2 Training to Assign <span style="color:var(--red);">*</span></label>'+
+    '<select class="form-control-sm" id="r2AssignSelect" style="width:100%;font-size:12px;">'+opts+'</select>'+
+    '</div>'+
+    '<div style="margin-bottom:12px;">'+
+    '<label class="form-label-sm" style="margin-bottom:6px;display:block;">Message to Employee (optional)</label>'+
+    '<textarea class="form-control-sm" id="r2AssignMsg" rows="2" placeholder="e.g. Please complete this Round 2 training before the deadline..." style="font-size:12px;"></textarea>'+
+    '</div>'+
+    '<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px;font-size:11px;color:var(--amber);display:flex;align-items:flex-start;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span><div>This will <b>enroll</b> '+empName+' in the selected training and send them a notification. If the training has a video, they must watch 90% before taking the test.</div></div>'+
+    '</div>'+
+    '<div class="modal-foot">'+
+    '<button class="btn btn-amber" onclick="confirmAssignR2(\''+failedTrnId+'\',\''+empId+'\',\''+empName.replace(/'/g,"\\\'")+'\')"><span class="mat-ico">school</span> Assign Round 2 Training</button>'+
+    '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+    '</div>','580px');
+}
+function confirmAssignR2(failedTrnId,empId,empName){
+  var r2TrnId=document.getElementById('r2AssignSelect').value;
+  var msgText=(document.getElementById('r2AssignMsg').value||'').trim();
+  var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
+  var r2Trn=DB.trainings.find(function(t){return t.id===r2TrnId;});
+  if(!failedTrn||!r2Trn){toast('Training not found','error');return;}
+  // Enroll employee in R2 training if not already
+  if(!r2Trn.enrolled)r2Trn.enrolled=[];
+  if(!r2Trn.enrolled.includes(empId)){r2Trn.enrolled.push(empId);}
+  // Log retraining record on the FAILED training
+  if(!failedTrn.retrainingRecords)failedTrn.retrainingRecords=[];
+  failedTrn.retrainingRecords.push({
+    empId:empId,empName:empName,training:failedTrn.name,trnId:failedTrnId,
+    date:new Date().toISOString().split('T')[0],timestamp:Date.now(),
+    r2TrnId:r2TrnId,r2TrnName:r2Trn.name,
+    action:'Round 2 Training Assigned',
+    reason:'Failed \"'+failedTrn.name+'\". Assigned \"'+r2Trn.name+'\" as Round 2 retraining.',
+    doneBy:currentUser.name||'Admin'
+  });
+  // Send notification
+  var notifyMsg='[Round 2 Retraining] You failed \"'+failedTrn.name+'\". New training assigned: \"'+r2Trn.name+'\". Please complete it.';
+  if(msgText)notifyMsg+=' '+msgText;
+  DB.notifications.unshift({id:genId('N'),msg:notifyMsg,read:false,time:'Just now',icon:'replay',forEmp:empId});
+  // Admin notification
+  DB.notifications.unshift({id:genId('N'),msg:'Round 2 training assigned: '+empName+' ('+empId+') \u2192 \"'+r2Trn.name+'\" (failed: '+failedTrn.name+')',read:false,time:'Just now',icon:'school'});
+  closeModal();saveDB();updateBadges();
+  toast('Round 2 training \"'+r2Trn.name+'\" assigned to '+empName+'!','success');
+  renderRetraining();
+}
+
+// Quick message to a single failed employee
+function openR2QuickMsg(trnId,empId,empName){
+  var trn=DB.trainings.find(function(t){return t.id===trnId;});
+  if(!trn)return;
+  openModal('<div class="modal-accent" style="background:linear-gradient(135deg,var(--blue),#6c5ce7);"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(52,152,219,.15)"><span class="mat-ico" style="color:var(--blue);font-size:22px;">mail</span></div><h2>Message Employee</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">'+
+    '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
+    '<div><b style="font-size:14px;">'+empName+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:var(--red);">Failed: '+trn.name+'</span></div>'+
+    '</div>'+
+    '<div style="margin-bottom:12px;">'+
+    '<label class="form-label-sm" style="margin-bottom:6px;display:block;">Message <span style="color:var(--red);">*</span></label>'+
+    '<textarea class="form-control-sm" id="r2QuickMsgText" rows="3" placeholder="Type your message to this employee about their failed training..." style="font-size:13px;"></textarea>'+
+    '</div>'+
+    '</div>'+
+    '<div class="modal-foot">'+
+    '<button class="btn" style="background:var(--blue);color:#fff;" onclick="sendR2QuickMsg(\''+trnId+'\',\''+empId+'\',\''+empName.replace(/'/g,"\\\'")+'\')"><span class="mat-ico">send</span> Send Message</button>'+
+    '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>'+
+    '</div>','480px');
+}
+function sendR2QuickMsg(trnId,empId,empName){
+  var msgText=(document.getElementById('r2QuickMsgText').value||'').trim();
+  if(!msgText){toast('Please type a message','error');return;}
+  var trn=DB.trainings.find(function(t){return t.id===trnId;});
+  if(!trn)return;
+  DB.notifications.unshift({id:genId('N'),msg:'[Round 2 \u2014 '+trn.name+'] '+msgText,read:false,time:'Just now',icon:'mail',forEmp:empId});
+  closeModal();saveDB();renderNotifPanel();
+  toast('Message sent to '+empName+'!','success');
 }
 
 // Save video link for a training in Round 2 page
@@ -5570,7 +5690,6 @@ function saveR2Video(trnId){
   if(!extractYoutubeId(ytUrl)){toast('Invalid YouTube URL','error');return;}
   var trn=DB.trainings.find(function(t){return t.id===trnId;});
   if(trn){trn.youtubeLink=ytUrl;}
-  // Notify all employees who failed this training and haven't passed
   var empIdSet=DB.employees.map(function(e){return e.id;});
   var trnRes=DB.testResults.filter(function(r){return r.training===trn.name&&empIdSet.indexOf(r.empId)>=0;});
   var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
@@ -5580,7 +5699,7 @@ function saveR2Video(trnId){
     if(hasPass)return;
     var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===trn.name;});
     if(hasCert)return;
-    DB.notifications.unshift({id:genId('N'),msg:'Round 2 Training video assigned: '+trn.name+' — Watch and retake. '+ytUrl,read:false,time:'Just now',icon:'smart_display',forEmp:eid});
+    DB.notifications.unshift({id:genId('N'),msg:'Round 2 Training video assigned: '+trn.name+' \u2014 Watch and retake. '+ytUrl,read:false,time:'Just now',icon:'smart_display',forEmp:eid});
     notified++;
   });
   saveDB();updateBadges();
@@ -5589,8 +5708,11 @@ function saveR2Video(trnId){
 }
 
 // Send bulk message to all failed employees of a training
-function sendR2BulkMessage(trnId,trnName){
+function sendR2BulkMessage(trnId){
   var msgInput=document.getElementById('r2msg_'+trnId);
+  var trn=DB.trainings.find(function(t){return t.id===trnId;});
+  if(!trn){toast('Training not found','error');return;}
+  var trnName=trn.name;
   var msg=msgInput?msgInput.value.trim():'';
   if(!msg){toast('Please type a message','error');return;}
   var empIdSet=DB.employees.map(function(e){return e.id;});
@@ -5602,13 +5724,14 @@ function sendR2BulkMessage(trnId,trnName){
     if(hasPass)return;
     var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===trnName;});
     if(hasCert)return;
-    DB.notifications.unshift({id:genId('N'),msg:'[Round 2 — '+trnName+'] '+msg,read:false,time:'Just now',icon:'mail',forEmp:eid});
+    DB.notifications.unshift({id:genId('N'),msg:'[Round 2 \u2014 '+trnName+'] '+msg,read:false,time:'Just now',icon:'mail',forEmp:eid});
     sent++;
   });
   if(msgInput)msgInput.value='';
   saveDB();renderNotifPanel();
   toast('Message sent to '+sent+' employee(s)!','success');
 }
+
 
 // Export Round 2 report
 function exportR2Report(){
@@ -5624,12 +5747,16 @@ function exportR2Report(){
       if(!emp)return;
       var hasPass=att.some(function(r){return r.pass;});
       var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
-      rows.push({Training:t.name,Category:t.cat,Employee:emp.name,'Employee ID':eid,Department:emp.dept,'1st Score':att[0].score+'%',Attempts:att.length,'Best Score':best+'%',Status:hasPass?'Passed on Retry':'Still Open',Trainer:t.trainer,Duration:t.duration,'Video Link':t.youtubeLink||''});
+      var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      var r2Name=r2Record?r2Record.r2TrnName:'';
+      var isOfflineTrn=(t.offlineTrained||[]).includes(eid);
+      var statusTxt=hasPass?'Passed on Retry':isOfflineTrn?'Offline Trained':r2Name?'R2 Assigned: '+r2Name:'Still Open';
+      rows.push({Training:t.name,Category:t.cat,Employee:emp.name,'Employee ID':eid,Department:emp.dept,'1st Score':att[0].score+'%',Attempts:att.length,'Best Score':best+'%',Status:statusTxt,'R2 Training':r2Name,Trainer:t.trainer,Duration:t.duration,'Video Link':t.youtubeLink||''});
     });
   });
   if(!rows.length){toast('No retraining data to export','info');return;}
   var ws=XLSX.utils.json_to_sheet(rows);
-  ws['!cols']=[{wch:30},{wch:15},{wch:20},{wch:12},{wch:15},{wch:10},{wch:10},{wch:10},{wch:15},{wch:20},{wch:15},{wch:40}];
+  ws['!cols']=[{wch:30},{wch:15},{wch:20},{wch:12},{wch:15},{wch:10},{wch:10},{wch:10},{wch:25},{wch:25},{wch:20},{wch:15},{wch:40}];
   var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Round 2 Training');
   XLSX.writeFile(wb,'round2_training_report.xlsx');toast('Exported!','success');
 }
