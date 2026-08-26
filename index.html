@@ -3288,7 +3288,6 @@ function renderTrainings(){
           </div>
           <div class="training-body">
             <div class="training-title">${t.name}</div>
-            ${isR2?`<div style="background:linear-gradient(135deg,rgba(255,176,32,.1),rgba(240,136,62,.08));border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;font-size:11px;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="color:var(--amber);font-weight:700;">🔄 Round 2 Retraining</span></div><div style="color:var(--txt2);"><b>Failed Training:</b> <span style="color:var(--red);">${r2Info.origName}</span></div>${r2Info.reason?'<div style="color:var(--txt2);margin-top:2px;"><b>Reason:</b> '+r2Info.reason+'</div>':''}${r2Info.r2Deadline?'<div style="color:'+(new Date(r2Info.r2Deadline)<new Date()?'var(--red)':'var(--amber)')+';margin-top:2px;"><b>Deadline:</b> '+formatDate(r2Info.r2Deadline)+(new Date(r2Info.r2Deadline)<new Date()?' <span style="color:var(--red);font-weight:700;">⚠️ Overdue!</span>':'')+'</div>':''}</div>`:''}
             <div class="training-meta">
               <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
