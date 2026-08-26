@@ -5544,7 +5544,7 @@ function renderRetraining(){
         statusHtml='<div style="font-weight:600;color:var(--green);font-size:10px;">'+escAttr(r.r2TrnName)+'</div>'+
         '<div style="display:inline-flex;align-items:center;gap:3px;margin-top:2px;padding:2px 6px;border-radius:4px;background:rgba(231,76,60,.1);color:var(--red);font-size:9px;font-weight:600;"><span class="mat-ico" style="font-size:10px;">error</span> Also failed R2 ('+r.r2BestScore+'%)</div>';
       }else{
-        var vidTag=r.r2Video?' <a href="'+r.r2Video+'" target="_blank" style="color:var(--red);text-decoration:none;font-size:9px;">\u{1F3AC} Video</a>':'';
+        var vidTag=r.r2Video?' <a href="'+r.r2Video+'" target="_blank" style="color:var(--red);text-decoration:none;font-size:9px;">\uD83C\uDFAC Video</a>':'';
         statusHtml='<div style="font-weight:600;color:var(--green);font-size:10px;">'+escAttr(r.r2TrnName)+vidTag+'</div>'+
         '<div style="display:inline-flex;align-items:center;gap:3px;margin-top:2px;padding:2px 6px;border-radius:4px;background:rgba(62,207,142,.1);color:var(--green);font-size:9px;font-weight:600;"><span class="mat-ico" style="font-size:10px;">schedule</span> In progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':'')+'</div>';
       }
@@ -5701,8 +5701,6 @@ function onR2TrnSelectChange(){
       (ytId?'<a href="'+vid+'" target="_blank" style="color:var(--red);text-decoration:none;"><span class="mat-ico" style="font-size:12px;">smart_display</span> Watch Video</a>':'<span style="color:var(--muted);">No video</span>')+
       '</div>';
   }
-}
-
   // Fill trainer field
   var trainerInput=document.getElementById('r2AssignTrainer');
   if(trainerInput)trainerInput.value=trainer;
@@ -5720,6 +5718,8 @@ function onR2TrnSelectChange(){
       '<span style="font-size:10px;color:var(--muted);">(10 questions randomly picked for test)</span>'+
       '</div>';
   }
+}
+
 function previewR2Video(val){
   var ytId=extractYoutubeId(val);
   var wrap=document.getElementById('r2VideoPreview');
