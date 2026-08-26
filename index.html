@@ -5497,82 +5497,131 @@ function renderRetraining(){
   h+='<button class="btn btn-outline" onclick="exportR2Report()"><span class="mat-ico">download</span> Export</button>';
   h+='</div></div>';
 
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px;">';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:26px;font-weight:700;color:var(--red);">'+total1st+'</div><div style="font-size:10px;color:var(--muted);">1st Test Failed</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:26px;font-weight:700;color:var(--amber);">'+totalAssigned+'</div><div style="font-size:10px;color:var(--muted);">R2 Assigned</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:26px;font-weight:700;color:var(--orange);">'+totalOpen+'</div><div style="font-size:10px;color:var(--muted);">Need R2</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #8e44ad;"><div style="font-size:26px;font-weight:700;color:#8e44ad;">'+total2nd+'</div><div style="font-size:10px;color:var(--muted);">2nd Test Failed</div></div>';
+  // ── Stat Cards ──
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:28px;font-weight:800;color:var(--red);">'+total1st+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">1st Test Failed</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:28px;font-weight:800;color:var(--amber);">'+totalAssigned+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Assigned</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalOpen+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Need R2</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+total2nd+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Round 3 Needed</div></div>';
   h+='</div>';
 
+  // ── Filters ──
   h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">';
   h+='<div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee or training..." oninput="window._r2search=this.value;renderRetraining()" value="'+window._r2search.replace(/"/g,'&quot;')+'"></div>';
   if(allDepts.length>0){h+='<select class="form-control-sm" style="width:auto;min-width:120px;font-size:12px;" onchange="window._r2deptFilter=this.value;renderRetraining()"><option value="All"'+(deptFilter==='All'?' selected':'')+'>All Depts</option>';allDepts.forEach(function(dp){h+='<option value="'+dp+'"'+(deptFilter===dp?' selected':'')+'>'+dp+'</option>';});h+='</select>';}
   h+='</div>';
 
-  // SECTION 1
-  h+='<div style="background:linear-gradient(135deg,rgba(232,72,58,.08),rgba(232,72,58,.03));border:1px solid rgba(232,72,58,.2);border-radius:var(--r);padding:14px 16px;margin-bottom:16px;">';
-  h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">';
-  h+='<div style="width:40px;height:40px;border-radius:10px;background:rgba(232,72,58,.12);display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="font-size:22px;color:var(--red);">person_off</span></div>';
-  h+='<div><div style="font-size:15px;font-weight:700;color:var(--red);">1st Test Failed \u2014 Assign Round 2</div><div style="font-size:11px;color:var(--muted);">Employees who failed. Assign new training with video.</div></div>';
-  h+='<div style="margin-left:auto;"><span class="badge badge-danger">'+filtered1.length+' employees</span></div>';
+  // ══════════════════════════════════════════════════════
+  // SECTION 1: ROUND 2 — 1st Test Failed, Assign R2
+  // ══════════════════════════════════════════════════════
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:16px;">';
+  // Section header
+  h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid rgba(232,72,58,.15);">';
+  h+='<div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,rgba(232,72,58,.15),rgba(232,72,58,.05));display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="font-size:24px;color:var(--red);">replay</span></div>';
+  h+='<div><div style="font-size:16px;font-weight:800;color:var(--red);">Round 2</div><div style="font-size:11px;color:var(--muted);">Employees who failed 1st test. Assign new training with video & reason.</div></div>';
+  h+='<div style="margin-left:auto;"><span class="badge badge-danger" style="font-size:11px;">'+filtered1.length+' employees</span></div>';
   h+='</div>';
 
   if(filtered1.length===0){
-    h+='<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;"><span class="mat-ico" style="font-size:36px;display:block;margin-bottom:8px;">check_circle</span>'+(q||deptFilter!=='All'?'No matching failures.':'No 1st test failures!')+'</div>';
+    h+='<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px;"><span class="mat-ico" style="font-size:40px;display:block;margin-bottom:10px;">check_circle</span>'+(q||deptFilter!=='All'?'No matching failures.':'All trainings passed! No retraining needed.')+'</div>';
   }else{
-    h+='<div class="table-wrap"><table style="font-size:11px;"><thead><tr><th>Employee</th><th>Failed Training</th><th>Score</th><th>R2 Training</th><th>R2 Video</th><th>Why</th><th>Deadline</th><th>Actions</th></tr></thead><tbody>';
+    // Simplified table: Employee | Failed Training | Score | R2 Status | Why | Deadline | Actions
+    h+='<div class="table-wrap"><table style="font-size:11px;"><thead><tr>'+
+    '<th>Employee</th>'+
+    '<th>Failed Training</th>'+
+    '<th style="text-align:center;">Score</th>'+
+    '<th>R2 Status</th>'+
+    '<th>Why</th>'+
+    '<th>Deadline</th>'+
+    '<th>Actions</th>'+
+    '</tr></thead><tbody>';
+
     filtered1.forEach(function(r){
-      var r2Vid=r.r2Video||'';
-      var r2VideoCell=r2Vid?'<a href="'+r2Vid+'" target="_blank" style="color:var(--red);font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:3px;"><span class="mat-ico" style="font-size:11px;">smart_display</span>Watch</a>':'<span style="color:var(--muted);font-size:10px;">'+(r.hasR2Assigned?'No video':'\u2014')+'</span>';
-      var r2Cell=r.r2TrnName?'<div style="font-weight:600;color:var(--green);font-size:10px;">'+escAttr(r.r2TrnName)+'</div>'+(r.r2Failed?'<span style="font-size:9px;color:#8e44ad;font-weight:600;">\u26a0\ufe0f Also failed</span>':''):'<span style="color:var(--muted);font-size:10px;">Not assigned</span>';
-      var whyCell=r.whyReason?'<div style="font-size:9px;color:var(--txt);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(r.whyReason)+'">'+escAttr(r.whyReason)+'</div>':'<span style="color:var(--muted);font-size:10px;">\u2014</span>';
-      var dlCell=r.r2Deadline?'<span style="font-size:10px;color:'+(new Date(r.r2Deadline)<new Date()?'var(--red)':'var(--amber)')+';font-weight:600;">'+formatDate(r.r2Deadline)+(new Date(r.r2Deadline)<new Date()?' !':'')+'</span>':'<span style="color:var(--muted);font-size:10px;">\u2014</span>';
-      h+='<tr>';
-      h+='<td><div style="display:flex;align-items:center;gap:6px;"><div style="width:28px;height:28px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;">'+avatarInitials(r.empName)+'</div><div><b>'+escAttr(r.empName)+'</b><div style="font-size:9px;color:var(--muted);">'+escAttr(r.dept)+' | '+r.empId+'</div></div></div></td>';
-      h+='<td><div style="font-weight:600;color:var(--red);font-size:10px;">'+escAttr(r.failedTrnName)+'</div><div style="font-size:9px;color:var(--muted);">1st: <b style="color:var(--red);">'+r.firstScore+'%</b> | Best: <b style="color:var(--blue);">'+r.best+'%</b> ('+r.attempts+' tries)</div></td>';
-      h+='<td style="text-align:center;"><div style="font-size:16px;font-weight:800;color:var(--red);">'+r.firstScore+'%</div></td>';
-      h+='<td>'+r2Cell+'</td>';
-      h+='<td>'+r2VideoCell+'</td>';
-      h+='<td>'+whyCell+'</td>';
-      h+='<td>'+dlCell+'</td>';
-      h+='<td><div style="display:flex;gap:3px;flex-wrap:wrap;">';
+      // R2 Status cell
+      var statusHtml;
       if(!r.hasR2Assigned){
-        h+='<button class="btn btn-sm" style="background:var(--amber);color:#000;padding:3px 8px;font-size:9px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:10px;">school</span> Assign R2</button>';
+        statusHtml='<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:rgba(240,136,62,.1);color:var(--orange);font-size:10px;font-weight:600;"><span class="mat-ico" style="font-size:11px;">pending</span> Open</span>';
+      }else if(r.r2Failed){
+        statusHtml='<div style="font-weight:600;color:var(--green);font-size:10px;">'+escAttr(r.r2TrnName)+'</div>'+
+        '<div style="display:inline-flex;align-items:center;gap:3px;margin-top:2px;padding:2px 6px;border-radius:4px;background:rgba(231,76,60,.1);color:var(--red);font-size:9px;font-weight:600;"><span class="mat-ico" style="font-size:10px;">error</span> Also failed R2 ('+r.r2BestScore+'%)</div>';
+      }else{
+        var vidTag=r.r2Video?' <a href="'+r.r2Video+'" target="_blank" style="color:var(--red);text-decoration:none;font-size:9px;">\u{1F3AC} Video</a>':'';
+        statusHtml='<div style="font-weight:600;color:var(--green);font-size:10px;">'+escAttr(r.r2TrnName)+vidTag+'</div>'+
+        '<div style="display:inline-flex;align-items:center;gap:3px;margin-top:2px;padding:2px 6px;border-radius:4px;background:rgba(62,207,142,.1);color:var(--green);font-size:9px;font-weight:600;"><span class="mat-ico" style="font-size:10px;">schedule</span> In progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':'')+'</div>';
       }
-      h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;padding:3px 8px;font-size:9px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" onclick="openR2QuickMsg(this.dataset.t,this.dataset.e,this.dataset.n)"><span class="mat-ico" style="font-size:10px;">mail</span></button>';
-      h+='</div></td></tr>';
+      // Why cell
+      var whyHtml=r.whyReason?'<div style="font-size:10px;color:var(--txt);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(r.whyReason)+'">'+escAttr(r.whyReason)+'</div>':'<span style="color:var(--muted);font-size:10px;">\u2014</span>';
+      // Deadline cell
+      var dlHtml=r.r2Deadline?'<span style="font-size:10px;color:'+(new Date(r.r2Deadline)<new Date()?'var(--red)':'var(--amber)')+';font-weight:600;">'+formatDate(r.r2Deadline)+(new Date(r.r2Deadline)<new Date()?' <span style="font-size:9px;">\u26A0\uFE0F</span>':'')+'</span>':'<span style="color:var(--muted);font-size:10px;">\u2014</span>';
+
+      h+='<tr>';
+      // Employee
+      h+='<td><div style="display:flex;align-items:center;gap:6px;"><div style="width:30px;height:30px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;">'+avatarInitials(r.empName)+'</div><div><b style="font-size:11px;">'+escAttr(r.empName)+'</b><div style="font-size:9px;color:var(--muted);">'+escAttr(r.dept)+'</div></div></div></td>';
+      // Failed Training
+      h+='<td><div style="font-weight:600;color:var(--red);font-size:10px;">'+escAttr(r.failedTrnName)+'</div><div style="font-size:9px;color:var(--muted);margin-top:1px;">Best: '+r.best+'% ('+r.attempts+' tries)</div></td>';
+      // Score
+      h+='<td style="text-align:center;"><div style="font-size:18px;font-weight:800;color:var(--red);line-height:1;">'+r.firstScore+'%</div></td>';
+      // R2 Status
+      h+='<td>'+statusHtml+'</td>';
+      // Why
+      h+='<td>'+whyHtml+'</td>';
+      // Deadline
+      h+='<td>'+dlHtml+'</td>';
+      // Actions
+      h+='<td><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+      if(!r.hasR2Assigned){
+        h+='<button class="btn btn-sm" style="background:var(--amber);color:#000;padding:4px 10px;font-size:10px;font-weight:600;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:11px;">school</span> Assign R2</button>';
+      }
+      h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;padding:4px 8px;font-size:10px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" onclick="openR2QuickMsg(this.dataset.t,this.dataset.e,this.dataset.n)"><span class="mat-ico" style="font-size:11px;">mail</span></button>';
+      h+='</div></td>';
+      h+='</tr>';
     });
+
     h+='</tbody></table></div>';
   }
   h+='</div>';
 
-  // SECTION 2
-  h+='<div style="background:linear-gradient(135deg,rgba(142,68,173,.1),rgba(232,72,58,.04));border:2px solid rgba(142,68,173,.25);border-radius:var(--r);padding:14px 16px;">';
-  h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">';
-  h+='<div style="width:40px;height:40px;border-radius:10px;background:rgba(142,68,173,.15);display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="font-size:22px;color:#8e44ad;">error</span></div>';
-  h+='<div><div style="font-size:15px;font-weight:700;color:#8e44ad;">2nd Test Failed (Round 2) \u2014 Send Message</div><div style="font-size:11px;color:var(--muted);">Employees who also failed their Round 2 training.</div></div>';
-  h+='<div style="margin-left:auto;"><span class="badge" style="background:rgba(142,68,173,.15);color:#8e44ad;">'+filtered2.length+' employees</span></div>';
+  // ══════════════════════════════════════════════════════
+  // SECTION 2: ROUND 3 — Failed R2 Training, Send Message
+  // ══════════════════════════════════════════════════════
+  h+='<div style="background:var(--sur);border:2px solid rgba(231,76,60,.25);border-radius:var(--r);padding:16px;">';
+  h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid rgba(231,76,60,.15);">';
+  h+='<div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,rgba(231,76,60,.15),rgba(231,76,60,.05));display:flex;align-items:center;justify-content:center;"><span class="mat-ico" style="font-size:24px;color:#e74c3c;">emergency</span></div>';
+  h+='<div><div style="font-size:16px;font-weight:800;color:#e74c3c;">Round 3 <span style="font-weight:400;font-size:13px;color:var(--muted);">\u2014 2nd Time Failure</span></div><div style="font-size:11px;color:var(--muted);">Employees who also failed their Round 2 training. Send message or escalate.</div></div>';
+  h+='<div style="margin-left:auto;"><span class="badge" style="background:rgba(231,76,60,.15);color:#e74c3c;font-size:11px;">'+filtered2.length+' employees</span></div>';
   h+='</div>';
 
   if(filtered2.length===0){
-    h+='<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;"><span class="mat-ico" style="font-size:36px;display:block;margin-bottom:8px;">verified</span>'+(q||deptFilter!=='All'?'No matching R2 failures.':'No 2nd test failures!')+'</div>';
+    h+='<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px;"><span class="mat-ico" style="font-size:40px;display:block;margin-bottom:10px;">verified</span>'+(q||deptFilter!=='All'?'No matching R2 failures.':'No Round 3 cases! All R2 trainings passed.')+'</div>';
   }else{
-    h+='<div class="table-wrap"><table style="font-size:11px;"><thead><tr><th>Employee</th><th>Dept</th><th>Original Failed</th><th>R2 Training Given</th><th>R2 Score</th><th>R2 Tries</th><th>Video</th><th>Actions</th></tr></thead><tbody>';
+    h+='<div class="table-wrap"><table style="font-size:11px;"><thead><tr>'+
+    '<th>Employee</th>'+
+    '<th>Dept</th>'+
+    '<th>Original Failed</th>'+
+    '<th>R2 Training</th>'+
+    '<th style="text-align:center;">R2 Score</th>'+
+    '<th style="text-align:center;">Tries</th>'+
+    '<th>Video</th>'+
+    '<th>Actions</th>'+
+    '</tr></thead><tbody>';
+
     filtered2.forEach(function(r){
       var videoCell=r.r2Video?'<a href="'+r.r2Video+'" target="_blank" style="color:var(--red);font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:3px;"><span class="mat-ico" style="font-size:11px;">smart_display</span>Watch</a>':'<span style="color:var(--muted);">No video</span>';
+      var scoreColor=r.r2FirstScore<40?'var(--red)':r.r2FirstScore<60?'var(--orange)':'var(--amber)';
       h+='<tr>';
-      h+='<td><div style="display:flex;align-items:center;gap:6px;"><div style="width:28px;height:28px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;">'+avatarInitials(r.empName)+'</div><div><b>'+escAttr(r.empName)+'</b><div style="font-size:9px;color:var(--muted);">'+r.empId+'</div></div></div></td>';
+      h+='<td><div style="display:flex;align-items:center;gap:6px;"><div style="width:30px;height:30px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;">'+avatarInitials(r.empName)+'</div><div><b style="font-size:11px;">'+escAttr(r.empName)+'</b><div style="font-size:9px;color:var(--muted);">'+r.empId+'</div></div></div></td>';
       h+='<td><span class="badge badge-info" style="font-size:9px;">'+escAttr(r.dept)+'</span></td>';
-      h+='<td><span style="color:var(--red);">'+escAttr(r.origTrnName)+'</span></td>';
-      h+='<td><span style="color:#8e44ad;font-weight:600;">'+escAttr(r.r2TrnName)+'</span></td>';
-      h+='<td style="color:var(--red);font-weight:700;font-size:13px;">'+r.r2FirstScore+'%</td>';
-      h+='<td>'+r.r2Attempts+'</td>';
+      h+='<td><span style="color:var(--red);font-weight:600;font-size:10px;">'+escAttr(r.origTrnName)+'</span></td>';
+      h+='<td><span style="color:#e74c3c;font-weight:600;font-size:10px;">'+escAttr(r.r2TrnName)+'</span></td>';
+      h+='<td style="text-align:center;"><div style="font-size:16px;font-weight:800;color:'+scoreColor+';line-height:1;">'+r.r2FirstScore+'%</div><div style="font-size:9px;color:var(--muted);margin-top:2px;">best '+r.r2BestScore+'%</div></td>';
+      h+='<td style="text-align:center;"><span style="font-size:14px;font-weight:700;">'+r.r2Attempts+'</span></td>';
       h+='<td>'+videoCell+'</td>';
-      h+='<td><div style="display:flex;gap:3px;flex-wrap:wrap;">';
-      h+='<button class="btn btn-sm" style="background:#8e44ad;color:#fff;padding:3px 8px;font-size:9px;" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-o="'+escAttr(r.origTrnName)+'" data-r="'+escAttr(r.r2TrnName)+'" onclick="openR2FailMsg(this.dataset.e,this.dataset.n,this.dataset.o,this.dataset.r)"><span class="mat-ico" style="font-size:10px;">mail</span> Message</button>';
-      if(r.r2Attempts>=3){h+='<button class="btn btn-sm" style="background:#e8483a;color:#fff;padding:3px 8px;font-size:9px;" data-ot="'+r.origTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-a="'+r.r2Attempts+'" onclick="send3rdFailEscalation(this.dataset.ot,this.dataset.e,this.dataset.n,this.dataset.a)"><span class="mat-ico" style="font-size:10px;">emergency</span> Escalate</button>';}
+      h+='<td><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+      h+='<button class="btn btn-sm" style="background:#e74c3c;color:#fff;padding:4px 10px;font-size:10px;font-weight:600;" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-o="'+escAttr(r.origTrnName)+'" data-r="'+escAttr(r.r2TrnName)+'" onclick="openR2FailMsg(this.dataset.e,this.dataset.n,this.dataset.o,this.dataset.r)"><span class="mat-ico" style="font-size:11px;">mail</span> Message</button>';
+      if(r.r2Attempts>=3){h+='<button class="btn btn-sm" style="background:#c0392b;color:#fff;padding:4px 10px;font-size:10px;font-weight:600;" data-ot="'+r.origTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-a="'+r.r2Attempts+'" onclick="send3rdFailEscalation(this.dataset.ot,this.dataset.e,this.dataset.n,this.dataset.a)"><span class="mat-ico" style="font-size:11px;">emergency</span> Escalate</button>';}
       h+='</div></td></tr>';
     });
+
     h+='</tbody></table></div>';
   }
   h+='</div>';
