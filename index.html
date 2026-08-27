@@ -3325,11 +3325,12 @@ function renderTrainings(){
 }
 function renderEmpTrainings(){
   const empId=currentUser.id;
+  // MIGRATION: Retroactively mark R2 trainings that lack the _isR2Training flag
+  var _r2Ids={};DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.r2TrnId)_r2Ids[r.r2TrnId]=true;});});
+  var _mig=false;DB.trainings.forEach(function(t){if(_r2Ids[t.id]&&!t._isR2Training){t._isR2Training=true;_mig=true;}});
+  if(_mig){try{saveDB();}catch(e){}}
   // R2 trainings show in Round 2 Training page, not here
   const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept))).filter(t=>!t._isR2Training);
-  const r2Map={};
-  DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){r2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason};}});});
-  const r2TrnIds=new Set(Object.keys(r2Map));
   document.getElementById("view-trainings").innerHTML=`
     <div class="section-header"><div class="section-title">My <span>Trainings</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
@@ -3345,9 +3346,7 @@ function renderEmpTrainings(){
         const bestRes=myRes.length?myRes.sort((a,b)=>b.score-a.score)[0]:null;
         const alreadyTested=myRes.length>0;
         const videoProgress=((t.videoProgress||{})[empId])||0;
-        const isR2=r2TrnIds.has(t.id);const r2Info=r2Map[t.id]||null;
-        const r2VidLink=isR2&&r2Info&&r2Info.r2Video?r2Info.r2Video:t.youtubeLink||'';
-        const ytEmbedId=extractYoutubeId(r2VidLink);
+        const ytEmbedId=extractYoutubeId(t.youtubeLink||'');
         const hasVideo=!!ytEmbedId;
         const videoCompleted=videoProgress>=90;
         const canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
@@ -3355,7 +3354,7 @@ function renderEmpTrainings(){
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
             <span class="category-chip">${t.cat}</span>
-            ${isR2?`<span class="badge" style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,var(--amber),var(--orange));color:#000;font-size:10px;padding:3px 8px;z-index:2;">🔄 Round 2 Training</span>`:''}
+
             ${hasVideo?`<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>`:""}
             ${done?`<span class="badge badge-active" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">check_circle</span> ${bestRes.score}%</span>`:hasVideo?`<span class="badge badge-${videoCompleted?"active":"warning"}" style="position:absolute;bottom:8px;right:8px;">${videoCompleted?"✅ Video Done":"⏳ "+videoProgress+"%"}</span>`:""}
             <span style="font-size:48px;">${catInfo.icon}</span>
@@ -3407,9 +3406,7 @@ function renderEmpTrainings(){
   // Initialize YouTube trackers for all training videos with progress tracking
   setTimeout(function(){
     myTrns.forEach(function(t){
-      var isR2Vid=r2TrnIds.has(t.id);
-      var vidLink=isR2Vid&&r2Map[t.id]&&r2Map[t.id].r2Video?r2Map[t.id].r2Video:t.youtubeLink||'';
-      var ytId=extractYoutubeId(vidLink);
+      var ytId=extractYoutubeId(t.youtubeLink||'');
       if(ytId){
         initTrnVideoTracker(ytId,t.id,empId);
       }
