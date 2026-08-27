@@ -5990,6 +5990,7 @@ function renderCorrectiveActions(){
   // Dedup allCA: keep only ONE per empId+training (show latest)
   var dedupSeen=new Set();
   allCA=allCA.filter(function(a){var k=(a.empId||'')+'||'+(a.training||a.trnName||'');if(dedupSeen.has(k))return false;dedupSeen.add(k);return true;});
+  window._caList=allCA;
   // Get unique training names from CAs for filter
   var allTrnNames=[];allCA.forEach(function(a){var n=a.training||a.trnName||'';if(n&&allTrnNames.indexOf(n)<0)allTrnNames.push(n);});
   var caTrnFilter=window._caTrnFilter||'All';
