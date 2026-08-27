@@ -3286,8 +3286,8 @@ function renderTrainings(){
   var _had=false;
   DB.trainings=DB.trainings.filter(function(t){var m=_cn.some(function(n){return(t.name||'').indexOf(n)!==-1;});if(m){_had=true;if(!_deletedIds.trainings)_deletedIds.trainings=[];if(!_deletedIds.trainings.includes(t.id))_deletedIds.trainings.push(t.id);try{fbDB.collection('trainings').doc(String(t.id)).delete().catch(function(){});}catch(e){}return false;}return true;});
   if(_had){try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e2){}}catch(e){}}
-  // Filter out any corrupted entries that slipped through
-  const cleanTrainings=DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined'&&t.cat;});
+  // Filter out any corrupted entries that slipped through, AND R2 trainings (they belong in Round 2 page only)
+  const cleanTrainings=DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined'&&t.cat&&!t._isR2Training;});
   const filtered=cleanTrainings.filter(t=>{
     const q=trn_search.toLowerCase();
     return!q||t.name.toLowerCase().includes(q)||(t.cat&&t.cat.toLowerCase().includes(q))||(t.trainer&&t.trainer.toLowerCase().includes(q));
@@ -5779,41 +5779,62 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
   if(!failedTrn)return;
   var defaultDeadline=new Date(Date.now()+7*86400000).toISOString().split('T')[0];
+  var today=new Date().toISOString().split('T')[0];
   var sn=escAttr(empName);
   var failedVideo=failedTrn.youtubeLink||'';
   window._r2Assign={failedTrnId:failedTrnId,empId:empId,empName:empName,failedTrnName:failedTrnName};
+  window._r2CustomQCount=0;
   var trainerList=DB.settings.trainerList||[];
   var trainerOpts=trainerList.map(function(t){return '<option value="'+escAttr(t)+'">'+escAttr(t)+'</option>';}).join('');
+  var catOpts=TRAINING_CATS.map(function(c){return '<option'+(c===(failedTrn.cat||'General')?' selected':'')+'>'+c+'</option>';}).join('');
+  var deptOpts='<option>All</option>'+DEPARTMENTS.map(function(d){return '<option'+(d===(failedTrn.dept||'All')?' selected':'')+'>'+d+'</option>';}).join('');
+  var r2DefaultName='R2: '+failedTrnName;
   openModal(
     '<div class="modal-accent" style="background:linear-gradient(135deg,var(--amber),var(--orange));"></div>'+
-    '<div class="modal-head"><div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">school</span></div><h2>Assign Round 2 Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">school</span></div><h2>Create R2 Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
     '<div class="modal-body">'+
     // Employee info banner
     '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">'+
     '<div style="display:flex;align-items:center;gap:8px;">'+
     '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
-    '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:12px;color:var(--red);font-weight:600;">\u274C Failed: '+escAttr(failedTrnName)+'</span>'+(failedVideo?' <a href="'+failedVideo+'" target="_blank" style="font-size:11px;color:var(--red);text-decoration:none;">\uD83C\uDFAC Original Video</a>':'')+'</div>'+
+    '<div style="min-width:0;flex:1;"><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:12px;color:var(--red);font-weight:600;">\u274C Failed: '+escAttr(failedTrnName)+'</span>'+(failedVideo?' <a href="'+failedVideo+'" target="_blank" style="font-size:11px;color:var(--red);text-decoration:none;">\uD83C\uDFAC Original Video</a>':'')+'</div>'+
+    '<div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">1st Score</div><div style="font-size:20px;font-weight:800;color:var(--red);">'+((failedTrn._r2FirstScore)||'--')+'%</div></div>'+
     '</div></div>'+
-    // R2 Video URL
-    '<div style="margin-bottom:12px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);border-radius:var(--r-sm);padding:10px;">'+
-    '<div class="form-section-title" style="color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">play_circle</span> R2 Video Link <span style="color:var(--red);">*</span></div>'+
-    '<input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." style="font-size:12px;width:100%;" oninput="previewR2Video(this.value)" onfocus="this.select()">'+
-    '<div id="r2VideoPreview" style="display:none;margin-top:8px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected!</div><div style="border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe id="r2VideoFrame" src="" style="width:100%;height:160px;" allowfullscreen></iframe></div></div>'+
+    // Training Details section (like Training Management)
+    '<div class="form-section"><div class="form-grid">'+
+    '<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">R2 Training Name *</label><input class="form-control-sm" id="r2AssignName" value="'+escAttr(r2DefaultName)+'" placeholder="e.g. R2: Fire Safety Induction"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="r2AssignCat">'+catOpts+'</select></div>'+
+    '<div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="r2AssignDept">'+deptOpts+'</select></div>'+
+    '<div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="r2AssignTrainer">'+(trainerOpts?'<option value="">Select trainer...</option>'+trainerOpts:'<option value="">No trainers configured</option>')+'</select></div>'+
+    '<div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="r2AssignManager" value="'+escAttr(failedTrn.manager||'')+'" placeholder="e.g. Mr. Sharma, Site Manager"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="r2AssignDate" type="date" value="'+today+'"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="r2AssignDur" value="'+escAttr(failedTrn.duration||'')+'" placeholder="e.g. 30 min, 2 hrs"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="r2AssignPass" type="number" value="'+(failedTrn.passing||75)+'" min="0" max="100"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Deadline <span style="color:var(--red);">*</span></label><input class="form-control-sm" type="date" id="r2AssignDeadline" value="'+defaultDeadline+'"></div>'+
     '</div>'+
-    // Trainer
-    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Trainer</label>'+
-    '<select class="form-control-sm" id="r2AssignTrainer" style="width:100%;font-size:12px;">'+(trainerOpts?'<option value="">Select trainer...</option>'+trainerOpts:'<option value="">No trainers configured</option>')+'</select>'+
+    '<div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="r2AssignDesc" rows="2" placeholder="R2 training description...">Round 2 retraining for: '+escAttr(failedTrnName)+'</textarea></div>'+
+    '<div class="form-group" style="margin-top:6px;"><label class="form-label-sm">Reason for R2 <span style="color:var(--red);">*</span></label><textarea class="form-control-sm" id="r2AssignWhy" rows="2" placeholder="e.g. Low score, needs improvement..."></textarea></div>'+
     '</div>'+
-    // Deadline
-    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Deadline <span style="color:var(--red);">*</span></label>'+
-    '<input class="form-control-sm" type="date" id="r2AssignDeadline" value="'+defaultDeadline+'" style="width:100%;font-size:12px;"></div>'+
-    // Reason
-    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Reason for R2 <span style="color:var(--red);">*</span></label>'+
-    '<textarea class="form-control-sm" id="r2AssignWhy" rows="2" placeholder="e.g. Low score, needs improvement..." style="font-size:12px;width:100%;"></textarea></div>'+
-    // Info box
-    '<div style="background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);padding:10px;font-size:11px;color:var(--green);display:flex;align-items:flex-start;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span><div>A new R2 training will be auto-created with name <b>R2: '+escAttr(failedTrnName)+'</b>. Questions will be picked from the question bank. '+sn+' will see it in their training list.</div></div>'+
+    // Video section (like Training Management)
+    '<div class="form-section" style="margin-top:14px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);">'+
+    '<div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> R2 YouTube Video Link <span style="color:var(--red);">*</span></div>'+
+    '<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." oninput="previewR2Video(this.value)" onfocus="this.select()"></div>'+
+    '<div id="r2VideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div style="border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);max-height:180px;"><iframe id="r2VideoFrame" src="" style="width:100%;height:160px;" allowfullscreen></iframe></div></div>'+
+    '<div style="margin-top:8px;padding:8px 12px;background:rgba(255,176,32,.06);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;font-size:11px;color:var(--amber);">'+
+    '<span class="mat-ico" style="font-size:13px;">info</span> Employee must watch <b>90% of this video</b> before the test button unlocks. Forwarding/skipping is NOT counted. Test can only be taken <b>one time</b> after video completion.'+
     '</div>'+
-    '<div class="modal-foot"><button class="btn btn-amber" onclick="confirmAssignR2()"><span class="mat-ico">school</span> Assign R2</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
+    '</div>'+
+    // Custom questions section
+    '<div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+    '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);">Custom Quiz Questions (Optional)</div>'+
+    '<button class="btn btn-sm btn-outline" onclick="addR2CustomQuestion()"><span class="mat-ico" style="font-size:11px;">add</span> Add Question</button>'+
+    '</div>'+
+    '<div id="r2CustomQuestionsList"></div>'+
+    '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">If no custom questions added, questions will be copied from the original training or auto-generated from the question bank.</div>'+
+    '</div>'+
+    '</div>'+
+    '<div class="modal-foot"><button class="btn btn-amber" id="saveR2Btn" onclick="confirmAssignR2()"><span class="mat-ico">school</span> Create R2 Training</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','740px');
 }
 
 function previewR2Video(val){
@@ -5824,34 +5845,88 @@ function previewR2Video(val){
   else if(wrap){wrap.style.display='none';}
 }
 
+function addR2CustomQuestion(){
+  var n=window._r2CustomQCount||0;
+  window._r2CustomQCount=n+1;
+  var container=document.getElementById('r2CustomQuestionsList');
+  var div=document.createElement('div');
+  div.id='r2cq_'+n;
+  div.style.cssText='background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;margin-bottom:8px;';
+  div.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
+    '<span style="font-size:11px;font-weight:700;color:var(--txt);">Question '+(n+1)+'</span>'+
+    '<button class="btn btn-sm" style="padding:2px 8px;border:1px solid var(--red);color:var(--red);background:rgba(232,72,58,.08);font-size:10px;" onclick="document.getElementById(\'r2cq_'+n+'\').remove()"><span class="mat-ico" style="font-size:11px;">close</span></button>'+
+    '</div>'+
+    '<input class="form-control-sm" id="r2cq_q_'+n+'" placeholder="Enter question text..." style="width:100%;margin-bottom:6px;">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">'+
+    '<input class="form-control-sm" id="r2cq_o0_'+n+'" placeholder="Option A">'+
+    '<input class="form-control-sm" id="r2cq_o1_'+n+'" placeholder="Option B">'+
+    '<input class="form-control-sm" id="r2cq_o2_'+n+'" placeholder="Option C">'+
+    '<input class="form-control-sm" id="r2cq_o3_'+n+'" placeholder="Option D">'+
+    '</div>'+
+    '<div style="margin-top:6px;font-size:10px;color:var(--muted);">Correct Answer: <select id="r2cq_a_'+n+'"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select></div>';
+  container.appendChild(div);
+}
+
+function getR2CustomQuestions(){
+  var qs=[];
+  var count=window._r2CustomQCount||0;
+  for(var i=0;i<count;i++){
+    var el=document.getElementById('r2cq_'+i);
+    if(!el)continue;
+    var q=(document.getElementById('r2cq_q_'+i)||{}).value||'';
+    var o0=(document.getElementById('r2cq_o0_'+i)||{}).value||'';
+    var o1=(document.getElementById('r2cq_o1_'+i)||{}).value||'';
+    var o2=(document.getElementById('r2cq_o2_'+i)||{}).value||'';
+    var o3=(document.getElementById('r2cq_o3_'+i)||{}).value||'';
+    var a=parseInt((document.getElementById('r2cq_a_'+i)||{}).value||'0');
+    q=q.trim();o0=o0.trim();o1=o1.trim();o2=o2.trim();o3=o3.trim();
+    if(q&&o0&&o1){
+      var opts=[o0,o1,o2||'N/A',o3||'N/A'].filter(function(x){return x;});
+      qs.push({q:q,o:opts,a:Math.min(a,opts.length-1)});
+    }
+  }
+  return qs;
+}
+
 function confirmAssignR2(){
   var p=window._r2Assign;if(!p){toast('Error','error');return;}
   var failedTrnId=p.failedTrnId,empId=p.empId,empName=p.empName,failedTrnName=p.failedTrnName;
+  var r2NameVal=(document.getElementById('r2AssignName').value||'').trim();
+  var r2CatVal=(document.getElementById('r2AssignCat').value||'').trim();
+  var r2DeptVal=(document.getElementById('r2AssignDept').value||'').trim();
+  var r2TrainerVal=(document.getElementById('r2AssignTrainer').value||'').trim();
+  var r2ManagerVal=(document.getElementById('r2AssignManager').value||'').trim();
+  var r2DateVal=(document.getElementById('r2AssignDate').value||'').trim();
+  var r2DurVal=(document.getElementById('r2AssignDur').value||'').trim();
+  var r2PassVal=parseInt(document.getElementById('r2AssignPass').value)||75;
+  var r2DescVal=(document.getElementById('r2AssignDesc').value||'').trim();
   var r2VideoLink=(document.getElementById('r2AssignVideo').value||'').trim();
-  var r2TrainerVal=(document.getElementById('r2AssignTrainer')||{}).value||'';
-  var whyText=(document.getElementById('r2AssignWhy').value||'').trim();
   var deadlineVal=(document.getElementById('r2AssignDeadline').value||'').trim();
+  var whyText=(document.getElementById('r2AssignWhy').value||'').trim();
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
   if(!failedTrn){toast('Original training not found','error');return;}
   // Validate
+  if(!r2NameVal){toast('Enter R2 training name','error');return;}
   if(!r2VideoLink){toast('Paste a YouTube video link','error');return;}
   if(!extractYoutubeId(r2VideoLink)){toast('Invalid YouTube link','error');return;}
   if(!whyText){toast('Enter reason for R2 training','error');return;}
   if(!deadlineVal){toast('Set a deadline','error');return;}
-  // Build R2 training name
-  var r2Name='R2: '+failedTrnName;
-  var newR2TrnId=genId('TRN');
-  var today=new Date().toISOString().split('T')[0];
-  // Copy questions from the failed training if it has custom questions
+  // Get custom questions (if any)
+  var r2CustomQs=getR2CustomQuestions();
+  // If no custom questions, copy from failed training
   var r2Questions=[];
-  if(failedTrn.questions&&failedTrn.questions.length){
-    r2Questions=failedTrn.questions.map(function(q){return{q:q.q,o:[...q.o],a:q.a};});
+  if(r2CustomQs.length){
+    r2Questions=r2CustomQs;
+  }else if(failedTrn.questions&&failedTrn.questions.length){
+    r2Questions=failedTrn.questions.map(function(q){return{q:q.q,o:q.o.slice(),a:q.a};});
   }
-  // Create the R2 training
+  var newR2TrnId=genId('TRN');
+  // Create the R2 training (full details, same structure as Training Management)
   var newTrn={
-    id:newR2TrnId,name:r2Name,cat:failedTrn.cat||'General',dept:failedTrn.dept||'All',
-    trainer:r2TrainerVal,manager:failedTrn.manager||'',date:today,duration:failedTrn.duration||'Not set',
-    passing:failedTrn.passing||75,validity:'1 Year',cert:false,desc:'Round 2 retraining for: '+failedTrn.name,
+    id:newR2TrnId,name:r2NameVal,cat:r2CatVal||'General',dept:r2DeptVal||'All',
+    trainer:r2TrainerVal,manager:r2ManagerVal,date:r2DateVal,duration:r2DurVal||'Not set',
+    passing:r2PassVal,validity:'1 Year',cert:false,desc:r2DescVal,
     enrolled:[empId],completed:[],completedDates:{},
     customQuestions:r2Questions.length,questions:r2Questions,
     youtubeLink:r2VideoLink,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),
@@ -5864,17 +5939,17 @@ function confirmAssignR2(){
   if(!failedTrn.retrainingRecords)failedTrn.retrainingRecords=[];
   failedTrn.retrainingRecords.push({
     empId:empId,empName:empName,training:failedTrn.name,trnId:failedTrnId,
-    date:today,timestamp:Date.now(),
-    r2TrnId:newR2TrnId,r2TrnName:r2Name,r2Video:r2VideoLink,
+    date:r2DateVal,timestamp:Date.now(),
+    r2TrnId:newR2TrnId,r2TrnName:r2NameVal,r2Video:r2VideoLink,
     r2Deadline:deadlineVal,r2Trainer:r2TrainerVal,
     action:'Round 2 Training Assigned',reason:whyText,doneBy:currentUser.name||'Admin'
   });
   // Notifications
-  var notifyMsg='[Round 2] You failed "'+failedTrn.name+'". Reason: '+whyText+'. New training: "'+r2Name+'". Deadline: '+formatDate(deadlineVal)+'. Watch: '+r2VideoLink;
+  var notifyMsg='[Round 2] You failed "'+failedTrn.name+'". Reason: '+whyText+'. New training: "'+r2NameVal+'". Deadline: '+formatDate(deadlineVal)+'. Watch the video to unlock the test.';
   DB.notifications.unshift({id:genId('N'),msg:notifyMsg,read:false,time:'Just now',icon:'replay',forEmp:empId});
-  DB.notifications.unshift({id:genId('N'),msg:'R2: '+empName+' \u2192 "'+r2Name+'" (failed: '+failedTrn.name+', why: '+whyText+') Deadline: '+formatDate(deadlineVal),read:false,time:'Just now',icon:'school'});
+  DB.notifications.unshift({id:genId('N'),msg:'R2: '+empName+' \u2192 "'+r2NameVal+'" (failed: '+failedTrn.name+', why: '+whyText+') Deadline: '+formatDate(deadlineVal),read:false,time:'Just now',icon:'school'});
   closeModal();saveDB();updateBadges();
-  toast('R2 "'+r2Name+'" created & assigned to '+empName+'!','success');
+  toast('R2 "'+r2NameVal+'" created & assigned to '+empName+'!','success');
   renderRetraining();
 }
 
