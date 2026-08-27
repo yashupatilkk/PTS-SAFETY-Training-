@@ -3286,6 +3286,10 @@ function renderTrainings(){
   var _had=false;
   DB.trainings=DB.trainings.filter(function(t){var m=_cn.some(function(n){return(t.name||'').indexOf(n)!==-1;});if(m){_had=true;if(!_deletedIds.trainings)_deletedIds.trainings=[];if(!_deletedIds.trainings.includes(t.id))_deletedIds.trainings.push(t.id);try{fbDB.collection('trainings').doc(String(t.id)).delete().catch(function(){});}catch(e){}return false;}return true;});
   if(_had){try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e2){}}catch(e){}}
+  // MIGRATION: Retroactively mark R2 trainings that lack the _isR2Training flag
+  var _r2Ids={};DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.r2TrnId)_r2Ids[r.r2TrnId]=true;});});
+  var _mig=false;DB.trainings.forEach(function(t){if(_r2Ids[t.id]&&!t._isR2Training){t._isR2Training=true;_mig=true;}});
+  if(_mig){try{saveDB();}catch(e){}}
   // Filter out any corrupted entries that slipped through, AND R2 trainings (they belong in Round 2 page only)
   const cleanTrainings=DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined'&&t.cat&&!t._isR2Training;});
   const filtered=cleanTrainings.filter(t=>{
@@ -5510,7 +5514,7 @@ function renderRetraining(){
   var totalR2Failed=needR2Rows.filter(function(r){return r.r2Failed;}).length;
 
   // Header
-  var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div></div>';
+  var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-amber" onclick="openCreateR2TrainingModal()"><span class="mat-ico">add</span> Create R2 Training</button></div></div>';
 
   // Stat cards
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
@@ -5772,6 +5776,54 @@ function sendOfflineMsg(){
   DB.notifications.unshift({id:genId('N'),msg:'[Offline Training Required] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId});
   closeModal();saveDB();updateBadges();
   toast('Offline training message sent to '+d.empName,'success');
+}
+
+
+function openCreateR2TrainingModal(){
+  var empIdSet=DB.employees.map(function(e){return e.id;});
+  var failedList=[];
+  DB.trainings.forEach(function(t){
+    if(t._isR2Training)return;
+    var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
+    if(!enrolled.length)return;
+    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
+    enrolled.forEach(function(eid){
+      var emp=DB.employees.find(function(e){return e.id===eid;});
+      if(!emp)return;
+      var att=eMap[eid]||[];if(!att.length)return;
+      var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;
+      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
+      var isOffline=(t.offlineTrained||[]).includes(eid);if(isOffline)return;
+      var r2Rec=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      var r2TrnId=r2Rec?r2Rec.r2TrnId:'';
+      var r2TrnObj=r2TrnId?DB.trainings.find(function(rt){return rt.id===r2TrnId;}):null;
+      var r2Att=r2TrnObj?DB.testResults.filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
+      var r2HasPass=r2Att.some(function(r){return r.pass;});if(r2HasPass)return;
+      failedList.push({empId:eid,empName:emp.name,dept:emp.dept,trnName:t.name,trnId:t.id,trnCat:t.cat,score:att[0].score,hasR2:!!r2Rec});
+    });
+  });
+  if(!failedList.length){toast('No failed employees found. Everyone passed!','info');return;}
+  var listHtml='<div style="max-height:400px;overflow-y:auto;">';
+  failedList.forEach(function(f,i){
+    listHtml+='<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--bdr);border-radius:var(--r-sm);margin-bottom:6px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background=\'var(--sur2)\'" onmouseout="this.style.background=\'transparent\'" onclick="closeModal();openAssignR2Modal(\''+f.trnId+'\',\''+f.empId+'\',\''+escAttr(f.empName).replace(/'/g,"\\'")+'\',\''+escAttr(f.trnName).replace(/'/g,"\\'")+'\')">';
+    listHtml+='<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(f.empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(f.empName)+'</div>';
+    listHtml+='<div style="min-width:0;flex:1;"><div style="font-size:13px;font-weight:600;">'+escAttr(f.empName)+' <span style="color:var(--muted);font-weight:400;font-size:11px;">'+escAttr(f.dept)+'</span></div>';
+    listHtml+='<div style="font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:11px;">error</span> Failed: '+escAttr(f.trnName)+' — <b>'+f.score+'%</b></div></div>';
+    listHtml+=(f.hasR2?'<span class="badge badge-warning" style="flex-shrink:0;">Re-assign</span>':'<span class="badge" style="background:rgba(255,176,32,.15);color:var(--amber);flex-shrink:0;">Assign</span>');
+    listHtml+='</div>';
+  });
+  listHtml+='</div>';
+  openModal(
+    '<div class="modal-accent" style="background:linear-gradient(135deg,var(--amber),var(--orange));"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">school</span></div><h2>Create R2 Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:14px;font-size:12px;display:flex;align-items:center;gap:10px;">'+
+    '<span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>'+
+    '<div>Select the <b>failed employee</b> to create a Round 2 training for. Then fill in the training details.</div></div>'+
+    listHtml+
+    '</div>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
 }
 
 
