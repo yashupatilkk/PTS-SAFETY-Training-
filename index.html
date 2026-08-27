@@ -2398,7 +2398,7 @@ function renderEmployees(){
 }
 function renderEmpEmployee(){
   const e=DB.employees.find(x=>x.id===currentUser.id);
-  if(!e){document.getElementById("view-employees").innerHTML="<div class='empty-state'><span class='mat-ico'>person_off</span><h3>Profile not found</h3></div>";return;}
+  if(!e){document.getElementById("view-employees").innerHTML="<div class='empty-state'><span class='mat-ico'>person</span><h3>Profile not found</h3></div>";return;}
   const myResults=DB.testResults.filter(r=>r.empId===e.id);
   const myCerts=DB.certificates.filter(c=>c.empId===e.id);
   document.getElementById("view-employees").innerHTML=`
@@ -3609,10 +3609,10 @@ function openTrainingDetail(id){
           else if(retrained){statusBadge='warning';statusText='🔄 Retrained';}
           else if(failed){statusBadge='danger';statusText='❌ Failed ('+failCount+'x)';}
           else{statusBadge='warning';statusText='⏳ Pending';}
-          var actionBtns='<button class=\'btn btn-sm btn-red\' onclick=\'removeEmployeeFromTraining(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Remove\'><span class=\'mat-ico\' style=\'font-size:14px;\'>person_remove</span></button>';
+          var actionBtns='<button class=\'btn btn-sm btn-red\' onclick=\'removeEmployeeFromTraining(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Remove\'><span class=\'mat-ico\' style=\'font-size:14px;\'>cancel</span></button>';
           if(failed&&!done){
             if(!retrained){actionBtns+='<button class=\'btn btn-sm btn-amber\' onclick=\'retrainEmployee(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 2: Retrain (allow retake)\'><span class=\'mat-ico\' style=\'font-size:11px;\'>replay</span></button>';}
-            else if(failCount>=2&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm\' style=\'background:var(--blue);color:#fff;\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>assignment_ind</span></button>';}
+            else if(failCount>=2&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm\' style=\'background:var(--blue);color:#fff;\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>assignment</span></button>';}
             if(retrained&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm btn-outline\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>mail</span></button>';
 }
           }
@@ -5997,61 +5997,7 @@ function renderCorrectiveActions(){
   allTrnNames.forEach(function(n){filterHtml+='<option value="'+n+'"'+(caTrnFilter===n?' selected':'')+'>'+n+'</option>';});
   filterHtml+='</select>';
   var h='<div class="section-header"><div class="section-title">Corrective <span>Actions Log</span></div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><div style="font-size:11px;color:var(--muted);">BSC Audit Trail</div>'+filterHtml+'<button class="btn btn-outline btn-sm" onclick="forceSyncFromCloud().then(function(){renderCorrectiveActions();updateBadges();toast(\'Data refreshed from cloud\',\'success\');});"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button><button class="btn btn-sm btn-amber" onclick="backfillCorrectiveActions()"><span class="mat-ico" style="font-size:12px;">build</span> Backfill</button><button class="btn btn-sm btn-outline" style="border-color:var(--red);color:var(--red);" onclick="cleanupDuplicateCAs()"><span class="mat-ico" style="font-size:12px;">delete_sweep</span> Clean Duplicates</button><button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="exportAllDataExcel()" title="Download all data as Excel/CSV"><span class="mat-ico" style="font-size:12px;">download</span> Export All</button></div></div>';
-  // === PER-TRAINING SUMMARY TABLE ===
-  // Build full training list from all test results (not just CAs) for complete picture
-  var allTrnNamesFromResults=[];
-  var empIdSet=DB.employees.map(function(e){return e.id;});
-  DB.testResults.forEach(function(r){if(empIdSet.indexOf(r.empId)>=0&&r.training&&allTrnNamesFromResults.indexOf(r.training)<0)allTrnNamesFromResults.push(r.training);});
-  // Merge with CA training names
-  allTrnNamesFromResults.forEach(function(n){if(allTrnNames.indexOf(n)<0)allTrnNames.push(n);});
-  var summaryTrns=caTrnFilter==='All'?allTrnNames:[caTrnFilter];
-  if(summaryTrns.length>0){
-    h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--amber);margin-bottom:10px;"><span class="mat-ico" style="font-size:14px;">assessment</span> Training-Wise Breakdown</div>';
-    h+='<div style="background:rgba(62,160,232,.06);border:1px solid rgba(62,160,232,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:12px;font-size:11px;display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="color:var(--blue);font-size:16px;">info</span>Shows each employee\'s status per training: who failed 1st attempt, who passed on re-attempt, who needs offline training.</div>';
-    summaryTrns.forEach(function(trnName){
-      var trnResults=DB.testResults.filter(function(r){return r.training===trnName&&empIdSet.indexOf(r.empId)>=0;});
-      // Group by employee, sort attempts by date
-      var empMap={};
-      trnResults.forEach(function(r){if(!empMap[r.empId])empMap[r.empId]=[];empMap[r.empId].push(r);});
-      Object.keys(empMap).forEach(function(eid){empMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
-      // Categorize employees
-      var firstFailEmps=[];var retrainPassEmps=[];var retrainFailEmps=[];var offlineEmpList=[];var openEmpList=[];
-      Object.keys(empMap).forEach(function(eid){
-        var attempts=empMap[eid];
-        var emp=DB.employees.find(function(e){return e.id===eid;});
-        var empName=emp?emp.name:eid;
-        var first=attempts[0];
-        var hasPass=attempts.some(function(r){return r.pass;});
-        var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===trnName;});
-        var isOffline=false;
-        DB.trainings.forEach(function(t){if(t.name===trnName&&(t.offlineRecords||[]).some(function(rec){return rec.empId===eid;}))isOffline=true;});
-        if(first&&!first.pass){
-          firstFailEmps.push({id:eid,name:empName,score:first.score});
-          if(attempts.length>=2&&attempts[1].pass){retrainPassEmps.push({id:eid,name:empName,score:attempts[1].score});}
-          else if(attempts.length>=2&&!attempts[1].pass){retrainFailEmps.push({id:eid,name:empName,score:attempts[1].score});}
-          if(isOffline){offlineEmpList.push({id:eid,name:empName});}
-          if(!hasPass&&!hasCert){openEmpList.push({id:eid,name:empName});}
-        }
-      });
-      // Build name chips helper — clrMap: {bg,text} for each type
-      var chipStyles={red:{bg:'rgba(232,72,58,.12)',text:'#e8483a'},green:{bg:'rgba(62,207,142,.12)',text:'#3ecf8e'},orange:{bg:'rgba(240,136,62,.12)',text:'#f0883e'},blue:{bg:'rgba(62,160,232,.12)',text:'#3ea0e8'},muted:{bg:'var(--sur2)',text:'var(--muted)'}};
-      function nameChips(list,styleKey){
-        var s=chipStyles[styleKey]||chipStyles.muted;
-        if(!list.length)return '<div style="font-size:10px;color:var(--muted);">—</div>';
-        return list.map(function(e){return '<span style="display:inline-block;background:'+s.bg+';color:'+s.text+';font-size:10px;padding:2px 7px;border-radius:10px;margin:2px;font-weight:600;" title="'+e.id+'">'+e.name+(e.score!==undefined?' ('+e.score+'%)':'')+'</span>';}).join('');
-      }
-      var isOpen=openEmpList.length>0;
-      h+='<div style="background:var(--sur);border:1px solid '+(isOpen?'rgba(232,72,58,.3)':'var(--bdr)')+';border-radius:var(--r);padding:14px;margin-bottom:10px;border-left:4px solid '+(isOpen?'var(--red)':'var(--green)')+';">';
-      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span class="mat-ico" style="font-size:18px;color:var(--amber);">school</span><div style="font-weight:700;font-size:13px;">'+trnName+'</div><div style="margin-left:auto;font-size:11px;">'+Object.keys(empMap).length+' tested · '+(isOpen?openEmpList.length+' <span style="color:var(--red);font-weight:700;">need action</span>':'<span style="color:var(--green);font-weight:700;">all resolved</span>')+'</div></div>';
-      h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">';
-      h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:6px;"><span class="mat-ico" style="font-size:12px;">cancel</span> 1st Attempt Failed ('+firstFailEmps.length+')</div>'+nameChips(firstFailEmps,'red')+'</div>';
-      h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:12px;">check_circle</span> Passed on Re-attempt ('+retrainPassEmps.length+')</div>'+nameChips(retrainPassEmps,'green')+'</div>';
-      h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--orange);margin-bottom:6px;"><span class="mat-ico" style="font-size:12px;">replay</span> Failed Again ('+retrainFailEmps.length+')</div>'+nameChips(retrainFailEmps,'orange')+'</div>';
-      h+='<div style="background:var(--sur2);border-radius:var(--r-sm);padding:10px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--blue);margin-bottom:6px;"><span class="mat-ico" style="font-size:12px;">mail</span> Sent Offline ('+offlineEmpList.length+')</div>'+nameChips(offlineEmpList,'blue')+'</div>';
-      h+='<div style="background:'+(openEmpList.length?'rgba(232,72,58,.08)':'var(--sur2)')+';border-radius:var(--r-sm);padding:10px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:'+(openEmpList.length?'var(--red)':'var(--green)')+';margin-bottom:6px;"><span class="mat-ico" style="font-size:12px;">'+(openEmpList.length?'warning':'verified')+'</span> Still Open ('+openEmpList.length+')</div>'+nameChips(openEmpList,openEmpList.length?'red':'green')+'</div>';
-      h+='</div></div>';
-    });
-  }
+  // === DETAILED CA TABLE ===
   // Filter: only show CAs for real employees (exist in DB.employees) AND matching training filter
   var realCA=allCA.filter(function(a){return a.empId&&DB.employees.find(function(e){return e.id===a.empId;});});
   if(caTrnFilter!=='All'){realCA=realCA.filter(function(a){return (a.training||a.trnName||'')===caTrnFilter;});}
@@ -6161,7 +6107,7 @@ function renderAdminAccess(){
     var isPromoted=DB.employees.find(function(e){return e.id===a.username;});
     var empData=isPromoted?'<span style=\'font-size:10px;color:var(--muted);\'>Dept: '+isPromoted.dept+'</span>':'';
     var srcBadge=isPromoted?'<span class="badge badge-purple">Promoted</span>':'<span class="badge badge-info">Direct</span>';
-    var delBtn=isPromoted?'<button class="btn btn-sm btn-red" onclick="removeAdminAccess(\''+a.username+'\')" title="Remove Admin Access"><span class="mat-ico" style="font-size:12px;">person_remove</span></button>':'<button class="btn btn-sm btn-red" onclick="deleteAdminAccount(\''+a.username+'\')" title="Delete Admin"><span class="mat-ico" style="font-size:12px;">delete</span></button>';
+    var delBtn=isPromoted?'<button class="btn btn-sm btn-red" onclick="removeAdminAccess(\''+a.username+'\')" title="Remove Admin Access"><span class="mat-ico" style="font-size:12px;">cancel</span></button>':'<button class="btn btn-sm btn-red" onclick="deleteAdminAccount(\''+a.username+'\')" title="Delete Admin"><span class="mat-ico" style="font-size:12px;">delete</span></button>';
     adminRows+='<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+a.username+'</td><td><b>'+a.name+'</b><br>'+empData+'</td><td><span class="badge badge-amber">'+a.role+'</span></td><td>'+srcBadge+'</td><td><div style="display:flex;gap:4px;"><button class="btn btn-sm btn-outline" onclick="changeAdminPw(\''+a.username+'\')" title="Change Password"><span class="mat-ico" style="font-size:12px;">lock_reset</span></button>'+delBtn+'</div></td></tr>';
   });
   var empCards='';
@@ -6262,7 +6208,7 @@ function renderSettings(){
           <tbody>${DB.admins.map(function(a){
             var isPromoted=DB.employees.find(function(e){return e.id===a.username;});
             return '<tr><td class="mono">'+a.username+'</td><td>'+a.name+'</td><td><span class="badge badge-amber">'+a.role+'</span></td><td>'+(isPromoted?'<span class="badge badge-purple">Promoted</span>':'<span class="badge badge-info">Direct</span>')+'</td>'+
-            '<td><div style="display:flex;gap:4px;"><button class="btn btn-sm btn-outline" onclick="changeAdminPw(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">lock_reset</span> PW</button>'+(isPromoted?'<button class="btn btn-sm btn-red" onclick="removeAdminAccess(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">person_remove</span> Remove</button>':'<button class="btn btn-sm btn-red" onclick="deleteAdminAccount(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">delete</span></button>')+'</div></td></tr>';
+            '<td><div style="display:flex;gap:4px;"><button class="btn btn-sm btn-outline" onclick="changeAdminPw(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">lock_reset</span> PW</button>'+(isPromoted?'<button class="btn btn-sm btn-red" onclick="removeAdminAccess(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">cancel</span> Remove</button>':'<button class="btn btn-sm btn-red" onclick="deleteAdminAccount(\''+a.username+'\')"><span class="mat-ico" style="font-size:12px;">delete</span></button>')+'</div></td></tr>';
           }).join('')}</tbody></table>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
