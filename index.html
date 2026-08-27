@@ -5548,8 +5548,8 @@ function renderRetraining(){
     h+='<div class="training-body">';
     // Employee name + dept
     h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-    h+='<div style="width:34px;height:34px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
-    h+='<div><b style="font-size:13px;">'+escAttr(r.empName)+'</b><div style="font-size:10px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
+    h+='<div style="width:44px;height:44px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
+    h+='<div style="min-width:0;"><div class="training-title" style="font-size:15px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
     h+='</div>';
 
     // Failed training name (the key info - which training they failed)
@@ -5586,6 +5586,12 @@ function renderRetraining(){
       h+='<div style="margin:10px 0;padding:10px;background:rgba(255,176,32,.06);border:1px dashed var(--amber);border-radius:var(--r-sm);text-align:center;">';
       h+='<div style="font-size:11px;color:var(--amber);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">school</span> No R2 training assigned yet</div>';
       h+='<button class="btn btn-sm btn-amber" style="font-size:11px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button>';
+      h+='</div>';
+    }
+    // Re-assign R2 button (shows for already-assigned cards)
+    if(r.hasR2Assigned){
+      h+='<div style="margin-top:10px;">';
+      h+='<button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);font-size:10px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:11px;">refresh</span> Re-assign R2</button>';
       h+='</div>';
     }
 
