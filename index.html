@@ -5651,16 +5651,12 @@ function renderRetraining(){
 function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
   if(!failedTrn)return;
-  var otherTrainings=DB.trainings.filter(function(t){return t.id!==failedTrnId;});
   var defaultDeadline=new Date(Date.now()+7*86400000).toISOString().split('T')[0];
-  var opts='';
-  otherTrainings.forEach(function(t){
-    var ae=(t.enrolled||[]).includes(empId)?' \u2705 Enrolled':'';
-    var vi=t.youtubeLink?' \uD83C\uDFAC Video':'';
-    opts+='<option value="'+t.id+'" data-video="'+(t.youtubeLink||'')+'" data-trainer="'+escAttr(t.trainer||'')+'" data-questions="'+(t.questions?t.questions.length:(t.customQuestions||0))+'">'+t.name+ae+vi+'</option>';
-  });
-  var sn=empName.replace(/"/g,'&quot;');
+  var sn=escAttr(empName);
   var failedVideo=failedTrn.youtubeLink||'';
+  var r2Name='R2: '+failedTrnName;
+  var trainerList=DB.settings.trainerList||[];
+  var trainerOpts=trainerList.map(function(t){return '<option value="'+escAttr(t)+'">'+escAttr(t)+'</option>';}).join('');
   window._r2Assign={failedTrnId:failedTrnId,empId:empId,empName:empName};
   openModal(
     '<div class="modal-accent" style="background:linear-gradient(135deg,var(--amber),var(--orange));"></div>'+
@@ -5669,76 +5665,30 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
     '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">'+
     '<div style="display:flex;align-items:center;gap:8px;">'+
     '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
-    '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:12px;color:var(--red);font-weight:600;">\uD83D\uDD34 Failed: '+escAttr(failedTrnName)+'</span>'+(failedVideo?' <a href="'+failedVideo+'" target="_blank" style="font-size:11px;color:var(--red);text-decoration:none;">\uD83C\uDFAC Watch Video</a>':'')+'</div>'+
+    '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:12px;color:var(--red);font-weight:600;">\u274C Failed: '+escAttr(failedTrnName)+'</span>'+(failedVideo?' <a href="'+failedVideo+'" target="_blank" style="font-size:11px;color:var(--red);text-decoration:none;">\uD83C\uDFAC Video</a>':'')+'</div>'+
     '</div></div>'+
-    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Why are you giving this training? <span style="color:var(--red);">*</span></label>'+
-    '<textarea class="form-control-sm" id="r2AssignWhy" rows="2" placeholder="e.g. Low score on fire safety, needs improvement..." style="font-size:12px;width:100%;"></textarea></div>'+
-    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Select Round 2 Training <span style="color:var(--red);">*</span></label>'+
-    '<select class="form-control-sm" id="r2AssignSelect" style="width:100%;font-size:12px;" onchange="onR2TrnSelectChange()">'+opts+'</select>'+
-    '<div id="r2TrnDetail" style="margin-top:8px;display:none;padding:10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:11px;"></div>'+
-    '</div>'+
-    '<div style="margin-bottom:12px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;">'+
-    '<div class="form-section-title" style="color:var(--purple);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">person</span> Trainer</div>'+
-    '<input class="form-control-sm" id="r2AssignTrainer" placeholder="Trainer name (auto-filled from selected training)" style="font-size:12px;width:100%;" readonly>'+''+
-    '</div>'+
-    '<div style="margin-bottom:12px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;">'+
-    '<div class="form-section-title" style="color:var(--blue);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">quiz</span> Quiz Questions</div>'+
-    '<div id="r2QuestionInfo" style="font-size:11px;color:var(--muted);">Select a training above to see question count.</div>'+
+    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">R2 Training Name <span style="color:var(--red);">*</span></label>'+
+    '<input class="form-control-sm" id="r2AssignName" value="'+escAttr(r2Name)+'" style="font-size:12px;width:100%;" placeholder="Round 2 training name">'+
     '</div>'+
     '<div style="margin-bottom:12px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);border-radius:var(--r-sm);padding:10px;">'+
-    '<div class="form-section-title" style="color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">play_circle</span> Round 2 Video Link</div>'+
-    '<input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=... (auto-filled from selected training)" style="font-size:12px;width:100%;" oninput="previewR2Video(this.value)">'+
+    '<div class="form-section-title" style="color:var(--red);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">play_circle</span> YouTube Video Link <span style="color:var(--red);">*</span></div>'+
+    '<input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." style="font-size:12px;width:100%;" oninput="previewR2Video(this.value)">'+
     '<div id="r2VideoPreview" style="display:none;margin-top:8px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected!</div><div style="border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe id="r2VideoFrame" src="" style="width:100%;height:160px;" allowfullscreen></iframe></div></div>'+
-    '<div style="margin-top:6px;font-size:10px;color:var(--muted);">Auto-filled from selected training. You can change it for this specific assignment.</div>'+
     '</div>'+
+    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Trainer</label>'+
+    '<select class="form-control-sm" id="r2AssignTrainer" style="width:100%;font-size:12px;">'+(trainerOpts?'<option value="">Select trainer...</option>'+trainerOpts:'<option value="">No trainers in settings</option>')+'</select>'+
+    '</div>'+
+    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Why are you giving this training? <span style="color:var(--red);">*</span></label>'+
+    '<textarea class="form-control-sm" id="r2AssignWhy" rows="2" placeholder="e.g. Low score, needs improvement..." style="font-size:12px;width:100%;"></textarea></div>'+
     '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Deadline <span style="color:var(--red);">*</span></label>'+
     '<input class="form-control-sm" type="date" id="r2AssignDeadline" value="'+defaultDeadline+'" style="width:100%;font-size:12px;"></div>'+
     '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Message for employee (optional)</label>'+
     '<textarea class="form-control-sm" id="r2AssignMsg" rows="2" placeholder="e.g. Complete before deadline..." style="font-size:12px;width:100%;"></textarea></div>'+
-    '<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px;font-size:11px;color:var(--amber);display:flex;align-items:flex-start;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span><div>'+sn+' will be enrolled in R2 training with its own video. Shows separately in their training list.</div></div>'+
+    '<div style="background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.2);border-radius:var(--r-sm);padding:10px;font-size:11px;color:var(--green);display:flex;align-items:flex-start;gap:6px;"><span class="mat-ico" style="font-size:14px;">info</span><div>A new R2 training will be created with this video. '+sn+' will see it as a separate card in their training list. 10 questions auto-generated from the question bank.</div></div>'+
     '</div>'+
-    '<div class="modal-foot"><button class="btn btn-amber" onclick="confirmAssignR2()"><span class="mat-ico">school</span> Assign R2</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','660px');
-  setTimeout(onR2TrnSelectChange,100);
+    '<div class="modal-foot"><button class="btn btn-amber" onclick="confirmAssignR2()"><span class="mat-ico">school</span> Assign R2</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','580px');
 }
 
-function onR2TrnSelectChange(){
-  var sel=document.getElementById('r2AssignSelect');
-  var vidInput=document.getElementById('r2AssignVideo');
-  var detailDiv=document.getElementById('r2TrnDetail');
-  if(!sel||!vidInput)return;
-  var opt=sel.options[sel.selectedIndex];
-  var vid=opt.getAttribute('data-video')||'';
-  var trainer=opt.getAttribute('data-trainer')||'';
-  var questions=opt.getAttribute('data-questions')||'0';
-  vidInput.value=vid;
-  previewR2Video(vid);
-  if(detailDiv){
-    detailDiv.style.display='block';
-    var ytId=extractYoutubeId(vid);
-    detailDiv.innerHTML='<div style="display:flex;gap:12px;flex-wrap:wrap;">'+
-      (trainer?'<span style="color:var(--blue);"><span class="mat-ico" style="font-size:12px;">person</span> Trainer: <b>'+trainer+'</b></span>':'')+
-      '<span style="color:var(--purple);"><span class="mat-ico" style="font-size:12px;">quiz</span> Questions: <b>'+questions+'</b></span>'+
-      (ytId?'<a href="'+vid+'" target="_blank" style="color:var(--red);text-decoration:none;"><span class="mat-ico" style="font-size:12px;">smart_display</span> Watch Video</a>':'<span style="color:var(--muted);">No video</span>')+
-      '</div>';
-  }
-  // Fill trainer field
-  var trainerInput=document.getElementById('r2AssignTrainer');
-  if(trainerInput)trainerInput.value=trainer;
-  // Fill question info
-  var qInfo=document.getElementById('r2QuestionInfo');
-  if(qInfo){
-    var selTrn=DB.trainings.find(function(x){return x.id===sel.value;});
-    var customQC=selTrn&&(selTrn.questions||[]).length;
-    var bankQC=0;
-    if(selTrn){var catK=selTrn.cat;var bnk=(typeof QUESTION_BANK!=='undefined'&&QUESTION_BANK[catK])?QUESTION_BANK[catK]:[];bankQC=bnk.length;}
-    qInfo.innerHTML='<div style="display:flex;gap:16px;flex-wrap:wrap;">'+
-      '<span style="color:var(--blue);"><span class="mat-ico" style="font-size:12px;">quiz</span> Custom: <b>'+customQC+'</b></span>'+
-      '<span style="color:var(--purple);"><span class="mat-ico" style="font-size:12px;">library_books</span> Question Bank: <b>'+bankQC+'</b></span>'+
-      '<span style="color:var(--green);"><span class="mat-ico" style="font-size:12px;">fact_check</span> Total Available: <b>'+(customQC+bankQC)+'</b></span>'+
-      '<span style="font-size:10px;color:var(--muted);">(10 questions randomly picked for test)</span>'+
-      '</div>';
-  }
-}
 
 function previewR2Video(val){
   var ytId=extractYoutubeId(val);
@@ -5751,29 +5701,43 @@ function previewR2Video(val){
 function confirmAssignR2(){
   var p=window._r2Assign;if(!p){toast('Error','error');return;}
   var failedTrnId=p.failedTrnId,empId=p.empId,empName=p.empName;
+  var r2Name=(document.getElementById('r2AssignName').value||'').trim();
+  var r2VideoLink=(document.getElementById('r2AssignVideo').value||'').trim();
+  var r2TrainerVal=(document.getElementById('r2AssignTrainer')||{}).value||'';
   var whyText=(document.getElementById('r2AssignWhy').value||'').trim();
-  var r2TrnId=document.getElementById('r2AssignSelect').value;
   var deadlineVal=(document.getElementById('r2AssignDeadline').value||'').trim();
   var msgText=(document.getElementById('r2AssignMsg').value||'').trim();
-  var r2VideoLink=(document.getElementById('r2AssignVideo').value||'').trim();
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
-  var r2Trn=DB.trainings.find(function(t){return t.id===r2TrnId;});
-  if(!failedTrn||!r2Trn){toast('Training not found','error');return;}
-  if(!whyText){toast('Please enter why you are giving this training','error');return;}
+  if(!failedTrn){toast('Original training not found','error');return;}
+  if(!r2Name){toast('Enter R2 training name','error');return;}
+  if(!r2VideoLink){toast('Paste a YouTube video link','error');return;}
+  if(!extractYoutubeId(r2VideoLink)){toast('Invalid YouTube link','error');return;}
+  if(!whyText){toast('Enter why you are giving this training','error');return;}
   if(!deadlineVal){toast('Set a deadline','error');return;}
-  var finalR2Video=r2VideoLink||r2Trn.youtubeLink||'';
-  if(!r2Trn.enrolled)r2Trn.enrolled=[];
-  if(!r2Trn.enrolled.includes(empId)){r2Trn.enrolled.push(empId);}
+  // Create a new R2 training automatically
+  var newR2TrnId=genId('TRN');
+  var today=new Date().toISOString().split('T')[0];
+  var newTrn={
+    id:newR2TrnId,name:r2Name,cat:failedTrn.cat||'General',dept:failedTrn.dept||'All',
+    trainer:r2TrainerVal,manager:failedTrn.manager||'',date:today,duration:failedTrn.duration||'Not set',
+    passing:failedTrn.passing||75,validity:'1 Year',cert:false,desc:'Round 2 retraining for: '+failedTrn.name,
+    enrolled:[empId],completed:[],completedDates:{},customQuestions:0,questions:[],
+    youtubeLink:r2VideoLink,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),
+    createdBy:currentUser.name||'Admin',modifiedAt:new Date().toISOString(),
+    modifiedBy:currentUser.name||'Admin',_isR2Training:true,_r2ForFailedTrnId:failedTrnId,_r2ForEmpId:empId
+  };
+  DB.trainings.push(newTrn);
+  // Save retraining record on the original training
   if(!failedTrn.retrainingRecords)failedTrn.retrainingRecords=[];
-  var r2TrainerVal=(document.getElementById('r2AssignTrainer')||{}).value||r2Trn.trainer||'';
-  failedTrn.retrainingRecords.push({empId:empId,empName:empName,training:failedTrn.name,trnId:failedTrnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),r2TrnId:r2TrnId,r2TrnName:r2Trn.name,r2Video:finalR2Video,r2Deadline:deadlineVal,r2Trainer:r2TrainerVal,action:'Round 2 Training Assigned',reason:whyText,doneBy:currentUser.name||'Admin'});
-  var notifyMsg='[Round 2] You failed "'+failedTrn.name+'". Reason: '+whyText+'. New training: "'+r2Trn.name+'". Deadline: '+formatDate(deadlineVal)+'.';
-  if(finalR2Video)notifyMsg+=' Watch: '+finalR2Video;
+  failedTrn.retrainingRecords.push({empId:empId,empName:empName,training:failedTrn.name,trnId:failedTrnId,date:today,timestamp:Date.now(),r2TrnId:newR2TrnId,r2TrnName:r2Name,r2Video:r2VideoLink,r2Deadline:deadlineVal,r2Trainer:r2TrainerVal,action:'Round 2 Training Assigned',reason:whyText,doneBy:currentUser.name||'Admin'});
+  // Notifications
+  var notifyMsg='[Round 2] You failed "'+failedTrn.name+'". Reason: '+whyText+'. New training: "'+r2Name+'". Deadline: '+formatDate(deadlineVal)+'.';
+  notifyMsg+=' Watch: '+r2VideoLink;
   if(msgText)notifyMsg+=' '+msgText;
   DB.notifications.unshift({id:genId('N'),msg:notifyMsg,read:false,time:'Just now',icon:'replay',forEmp:empId});
-  DB.notifications.unshift({id:genId('N'),msg:'R2: '+empName+' \u2192 "'+r2Trn.name+'" (failed: '+failedTrn.name+', why: '+whyText+') Deadline: '+formatDate(deadlineVal),read:false,time:'Just now',icon:'school'});
+  DB.notifications.unshift({id:genId('N'),msg:'R2: '+empName+' \u2192 "'+r2Name+'" (failed: '+failedTrn.name+', why: '+whyText+') Deadline: '+formatDate(deadlineVal),read:false,time:'Just now',icon:'school'});
   closeModal();saveDB();updateBadges();
-  toast('R2 "'+r2Trn.name+'" assigned to '+empName+'!','success');
+  toast('R2 "'+r2Name+'" created & assigned to '+empName+'!','success');
   renderRetraining();
 }
 
