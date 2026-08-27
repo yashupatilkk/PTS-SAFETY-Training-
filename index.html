@@ -5446,172 +5446,211 @@ function renderRetraining(){
   if(!isAdmin){document.getElementById('view-retraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
   var el=document.getElementById('view-retraining');
   if(typeof window._r2search==='undefined')window._r2search='';
-  if(typeof window._r2deptFilter==='undefined')window._r2deptFilter='All';
+  if(typeof window._r2filter==='undefined')window._r2filter='all';
   var q=window._r2search.toLowerCase();
-  var deptFilter=window._r2deptFilter;
+  var filter=window._r2filter;
   var empIdSet=DB.employees.map(function(e){return e.id;});
 
-  // Build rows: employees who failed 1st test, excluding those who passed R2
-  var rows=[];
+  // Collect employees who failed 1st test (no R2 yet, no pass, no offline, no R2 pass)
+  var needR2Rows=[];
   DB.trainings.forEach(function(t){
+    if(t._isR2Training)return;
     var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
     if(!enrolled.length)return;
     var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
     Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
-
     enrolled.forEach(function(eid){
       var emp=DB.employees.find(function(e){return e.id===eid;});
       if(!emp)return;
       var att=eMap[eid]||[];
       if(att.length===0)return;
       var hasPass=att.some(function(r){return r.pass;});
+      if(hasPass)return;
       var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});
-      if(hasPass||hasCert)return;
+      if(hasCert)return;
       var isOffline=(t.offlineTrained||[]).includes(eid);
       if(isOffline)return;
-      var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
-      var firstScore=att[0].score;
-
-      // R2 data
       var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
-      var r2TrnName=r2Record?r2Record.r2TrnName:'';
       var r2TrnId=r2Record?r2Record.r2TrnId:'';
-      var r2Deadline=r2Record?r2Record.r2Deadline:'';
-      var r2Video=r2Record?(r2Record.r2Video||''):'';
-      var whyReason=r2Record?(r2Record.reason||''):'';
-      var r2Trainer=r2Record?(r2Record.r2Trainer||''):'';
       var r2TrnObj=r2TrnId?DB.trainings.find(function(rt){return rt.id===r2TrnId;}):null;
       var r2Att=r2TrnObj?DB.testResults.filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
-      r2Att.sort(function(a,b){return a.date.localeCompare(b.date);});
       var r2HasPass=r2Att.some(function(r){return r.pass;});
-      // If passed R2, don't show at all
       if(r2HasPass)return;
-      var r2Failed=!r2HasPass&&r2Att.length>0;
-      var r2BestScore=r2Att.length?Math.max.apply(null,r2Att.map(function(r){return r.score;})):0;
-      var r2YtId=r2Video?extractYoutubeId(r2Video):'';
-
-      rows.push({
+      var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
+      needR2Rows.push({
         empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,
-        failedTrnName:t.name,failedTrnId:t.id,failedTrnCat:t.cat,
-        failedTrnVideo:t.youtubeLink||'',
-        firstScore:firstScore,attempts:att.length,best:best,
-        r2TrnName:r2TrnName,r2TrnId:r2TrnId,r2Video:r2Video,r2YtId:r2YtId,
-        r2Deadline:r2Deadline,r2Trainer:r2Trainer,whyReason:whyReason,
+        failedTrnName:t.name,failedTrnId:t.id,failedTrnCat:t.cat,failedTrnVideo:t.youtubeLink||'',
+        firstScore:att[0].score,attempts:att.length,best:best,
         hasR2Assigned:!!r2Record,
-        r2Failed:r2Failed,r2Att:r2Att.length,r2BestScore:r2BestScore
+        r2TrnName:r2Record?r2Record.r2TrnName:'',r2TrnId:r2TrnId,
+        r2Video:r2Record?(r2Record.r2Video||''):'',r2Deadline:r2Record?(r2Record.r2Deadline||''):'',
+        r2Trainer:r2Record?(r2Record.r2Trainer||''):'',whyReason:r2Record?(r2Record.reason||''):'',
+        r2Failed:!r2HasPass&&r2Att.length>0,r2Att:r2Att.length,r2BestScore:r2Att.length?Math.max.apply(null,r2Att.map(function(r){return r.score;})):0
       });
     });
   });
 
-  // Filter
-  var filtered=rows.filter(function(r){
-    if(deptFilter!=='All'&&r.dept!==deptFilter)return false;
-    if(q){var m=r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q)||r.empId.toLowerCase().includes(q);if(!m)return false;}
-    return true;
-  });
+  // Separate into: need R2 (no assignment) and R2 assigned (show as training cards)
+  var noR2=needR2Rows.filter(function(r){return !r.hasR2Assigned;});
+  var hasR2=needR2Rows.filter(function(r){return r.hasR2Assigned;});
 
-  var totalFailed=rows.length;
-  var totalAssigned=rows.filter(function(r){return r.hasR2Assigned;}).length;
-  var totalOpen=rows.filter(function(r){return !r.hasR2Assigned;}).length;
-  var totalR2Failed=rows.filter(function(r){return r.r2Failed;}).length;
-  var allDepts=[];rows.forEach(function(r){if(allDepts.indexOf(r.dept)<0)allDepts.push(r.dept);});allDepts.sort();
+  // Apply search filter
+  if(q){
+    noR2=noR2.filter(function(r){return r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);});
+    hasR2=hasR2.filter(function(r){return r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.r2TrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);});
+  }
 
+  // Apply tab filter
+  if(filter==='needR2'){hasR2=[];}
+  else if(filter==='assigned'){noR2=[];}
+
+  var totalNeedR2=needR2Rows.filter(function(r){return !r.hasR2Assigned;}).length;
+  var totalAssigned=needR2Rows.filter(function(r){return r.hasR2Assigned;}).length;
+  var totalR2Failed=needR2Rows.filter(function(r){return r.r2Failed;}).length;
+
+  // Header
   var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div></div>';
 
   // Stat cards
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--red);"><div style="font-size:28px;font-weight:800;color:var(--red);">'+totalFailed+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">1st Test Failed</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);"><div style="font-size:28px;font-weight:800;color:var(--amber);">'+totalAssigned+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Assigned</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalOpen+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Need R2</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalR2Failed+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Also Failed</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);cursor:pointer;" onclick="window._r2filter=\'needR2\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:var(--amber);">'+totalNeedR2+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Need R2</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);cursor:pointer;" onclick="window._r2filter=\'assigned\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:var(--green);">'+totalAssigned+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Assigned</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;cursor:pointer;" onclick="window._r2filter=\'all\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalR2Failed+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Also Failed</div></div>';
   h+='</div>';
 
-  // Filters
+  // Search + filter tabs
   h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">';
   h+='<div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee or training..." oninput="window._r2search=this.value;renderRetraining()" value="'+window._r2search.replace(/"/g,'&quot;')+'"></div>';
-  if(allDepts.length>0){h+='<select class="form-control-sm" style="width:auto;min-width:120px;font-size:12px;" onchange="window._r2deptFilter=this.value;renderRetraining()"><option value="All"'+(deptFilter==='All'?' selected':'')+'>All Depts</option>';allDepts.forEach(function(dp){h+='<option value="'+dp+'"'+(deptFilter===dp?' selected':'')+'>'+dp+'</option>';});h+='</select>';}
+  h+='<div style="display:flex;gap:4px;">';
+  h+='<button class="btn btn-sm '+(filter==='all'?'btn-amber':'btn-outline')+'" style="font-size:11px;" onclick="window._r2filter=\'all\';renderRetraining()">All</button>';
+  h+='<button class="btn btn-sm '+(filter==='needR2'?'btn-amber':'btn-outline')+'" style="font-size:11px;" onclick="window._r2filter=\'needR2\';renderRetraining()">Need R2</button>';
+  h+='<button class="btn btn-sm '+(filter==='assigned'?'btn-amber':'btn-outline')+'" style="font-size:11px;" onclick="window._r2filter=\'assigned\';renderRetraining()">Assigned</button>';
+  h+='</div>';
   h+='</div>';
 
-  if(filtered.length===0){
-    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>All Clear!</h3><p>'+(q||deptFilter!=='All'?'No matching failures.':'No failed employees. Everyone passed!')+'</p></div>';
-    el.innerHTML=h;return;
+  // ===== SECTION 1: Employees needing R2 (no assignment yet) =====
+  if(noR2.length>0){
+    h+='<div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:16px;">warning</span> Need R2 Assignment ('+noR2.length+')</div>';
+    h+='<div class="training-cards">';
+    noR2.forEach(function(r){
+      var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
+      var catColor=catInfo.color;
+      var catIcon=catInfo.icon;
+      h+='<div class="training-card" style="cursor:default;">';
+      h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catColor+'33,'+catColor+'11)">';
+      h+='<div class="overlay-grad"></div>';
+      h+='<span class="category-chip">'+escAttr(r.failedTrnCat)+'</span>';
+      h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">error</span> Failed</span>';
+      h+='<span style="font-size:48px;">'+catIcon+'</span>';
+      h+='</div>';
+      h+='<div class="training-body">';
+      // Employee info
+      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+      h+='<div style="width:40px;height:40px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
+      h+='<div style="min-width:0;"><div class="training-title" style="font-size:14px;margin-bottom:2px;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
+      h+='</div>';
+      // Failed training name
+      h+='<div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">error</span> Failed: '+escAttr(r.failedTrnName)+'</div>';
+      h+='<div class="training-meta">';
+      h+='<span><span class="mat-ico" style="font-size:12px;">quiz</span>Score: <b style="color:var(--red);">'+r.firstScore+'%</b></span>';
+      h+='<span><span class="mat-ico" style="font-size:12px;">replay</span>Tries: '+r.attempts+'</span>';
+      h+='</div>';
+      // Assign button
+      h+='<div style="margin-top:10px;">';
+      h+='<button class="btn btn-sm btn-amber" style="width:100%;justify-content:center;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button>';
+      h+='</div>';
+      h+='</div></div>';
+    });
+    h+='</div>';
   }
 
-  // Cards - same layout as Training Management
-  h+='<div class="training-cards">';
-  filtered.forEach(function(r){
-    var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'📚'};
-    var catColor=catInfo.color;
-    var catIcon=catInfo.icon;
-
-    // Card thumbnail
-    h+='<div class="training-card" style="cursor:default;">';
-    h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catColor+'33,'+catColor+'11)">';
-    h+='<div class="overlay-grad"></div>';
-    h+='<span class="category-chip">'+escAttr(r.failedTrnCat)+'</span>';
-    h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">error</span> 1st Fail</span>';
-    if(r.r2Failed){
-      h+='<span class="badge" style="position:absolute;bottom:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">emergency</span> R2 Also Failed</span>';
+  // ===== SECTION 2: R2 Trainings Created (TRAINING cards like Training Management) =====
+  if(hasR2.length>0){
+    if(noR2.length>0){
+      h+='<div style="height:1px;background:var(--bdr);margin:20px 0 16px;"></div>';
     }
-    h+='<span style="font-size:48px;">'+catIcon+'</span>';
-    h+='</div>';
+    h+='<div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:16px;">school</span> R2 Trainings Created ('+hasR2.length+')</div>';
+    h+='<div class="training-cards">';
+    hasR2.forEach(function(r){
+      var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
+      var catColor=catInfo.color;
+      var catIcon=catInfo.icon;
+      var r2YtId=r.r2Video?extractYoutubeId(r.r2Video):'';
 
-    // Card body
-    h+='<div class="training-body">';
-    // Employee name + dept
-    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-    h+='<div style="width:44px;height:44px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
-    h+='<div style="min-width:0;"><div class="training-title" style="font-size:15px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
-    h+='</div>';
-
-    // Failed training name (the key info - which training they failed)
-    h+='<div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">error</span> Failed: '+escAttr(r.failedTrnName)+'</div>';
-
-    // Score meta
-    h+='<div class="training-meta">';
-    h+='<span><span class="mat-ico" style="font-size:12px;">quiz</span>Score: <b style="color:var(--red);">'+r.firstScore+'%</b></span>';
-    h+='<span><span class="mat-ico" style="font-size:12px;">replay</span>Tries: '+r.attempts+'</span>';
-    h+='<span><span class="mat-ico" style="font-size:12px;">emoji_events</span>Best: '+r.best+'%</span>';
-    h+='</div>';
-
-    // R2 Status indicator
-    if(r.hasR2Assigned){
+      // --- TRAINING CARD (like Training Management) ---
+      h+='<div class="training-card" style="cursor:default;">';
+      // Thumbnail
+      h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catColor+'33,'+catColor+'11)">';
+      h+='<div class="overlay-grad"></div>';
+      h+='<span class="category-chip">'+escAttr(r.failedTrnCat)+'</span>';
+      h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:linear-gradient(135deg,var(--amber),var(--orange));color:#000;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">replay</span> Round 2</span>';
       if(r.r2Failed){
-        h+='<div style="padding:6px 10px;background:rgba(231,76,60,.08);border-left:3px solid #e74c3c;border-radius:0 8px 8px 0;font-size:11px;color:#e74c3c;margin-bottom:8px;"><span class="mat-ico" style="font-size:13px;">emergency</span> R2 <b>'+escAttr(r.r2TrnName)+'</b> also failed ('+r.r2BestScore+'%)</div>';
-      }else{
-        h+='<div style="padding:6px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);margin-bottom:8px;"><span class="mat-ico" style="font-size:13px;">schedule</span> R2 <b>'+escAttr(r.r2TrnName)+'</b> in progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':'')+'</div>';
+        h+='<span class="badge" style="position:absolute;bottom:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">emergency</span> R2 Failed</span>';
       }
+      if(r2YtId){
+        h+='<span class="badge" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>';
+      }
+      h+='<span style="font-size:48px;">'+catIcon+'</span>';
+      h+='</div>';
+
+      // Body
+      h+='<div class="training-body">';
+      // R2 Training name (prominent, like Training Management)
+      h+='<div class="training-title">'+escAttr(r.r2TrnName)+'</div>';
+      // Meta info (trainer, deadline, date)
+      h+='<div class="training-meta">';
+      if(r.r2Trainer){h+='<span><span class="mat-ico" style="font-size:12px;">person</span>'+escAttr(r.r2Trainer)+'</span>';}
       if(r.r2Deadline){
         var isOverdue=new Date(r.r2Deadline)<new Date();
-        h+='<div style="font-size:10px;color:'+(isOverdue?'var(--red)':'var(--amber)')+';margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">event</span> Deadline: <b>'+formatDate(r.r2Deadline)+'</b>'+(isOverdue?' <span style="font-size:9px;">\u26A0\uFE0F Overdue</span>':'')+'</div>';
+        h+='<span style="color:'+(isOverdue?'var(--red)':'inherit')+'"><span class="mat-ico" style="font-size:12px;">event</span>Deadline: <b>'+formatDate(r.r2Deadline)+'</b>'+(isOverdue?' \u26A0\uFE0F':'')+'</span>';
       }
-      if(r.r2Trainer){h+='<div style="font-size:10px;color:var(--muted);margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">person</span> Trainer: '+escAttr(r.r2Trainer)+'</div>';}
-      if(r.whyReason){h+='<div style="font-size:10px;color:var(--muted);margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">edit_note</span> '+escAttr(r.whyReason)+'</div>';}
+      h+='</div>';
 
-      // Video embed - stays visible on the card (like Training Management)
-      if(r.r2YtId){
-        h+='<div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r.r2YtId+'?rel=0" style="width:100%;height:160px;" allowfullscreen></iframe></div>';
-        h+='<a href="'+r.r2Video+'" target="_blank" style="font-size:10px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:3px;margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">smart_display</span> R2 Video Link</a>';
+      // Employee info banner (who this R2 is for)
+      h+='<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);margin-top:8px;">';
+      h+='<div style="width:32px;height:32px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
+      h+='<div style="min-width:0;flex:1;"><div style="font-size:12px;font-weight:600;">'+escAttr(r.empName)+' <span style="color:var(--muted);font-weight:400;">'+escAttr(r.dept)+'</span></div></div>';
+      h+='<div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">1st Test</div><div style="font-size:13px;font-weight:700;color:var(--red);">'+r.firstScore+'%</div></div>';
+      h+='</div>';
+
+      // Failed training connection
+      h+='<div style="font-size:11px;color:var(--red);margin-top:6px;display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">error</span> Failed: <b>'+escAttr(r.failedTrnName)+'</b></div>';
+
+      // R2 Status
+      if(r.r2Failed){
+        h+='<div style="padding:6px 10px;background:rgba(231,76,60,.08);border-left:3px solid #e74c3c;border-radius:0 8px 8px 0;font-size:11px;color:#e74c3c;margin-top:6px;"><span class="mat-ico" style="font-size:13px;">emergency</span> R2 test also failed (best: '+r.r2BestScore+'%, '+r.r2Att+' tries)</div>';
+      }else{
+        h+='<div style="padding:6px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);margin-top:6px;"><span class="mat-ico" style="font-size:13px;">schedule</span> R2 in progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':' — awaiting test')+'</div>';
       }
-    }else{
-      // No R2 assigned yet - show Assign R2 button prominently
-      h+='<div style="margin:10px 0;padding:10px;background:rgba(255,176,32,.06);border:1px dashed var(--amber);border-radius:var(--r-sm);text-align:center;">';
-      h+='<div style="font-size:11px;color:var(--amber);margin-bottom:8px;"><span class="mat-ico" style="font-size:14px;">school</span> No R2 training assigned yet</div>';
-      h+='<button class="btn btn-sm btn-amber" style="font-size:11px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button>';
-      h+='</div>';
-    }
-    // Re-assign R2 button (shows for already-assigned cards)
-    if(r.hasR2Assigned){
-      h+='<div style="margin-top:10px;">';
-      h+='<button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);font-size:10px;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:11px;">refresh</span> Re-assign R2</button>';
-      h+='</div>';
-    }
 
-    h+='</div>'; // end training-body
-    h+='</div>'; // end training-card
-  });
-  h+='</div>'; // end training-cards
+      // Video embed — FULLY VISIBLE (like Training Management)
+      if(r2YtId){
+        h+='<div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r2YtId+'?rel=0" style="width:100%;height:180px;" allowfullscreen></iframe></div>';
+        h+='<a href="'+r.r2Video+'" target="_blank" style="font-size:10px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:3px;margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">open_in_new</span> Open in YouTube</a>';
+      }
+
+      // Reason
+      if(r.whyReason){h+='<div style="font-size:10px;color:var(--muted);margin-top:4px;"><span class="mat-ico" style="font-size:11px;">edit_note</span> '+escAttr(r.whyReason)+'</div>';}
+
+      // Action buttons
+      h+='<div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">';
+      h+='<button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:11px;">refresh</span> Re-assign</button>';
+      if(r.r2Failed){
+        h+='<button class="btn btn-sm" style="background:rgba(231,76,60,.1);color:#e74c3c;border:1px solid rgba(231,76,60,.3);" onclick="gotoView(\'offlinetraining\')"><span class="mat-ico" style="font-size:11px;">groups</span> Offline Training</button>';
+      }
+      h+='</div>';
+
+      h+='</div>'; // end training-body
+      h+='</div>'; // end training-card
+    });
+    h+='</div>'; // end training-cards
+  }
+
+  // Empty state
+  if(noR2.length===0&&hasR2.length===0){
+    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>All Clear!</h3><p>'+(q?'No matching records.':'No failed employees. Everyone passed!')+'</p></div>';
+  }
 
   el.innerHTML=h;
 }
