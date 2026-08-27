@@ -561,6 +561,7 @@ select.form-control-sm{background:var(--sur2);}
     </div>
     <button class="nav-item" data-view="trainings" onclick="gotoView('trainings')"><span class="mat-ico">school</span><span>Trainings</span><span class="nav-badge" id="nb-trainings">0</span></button>
     <button class="nav-item" data-view="retraining" onclick="gotoView('retraining')"><span class="mat-ico">replay</span><span>Round 2 Training</span><span class="nav-badge" id="nb-retraining" style="background:rgba(240,136,62,.2);color:var(--orange)">0</span></button>
+    <button class="nav-item" data-view="offlinetraining" onclick="gotoView('offlinetraining')"><span class="mat-ico">groups</span><span>Offline Training</span><span class="nav-badge" id="nb-offlinetraining" style="background:rgba(231,76,60,.15);color:#e74c3c">0</span></button>
     <button class="nav-item" data-view="equipment" onclick="gotoView('equipment')"><span class="mat-ico">build</span><span>Equipment Library</span><span class="nav-badge" id="nb-equipment">0</span></button>
     <div class="nav-section-title">Resources</div>
     <button class="nav-item" data-view="sop" onclick="gotoView('sop')"><span class="mat-ico">description</span><span>SOP Library</span></button>
@@ -628,6 +629,7 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-empcards"></div>
     <div class="view" id="view-trainings"></div>
     <div class="view" id="view-retraining"></div>
+    <div class="view" id="view-offlinetraining"></div>
     <div class="view" id="view-equipment"></div>
     <div class="view" id="view-sop"></div>
     <div class="view" id="view-quiz"></div>
@@ -1907,6 +1909,17 @@ function updateBadges(){
     });
   });
   var r2El=document.getElementById("nb-retraining");if(r2El)r2El.textContent=r2Count;
+  var offCount=0;
+  DB.trainings.forEach(function(t){
+    var r2Recs=(t.retrainingRecords||[]).filter(function(r){return r.r2TrnId;});
+    r2Recs.forEach(function(r2){
+      var r2Trn=DB.trainings.find(function(rt){return rt.id===r2.r2TrnId;});
+      if(!r2Trn)return;
+      var r2Res=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===r2.empId;});
+      if(r2Res.length>0&&!r2Res.some(function(r){return r.pass;}))offCount++;
+    });
+  });
+  var offEl=document.getElementById("nb-offlinetraining");if(offEl)offEl.textContent=offCount;
   // Employee: show unread admin replies badge on Message to Admin
   if(!isAdmin&&currentUser&&currentUser.id){
     var adminRepliesUnread=DB.notifications.filter(function(n){return n.fromEmp===currentUser.id&&n.replies&&n.replies.some(function(r){return r.byId!==currentUser.id;});}).length;
@@ -1931,10 +1944,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",retraining:"Round 2 Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",retraining:"Round 2 Training",offlinetraining:"Offline Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,retraining:renderRetraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,retraining:renderRetraining,offlinetraining:renderOfflineTraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   if(v==="dashboard"&&isAdmin){var ds=document.getElementById("view-dashboard");var ah=getBSCAuditHTML();if(ah&&ds){var oldSlot=ds.querySelector(".bsc-audit-slot");if(oldSlot)oldSlot.remove();var wrapper=document.createElement("div");wrapper.className="bsc-audit-slot";wrapper.innerHTML=ah;ds.appendChild(wrapper);}}
   closeSidebar();
@@ -5602,6 +5615,126 @@ function renderRetraining(){
 
   el.innerHTML=h;
 }
+
+function renderOfflineTraining(){
+  if(!isAdmin){document.getElementById('view-offlinetraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var el=document.getElementById('view-offlinetraining');
+  var empIdSet=DB.employees.map(function(e){return e.id;});
+
+  var rows=[];
+  DB.trainings.forEach(function(t){
+    var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
+    if(!enrolled.length)return;
+    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
+    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
+
+    enrolled.forEach(function(eid){
+      var emp=DB.employees.find(function(e){return e.id===eid;});
+      if(!emp)return;
+      var att=eMap[eid]||[];
+      if(att.length===0)return;
+      var hasPass=att.some(function(r){return r.pass;});
+      if(hasPass)return;
+      var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      if(!r2Record)return;
+      var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Record.r2TrnId;});
+      if(!r2Trn)return;
+      var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});
+      if(r2Att.length===0)return;
+      var r2HasPass=r2Att.some(function(r){return r.pass;});
+      if(r2HasPass)return;
+      var best1=0;att.forEach(function(r){if(r.score>best1)best1=r.score;});
+      var best2=0;r2Att.forEach(function(r){if(r.score>best2)best2=r.score;});
+      var r2YtId=r2Record.r2Video?extractYoutubeId(r2Record.r2Video):'';
+      rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,origTrnName:t.name,origTrnId:t.id,origCat:t.cat,r2TrnName:r2Trn.name,r2TrnId:r2Trn.id,origScore:att[0].score,origBest:best1,origTries:att.length,r2Score:r2Att[0].score,r2Best:best2,r2Tries:r2Att.length,r2Video:r2Record.r2Video||'',r2YtId:r2YtId,r2Deadline:r2Record.r2Deadline||'',r2Trainer:r2Record.r2Trainer||''});
+    });
+  });
+
+  var h='<div class="section-header"><div class="section-title">Offline <span>Training</span></div></div>';
+  h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">';
+  h+='<span class="mat-ico" style="color:#e74c3c;font-size:20px;">emergency</span>';
+  h+='<div><b>2x Failed Employees</b> — Failed both 1st test and Round 2. Need <b>offline/in-person training</b>. Send message to schedule.</div>';
+  h+='</div>';
+
+  var totalCases=rows.length;
+  var totalEmps=new Set(rows.map(function(r){return r.empId;})).size;
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalEmps+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Employees</div></div>';
+  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalCases+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Failed Cases</div></div>';
+  h+='</div>';
+
+  if(rows.length===0){
+    h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Cases!</h3><p>All R2 trainings passed.</p></div>';
+    el.innerHTML=h;return;
+  }
+
+  h+='<div class="training-cards">';
+  rows.forEach(function(r){
+    var catInfo=CATEGORIES[r.origCat]||{color:'#ffb020',icon:'\ud83d\udcda'};
+    h+='<div class="training-card" style="cursor:default;">';
+    h+='<div class="training-thumb" style="background:linear-gradient(135deg,rgba(231,76,60,.15),rgba(231,76,60,.05))">';
+    h+='<div class="overlay-grad"></div>';
+    h+='<span class="category-chip" style="background:rgba(231,76,60,.8);">'+escAttr(r.origCat)+'</span>';
+    h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">emergency</span> 2x Failed</span>';
+    h+='<span style="font-size:48px;">'+catInfo.icon+'</span>';
+    h+='</div>';
+
+    h+='<div class="training-body">';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+    h+='<div style="width:44px;height:44px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
+    h+='<div style="min-width:0;"><div class="training-title" style="font-size:15px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
+    h+='</div>';
+
+    h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.15);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;">';
+    h+='<div style="font-size:11px;font-weight:700;color:#e74c3c;margin-bottom:4px;"><span class="mat-ico" style="font-size:12px;">error</span> 1st Test: '+escAttr(r.origTrnName)+'</div>';
+    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);margin-bottom:4px;"><span>Score: <b style="color:#e74c3c;">'+r.origScore+'%</b></span><span>Tries: '+r.origTries+'</span><span>Best: '+r.origBest+'%</span></div>';
+    h+='<div style="height:1px;background:var(--bdr);margin:6px 0;"></div>';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--orange);margin-bottom:4px;"><span class="mat-ico" style="font-size:12px;">replay</span> R2 Test: '+escAttr(r.r2TrnName)+'</div>';
+    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);"><span>Score: <b style="color:var(--orange);">'+r.r2Score+'%</b></span><span>Tries: '+r.r2Tries+'</span><span>Best: '+r.r2Best+'%</span></div>';
+    h+='</div>';
+
+    if(r.r2YtId){
+      h+='<div style="margin-bottom:8px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r.r2YtId+'?rel=0" style="width:100%;height:140px;" allowfullscreen></iframe></div>';
+    }
+
+    h+='<button class="btn btn-sm" style="background:#e74c3c;color:#fff;font-size:11px;width:100%;justify-content:center;" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-o="'+escAttr(r.origTrnName)+'" data-r="'+escAttr(r.r2TrnName)+'" onclick="openOfflineMsg(this.dataset.e,this.dataset.n,this.dataset.o,this.dataset.r)"><span class="mat-ico" style="font-size:13px;">mail</span> Send Offline Training Message</button>';
+
+    h+='</div>'; // end training-body
+    h+='</div>'; // end training-card
+  });
+  h+='</div>'; // end training-cards
+
+  el.innerHTML=h;
+}
+
+function openOfflineMsg(empId,empName,origTrnName,r2TrnName){
+  var sn=empName.replace(/"/g,'&quot;');
+  window._offlineMsgData={empId:empId,empName:empName};
+  openModal(
+    '<div class="modal-accent" style="background:linear-gradient(135deg,#e74c3c,#c0392b);"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(231,76,60,.15)"><span class="mat-ico" style="color:#e74c3c;font-size:22px;">mail</span></div><h2>Offline Training Message</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">'+
+    '<div style="display:flex;align-items:center;gap:8px;">'+
+    '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
+    '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:#e74c3c;">Failed 2x: '+escAttr(origTrnName)+' &rarr; '+escAttr(r2TrnName)+'</span></div>'+
+    '</div></div>'+
+    '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Message <span style="color:var(--red);">*</span></label>'+
+    '<textarea class="form-control-sm" id="offlineMsgText" rows="4" placeholder="Schedule offline/in-person training session... e.g. Please attend offline training on [date] at [location]" style="font-size:13px;"></textarea></div>'+
+    '</div>'+
+    '<div class="modal-foot"><button class="btn" style="background:#e74c3c;color:#fff;" onclick="sendOfflineMsg()"><span class="mat-ico">send</span> Send Message</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','520px');
+}
+
+function sendOfflineMsg(){
+  var d=window._offlineMsgData;if(!d){toast('Error','error');return;}
+  var msg=(document.getElementById('offlineMsgText').value||'').trim();
+  if(!msg){toast('Enter a message','error');return;}
+  DB.notifications.unshift({id:genId('N'),msg:'[Offline Training Required] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId});
+  closeModal();saveDB();updateBadges();
+  toast('Offline training message sent to '+d.empName,'success');
+}
+
 
 function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
