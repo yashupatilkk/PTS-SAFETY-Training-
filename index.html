@@ -3610,11 +3610,11 @@ function openTrainingDetail(id){
           else if(retrained){statusBadge='warning';statusText='🔄 Retrained';}
           else if(failed){statusBadge='danger';statusText='❌ Failed ('+failCount+'x)';}
           else{statusBadge='warning';statusText='⏳ Pending';}
-          var actionBtns='<button class=\'btn btn-sm btn-red\' onclick=\'removeEmployeeFromTraining(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Remove\'><span class=\'mat-ico\' style=\'font-size:14px;\'>cancel</span></button>';
+          var actionBtns='<button class="btn btn-sm btn-red" onclick="removeEmployeeFromTraining(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')" title="Remove"><span class="mat-ico" style="font-size:14px;">cancel</span></button>';
           if(failed&&!done){
-            if(!retrained){actionBtns+='<button class=\'btn btn-sm btn-amber\' onclick=\'retrainEmployee(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 2: Retrain (allow retake)\'><span class=\'mat-ico\' style=\'font-size:11px;\'>replay</span></button>';}
-            else if(failCount>=2&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm\' style=\'background:var(--blue);color:#fff;\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>assignment</span></button>';}
-            if(retrained&&!offlineTrained){actionBtns+='<button class=\'btn btn-sm btn-outline\' onclick=\'sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')\' title=\'Step 3: Send Offline Training Notice\'><span class=\'mat-ico\' style=\'font-size:11px;\'>mail</span></button>';
+            if(!retrained){actionBtns+='<button class="btn btn-sm btn-amber" onclick="retrainEmployee(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')" title="Step 2: Retrain (allow retake)"><span class="mat-ico" style="font-size:11px;">replay</span></button>';}
+            else if(failCount>=2&&!offlineTrained){actionBtns+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;" onclick="sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')" title="Step 3: Send Offline Training Notice"><span class="mat-ico" style="font-size:11px;">assignment</span></button>';}
+            if(retrained&&!offlineTrained){actionBtns+='<button class="btn btn-sm btn-outline" onclick="sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')" title="Step 3: Send Offline Training Notice"><span class="mat-ico" style="font-size:11px;">mail</span></button>';
 }
           }
           const cert=DB.certificates.find(c=>c.empId===e.id&&c.training===t.name);
