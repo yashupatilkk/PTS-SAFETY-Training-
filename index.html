@@ -41,8 +41,7 @@ select option{background:var(--sur);}
 @keyframes grS{to{background-position:300% 50%;}}
 /* LOGIN - SAFETY THEMED */
 #loginPage{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:#0a0c10;overflow:auto;}
-.login-bg{position:absolute;inset:0;background:radial-gradient(ellipse at 20% 80%,rgba(232,72,58,.07) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(255,176,32,.05) 0%,transparent 50%),radial-gradient(ellipse at 50% 50%,rgba(62,207,142,.03) 0%,transparent 60%);pointer-events:none;animation:bgShift 8s ease-in-out infinite alternate;}
-@keyframes bgShift{0%{filter:hue-rotate(0deg) brightness(1);}50%{filter:hue-rotate(5deg) brightness(1.05);}100%{filter:hue-rotate(-3deg) brightness(1);}}
+.login-bg{position:absolute;inset:0;background:radial-gradient(ellipse at 20% 80%,rgba(232,72,58,.07) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(255,176,32,.05) 0%,transparent 50%),radial-gradient(ellipse at 50% 50%,rgba(62,207,142,.03) 0%,transparent 60%);pointer-events:none;}
 .login-dots{position:absolute;inset:0;background-image:radial-gradient(circle at 1px 1px,rgba(255,176,32,.15) .5px,transparent 0);background-size:40px 40px;opacity:.3;pointer-events:none;}
 .login-safety-bar{position:absolute;top:0;left:0;right:0;height:4px;background:repeating-linear-gradient(90deg,#e8483a 0 30px,#ffb020 30px 60px,#3ecf8e 60px 90px);animation:safetyBarSlide 4s linear infinite;}
 @keyframes safetyBarSlide{to{background-position:90px 0;}}
@@ -51,32 +50,24 @@ select option{background:var(--sur);}
 .login-safety-icons::before{top:10%;right:8%;width:180px;height:180px;border:2px dashed rgba(232,72,58,.12);animation:safetySpin 30s linear infinite;}
 .login-safety-icons::after{bottom:15%;left:5%;width:120px;height:120px;border:2px dashed rgba(255,176,32,.1);animation:safetySpin 25s linear infinite reverse;}
 @keyframes safetySpin{to{transform:rotate(360deg);}}
-.login-wrap{position:relative;z-index:1;width:100%;max-width:540px;padding:20px;padding-bottom:max(40px, env(safe-area-inset-bottom, 40px));animation:wrapFloat 6s ease-in-out infinite;}
-@keyframes wrapFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-4px);}}
-.login-card{background:rgba(22,27,34,.92);backdrop-filter:blur(24px);border:1px solid rgba(232,72,58,.15);border-radius:20px;padding:40px 36px;box-shadow:0 8px 40px rgba(0,0,0,.6),0 0 80px rgba(232,72,58,.05),inset 0 1px 0 rgba(255,255,255,.03);position:relative;overflow:hidden;transition:box-shadow .5s ease,border-color .5s ease;animation:cardAppear .6s ease-out;}
-@keyframes cardAppear{from{opacity:0;transform:translateY(20px) scale(.97);filter:blur(4px);}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0);}}
-.login-card:hover{border-color:rgba(232,72,58,.3);box-shadow:0 12px 48px rgba(0,0,0,.7),0 0 100px rgba(232,72,58,.1),inset 0 1px 0 rgba(255,255,255,.05);}
-.login-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#e8483a,#ffb020,#3ecf8e,#3ea0e8,#8b6de8,#e8483a);background-size:200% 100%;animation:borderShimmer 4s linear infinite;}
-@keyframes borderShimmer{0%{background-position:0% 0%;}100%{background-position:200% 0%;}}
+.login-wrap{position:relative;z-index:1;width:100%;max-width:540px;padding:20px;padding-bottom:max(40px, env(safe-area-inset-bottom, 40px));}
+.login-card{background:rgba(22,27,34,.92);backdrop-filter:blur(24px);border:1px solid rgba(232,72,58,.15);border-radius:20px;padding:40px 36px;box-shadow:0 8px 40px rgba(0,0,0,.6),0 0 80px rgba(232,72,58,.05),inset 0 1px 0 rgba(255,255,255,.03);position:relative;overflow:hidden;}
+.login-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#e8483a,#ffb020,#3ecf8e);}
 .login-logo{text-align:center;margin-bottom:24px;}
-.login-logo .logo-mark{width:72px;height:72px;border-radius:16px;background:linear-gradient(135deg,#e8483a 0%,#ffb020 100%);margin:0 auto 14px;display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 32px rgba(232,72,58,.35);animation:safetyPulse 3s ease-in-out infinite;position:relative;overflow:hidden;}
-.login-logo .logo-mark::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.3) 50%,transparent 60%);animation:logoShimmer 3s ease-in-out infinite;}
-@keyframes logoShimmer{0%,100%{transform:translateX(-100%);}50%{transform:translateX(100%);}}
+.login-logo .logo-mark{width:72px;height:72px;border-radius:16px;background:linear-gradient(135deg,#e8483a 0%,#ffb020 100%);margin:0 auto 14px;display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 32px rgba(232,72,58,.35);animation:safetyPulse 3s ease-in-out infinite;position:relative;}
 .login-logo .logo-mark::after{content:'';position:absolute;inset:-4px;border-radius:20px;border:2px solid rgba(232,72,58,.2);animation:safetyRing 2s ease-in-out infinite;}
 @keyframes safetyPulse{0%,100%{box-shadow:0 8px 32px rgba(232,72,58,.35);}50%{box-shadow:0 8px 48px rgba(255,176,32,.4);}}
 @keyframes safetyRing{0%,100%{opacity:.2;transform:scale(1);}50%{opacity:.5;transform:scale(1.05);}}
 @keyframes strA{to{background-position:22px 22px;}}
-.login-logo h1{font-size:22px;text-transform:uppercase;font-weight:800;letter-spacing:.08em;background:linear-gradient(90deg,#e8483a,#ffb020,#e8483a);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:textGrad 4s linear infinite;}
-@keyframes textGrad{0%{background-position:0% center;}100%{background-position:200% center;}}
+.login-logo h1{font-size:20px;text-transform:uppercase;font-weight:700;letter-spacing:.06em;background:linear-gradient(90deg,#e8483a,#ffb020);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
 .login-logo p{font-size:10.5px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:4px;}
 .login-tabs{display:flex;gap:4px;background:rgba(255,255,255,.04);border:1px solid var(--bdr);border-radius:12px;padding:4px;margin-bottom:22px;}
-.login-tab{flex:1;padding:9px;border-radius:9px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);transition:all .3s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;border:none;background:transparent;cursor:pointer;}
-.login-tab:not(.active):hover{color:var(--txt);background:rgba(255,255,255,.06);}
+.login-tab{flex:1;padding:9px;border-radius:9px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);transition:all .25s ease;border:none;background:transparent;cursor:pointer;}
 .login-tab.active{background:linear-gradient(135deg,#e8483a,#d43a2e);color:#fff;box-shadow:0 4px 16px rgba(232,72,58,.3);}
 .form-group{margin-bottom:14px;}
 .form-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px;}
 .form-control{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--bdr);background:rgba(255,255,255,.03);color:var(--txt);font-size:13.5px;transition:all .25s ease;}
-.form-control:focus{border-color:#e8483a;box-shadow:0 0 0 3px rgba(232,72,58,.12),0 0 20px rgba(232,72,58,.06);outline:none;transform:translateY(-1px);}
+.form-control:focus{border-color:#e8483a;box-shadow:0 0 0 3px rgba(232,72,58,.12);outline:none;}
 .input-icon-wrap{position:relative;}
 .input-icon-wrap .mat-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;}
 .input-icon-wrap .form-control{padding-left:38px;}
@@ -85,13 +76,9 @@ select option{background:var(--sur);}
 .checkbox-label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer;}
 .checkbox-label input[type=checkbox]{width:15px;height:15px;accent-color:#e8483a;}
 .link-btn{font-size:12.5px;color:#e8483a;font-weight:600;background:none;border:none;cursor:pointer;}
-.btn-primary-full{width:100%;padding:14px;border-radius:10px;background:linear-gradient(135deg,#e8483a 0%,#c73a2e 100%);color:#fff;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;transition:all .3s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(232,72,58,.3);}
-.btn-primary-full::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.15) 50%,transparent 60%);transform:translateX(-100%);transition:transform .6s ease;}
-.btn-primary-full:hover::after{transform:translateX(100%);}
-.btn-primary-full:hover{background:linear-gradient(135deg,#ff5a4a 0%,#e8483a 100%);transform:translateY(-2px);box-shadow:0 8px 30px rgba(232,72,58,.5);}
-.btn-primary-full:active{transform:translateY(0) scale(.98);box-shadow:0 2px 8px rgba(232,72,58,.3);}
-.login-footer{text-align:center;margin-top:20px;padding-bottom:40px;font-size:11px;color:var(--muted);letter-spacing:.04em;animation:footerFade 1s ease .3s both;}
-@keyframes footerFade{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+.btn-primary-full{width:100%;padding:14px;border-radius:10px;background:linear-gradient(135deg,#e8483a 0%,#c73a2e 100%);color:#fff;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;transition:all .25s ease;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(232,72,58,.3);}
+.btn-primary-full:hover{background:linear-gradient(135deg,#ff5a4a 0%,#e8483a 100%);transform:translateY(-1px);box-shadow:0 6px 24px rgba(232,72,58,.4);}
+.login-footer{text-align:center;margin-top:20px;padding-bottom:40px;font-size:11px;color:var(--muted);letter-spacing:.04em;}
 .login-footer span{color:var(--amber);font-weight:600;}
 .demo-hint{background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.15);border-radius:10px;padding:12px 16px;margin-top:14px;font-size:11.5px;color:var(--muted);text-align:left;}
 .demo-hint b{color:#e8483a;}
@@ -164,10 +151,6 @@ select option{background:var(--sur);}
 @keyframes conePass{0%,10%{opacity:1;transform:translateY(0);}15%,25%{opacity:0;transform:translateY(8px);}30%,100%{opacity:1;transform:translateY(0);}}
 
 /* ===== END SAFETY VEHICLE ===== */
-
-.login-particles{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0;}
-.login-particle{position:absolute;border-radius:50%;opacity:0;animation:pFloat linear infinite;}
-@keyframes pFloat{0%{opacity:0;transform:translateY(100vh) scale(0);}10%{opacity:.6;}90%{opacity:.6;}100%{opacity:0;transform:translateY(-10vh) scale(1);}}
 
 /* SIDEBAR */
 .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:59;}
@@ -457,7 +440,6 @@ select.form-control-sm{background:var(--sur2);}
 <div id="loginPage">
   <div class="login-bg"></div>
   <div class="login-dots"></div>
-  <div class="login-particles" id="loginParticles"></div>
   <div class="login-safety-bar"></div>
   <div class="login-safety-icons"></div>
 
@@ -1623,7 +1605,6 @@ function formatDate(d){if(!d)return"N/A";const dt=new Date(d);return dt.toLocale
 function genId(prefix){return prefix+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();}
 function avatarColor(name){const colors=["#e8483a","#ffb020","#3ecf8e","#3ea0e8","#8b6de8","#f0883e"];let h=0;for(let c of(name||"?"))h+=c.charCodeAt(0);return colors[h%colors.length];}
 function avatarInitials(name){return(name||"?").split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);}
-function escAttr(s){return(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function daysUntil(dateStr){const now=new Date(),d=new Date(dateStr);return Math.ceil((d-now)/(1000*60*60*24));}
 function shuffle(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 function extractYoutubeId(url){
@@ -1909,16 +1890,9 @@ function updateBadges(){
     });
   });
   var r2El=document.getElementById("nb-retraining");if(r2El)r2El.textContent=r2Count;
-  var offCount=0;
-  DB.trainings.forEach(function(t){
-    var r2Recs=(t.retrainingRecords||[]).filter(function(r){return r.r2TrnId;});
-    r2Recs.forEach(function(r2){
-      var r2Trn=DB.trainings.find(function(rt){return rt.id===r2.r2TrnId;});
-      if(!r2Trn)return;
-      var r2Res=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===r2.empId;});
-      if(r2Res.length>0&&!r2Res.some(function(r){return r.pass;}))offCount++;
-    });
-  });
+  // Offline training badge
+  var offCount=0;var empIdSet2=DB.employees.map(function(e){return e.id;});
+  DB.trainings.forEach(function(t){var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});if(!enrolled.length)return;var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});enrolled.forEach(function(eid){var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;var r2Rec=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});if(!r2Rec)return;var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Rec.r2TrnId;});if(!r2Trn)return;var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});if(!r2Att.length)return;if(r2Att.some(function(r){return r.pass;}))return;offCount++;});});
   var offEl=document.getElementById("nb-offlinetraining");if(offEl)offEl.textContent=offCount;
   // Employee: show unread admin replies badge on Message to Admin
   if(!isAdmin&&currentUser&&currentUser.id){
@@ -1934,7 +1908,6 @@ function updateLoginClock(){
   if(el)el.textContent=now.toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})+" | "+now.toLocaleTimeString("en-IN");
 }
 setInterval(updateLoginClock,1000);updateLoginClock();
-(function(){var pc=document.getElementById('loginParticles');if(!pc)return;var cols=['rgba(232,72,58,.5)','rgba(255,176,32,.4)','rgba(62,207,142,.4)','rgba(62,160,232,.3)'];function sp(){if(!pc||!pc.isConnected)return;var p=document.createElement('div');p.className='login-particle';var sz=Math.random()*4+2;p.style.cssText='width:'+sz+'px;height:'+sz+'px;left:'+Math.random()*100+'%;background:'+cols[Math.floor(Math.random()*cols.length)]+';animation-duration:'+(Math.random()*8+6)+'s;animation-delay:'+(Math.random()*2)+'s;';pc.appendChild(p);setTimeout(function(){if(p.parentNode)p.remove();},16000);}for(var i=0;i<15;i++)setTimeout(sp,i*400);setInterval(sp,1200);})();
 
 /* ============================================================
    NAVIGATION
@@ -1944,7 +1917,7 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",retraining:"Round 2 Training",offlinetraining:"Offline Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",retraining:"Round 2 Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
   const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,retraining:renderRetraining,offlinetraining:renderOfflineTraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
@@ -3286,11 +3259,12 @@ function renderTrainings(){
   var _had=false;
   DB.trainings=DB.trainings.filter(function(t){var m=_cn.some(function(n){return(t.name||'').indexOf(n)!==-1;});if(m){_had=true;if(!_deletedIds.trainings)_deletedIds.trainings=[];if(!_deletedIds.trainings.includes(t.id))_deletedIds.trainings.push(t.id);try{fbDB.collection('trainings').doc(String(t.id)).delete().catch(function(){});}catch(e){}return false;}return true;});
   if(_had){try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(_deletedIds));}catch(e2){}}catch(e){}}
+  // Filter out any corrupted entries that slipped through
   // MIGRATION: Retroactively mark R2 trainings that lack the _isR2Training flag
   var _r2Ids={};DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.r2TrnId)_r2Ids[r.r2TrnId]=true;});});
   var _mig=false;DB.trainings.forEach(function(t){if(_r2Ids[t.id]&&!t._isR2Training){t._isR2Training=true;_mig=true;}});
   if(_mig){try{saveDB();}catch(e){}}
-  // Filter out any corrupted entries that slipped through, AND R2 trainings (they belong in Round 2 page only)
+  // Filter out corrupted entries AND R2 trainings (Round 2 page only)
   const cleanTrainings=DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined'&&t.cat&&!t._isR2Training;});
   const filtered=cleanTrainings.filter(t=>{
     const q=trn_search.toLowerCase();
@@ -3325,6 +3299,7 @@ function renderTrainings(){
           </div>
           <div class="training-body">
             <div class="training-title">${t.name}</div>
+            ${isR2?`<div style="background:linear-gradient(135deg,rgba(255,176,32,.1),rgba(240,136,62,.08));border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;font-size:11px;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="color:var(--amber);font-weight:700;">🔄 Round 2 Retraining</span></div><div style="color:var(--txt2);"><b>Failed Training:</b> <span style="color:var(--red);">${r2Info.origName}</span></div>${r2Info.reason?'<div style="color:var(--txt2);margin-top:2px;"><b>Reason:</b> '+r2Info.reason+'</div>':''}${r2Info.r2Deadline?'<div style="color:'+(new Date(r2Info.r2Deadline)<new Date()?'var(--red)':'var(--amber)')+';margin-top:2px;"><b>Deadline:</b> '+formatDate(r2Info.r2Deadline)+(new Date(r2Info.r2Deadline)<new Date()?' <span style="color:var(--red);font-weight:700;">⚠️ Overdue!</span>':'')+'</div>':''}</div>`:''}
             <div class="training-meta">
               <span><span class="mat-ico" style="font-size:12px;">person</span>${t.trainer}</span>
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
@@ -3350,7 +3325,8 @@ function renderTrainings(){
 }
 function renderEmpTrainings(){
   const empId=currentUser.id;
-  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
+  // R2 trainings show in Round 2 Training page, not here
+  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept))).filter(t=>!t._isR2Training);
   const r2Map={};
   DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){r2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason};}});});
   const r2TrnIds=new Set(Object.keys(r2Map));
@@ -5447,15 +5423,89 @@ function confirmCAAssignV2(){
    ROUND 2 TRAINING — Same as Training Management but for retraining
 ============================================================ */
 function renderRetraining(){
-  if(!isAdmin){document.getElementById('view-retraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  // EMPLOYEE VIEW: Show their R2 trainings with video + test
+  if(!isAdmin){
+    var empEl=document.getElementById('view-retraining');
+    var myId=currentUser.id;
+    var r2Map={};
+    DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===myId&&r.r2TrnId){r2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason};}});});
+    var myR2Trns=DB.trainings.filter(function(t){return t._isR2Training&&(t.enrolled||[]).includes(myId);});
+    var h='<div class="section-header"><div class="section-title">My <span>Round 2 Training</span></div></div>';
+    h+='<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">';
+    h+='<span class="mat-ico" style="color:var(--amber);font-size:20px;">replay</span>';
+    h+='<div><b>Round 2 Training</b> \u2014 You failed the first test. Watch the video and take the test again. Watch <b>90%</b> to unlock.</div></div>';
+    if(!myR2Trns.length){
+      h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No R2 Trainings</h3><p>You have no Round 2 trainings assigned.</p></div>';
+      empEl.innerHTML=h;return;
+    }
+    h+='<div class="training-cards">';
+    myR2Trns.forEach(function(t){
+      var catInfo=CATEGORIES[t.cat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
+      var r2Info=r2Map[t.id]||null;
+      var myRes=DB.testResults.filter(function(r){return r.empId===myId&&r.training===t.name;});
+      var myPassRes=myRes.filter(function(r){return r.pass;});
+      var done=myPassRes.length>0;
+      var bestRes=myRes.length?myRes.slice().sort(function(a,b){return b.score-a.score;})[0]:null;
+      var alreadyTested=myRes.length>0;
+      var videoProgress=((t.videoProgress||{})[myId])||0;
+      var ytEmbedId=extractYoutubeId(t.youtubeLink||'');
+      var hasVideo=!!ytEmbedId;
+      var videoCompleted=videoProgress>=90;
+      var canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
+      h+='<div class="training-card">';
+      h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)">';
+      h+='<div class="overlay-grad"></div>';
+      h+='<span class="category-chip">'+escAttr(t.cat)+'</span>';
+      h+='<span class="badge" style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,var(--amber),var(--orange));color:#000;font-size:10px;padding:3px 8px;z-index:2;">\uD83D\uDD04 Round 2</span>';
+      if(hasVideo){h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>';}
+      if(done){h+='<span class="badge badge-active" style="position:absolute;top:8px;right:8px;"><span class="mat-ico" style="font-size:11px;">check_circle</span> '+bestRes.score+'%</span>';}else if(hasVideo){h+='<span class="badge badge-'+(videoCompleted?'active':'warning')+'" style="position:absolute;bottom:8px;right:8px;">'+(videoCompleted?'\u2705 Video Done':'\u23F3 '+videoProgress+'%')+'</span>';}
+      h+='<span style="font-size:48px;">'+catInfo.icon+'</span>';
+      h+='</div>';
+      h+='<div class="training-body">';
+      h+='<div class="training-title">'+escAttr(t.name)+'</div>';
+      if(r2Info){h+='<div style="font-size:11px;color:var(--red);margin-bottom:6px;"><span class="mat-ico" style="font-size:12px;">error</span> Failed: <b>'+escAttr(r2Info.origName)+'</b>'+(r2Info.r2Deadline?' &mdash; Deadline: '+formatDate(r2Info.r2Deadline):'')+'</div>';}
+      h+='<div class="training-meta">';
+      if(t.trainer){h+='<span><span class="mat-ico" style="font-size:12px;">person</span>'+escAttr(t.trainer)+'</span>';}
+      h+='<span><span class="mat-ico" style="font-size:12px;">calendar_month</span>'+formatDate(t.date)+'</span>';
+      h+='<span><span class="mat-ico" style="font-size:12px;">timer</span>'+((t.duration&&t.duration!=='--')?t.duration:'Not set')+'</span>';
+      h+='</div>';
+      if(hasVideo){
+        h+='<div id="trnVidPlayer_'+t.id+'" style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);width:100%;height:200px;"></div>';
+        h+='<div style="padding:8px 10px;background:var(--sur2);border-radius:0 0 var(--r-sm) var(--r-sm);border:1px solid var(--bdr);border-top:none;margin-top:-4px;">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;font-weight:700;color:var(--amber);">Watch Progress</span><span style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);"><span id="trnVidTime_'+t.id+'">0:00</span><span id="trnVidPct_'+t.id+'" style="font-weight:700;color:'+(videoCompleted?'var(--green)':'var(--amber)')+';">'+videoProgress+'%</span></span></div>';
+        h+='<div style="height:6px;background:var(--sur3);border-radius:99px;overflow:hidden;margin-bottom:6px;"><div id="trnVidBar_'+t.id+'" style="height:100%;width:'+videoProgress+'%;background:'+(videoCompleted?'var(--green)':'linear-gradient(90deg,var(--amber),var(--green))')+';border-radius:99px;transition:width 0.5s ease;"></div></div>';
+        if(!videoCompleted){h+='<div id="trnVidLock_'+t.id+'" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% \u2014 forwarding/skipping not counted</div>';}else{h+='<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video completed! You can now take the test.</div>';}
+        h+='</div>';
+      }
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:6px;">';
+      h+='<span class="badge badge-'+(done?'active':'warning')+'">'+(done?'\u2705 Completed ('+bestRes.score+'%)':alreadyTested?'\u274C Failed ('+bestRes.score+'%)':'\u23F3 Pending')+'</span>';
+      h+='<span style="font-size:10.5px;color:var(--muted);">Pass: '+t.passing+'%</span>';
+      h+='</div>';
+      if(alreadyTested){h+='<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Your score: <b style="color:'+(bestRes.pass?'var(--green)':'var(--red)')+';">'+bestRes.score+'%</b> ('+bestRes.correct+'/'+bestRes.total+' correct) \u2014 Attempt #'+bestRes.attempt+'</div>';}
+      h+='<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">';
+      if(canTakeTest){h+='<button id="trnVidTestBtn_'+t.id+'" class="btn btn-sm btn-amber" onclick="startQuizForTrn(\''+t.id+'\')" '+(videoCompleted?'style="animation:pulseGlow 1.5s ease-in-out infinite;"':'disabled style="opacity:0.5;cursor:not-allowed;"')+'><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>';}
+      else if(alreadyTested&&!done){h+='<div style="padding:4px 10px;background:rgba(232,72,58,.08);border-radius:6px;font-size:11px;color:var(--red);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">block</span> Test taken (score: '+bestRes.score+'%)</div>';}
+      else if(done){h+='<div style="padding:4px 10px;background:rgba(62,207,142,.08);border-radius:6px;font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">verified</span> Training completed</div>';}
+      if(done){var _certRes=myRes.find(function(r){return r.cert;});if(_certRes){h+='<button class="btn btn-sm btn-outline" onclick="downloadCertificate(\''+_certRes.cert+'\')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Certificate</button>';}}
+      h+='</div></div></div>';
+    });
+    h+='</div>';
+    empEl.innerHTML=h;
+    setTimeout(function(){
+      myR2Trns.forEach(function(t){
+        var ytId=extractYoutubeId(t.youtubeLink||'');
+        if(ytId){initTrnVideoTracker(ytId,t.id,myId);}
+      });
+    },800);
+    return;
+  }
+  // ADMIN VIEW
   var el=document.getElementById('view-retraining');
   if(typeof window._r2search==='undefined')window._r2search='';
   if(typeof window._r2filter==='undefined')window._r2filter='all';
   var q=window._r2search.toLowerCase();
   var filter=window._r2filter;
   var empIdSet=DB.employees.map(function(e){return e.id;});
-
-  // Collect employees who failed 1st test (no R2 yet, no pass, no offline, no R2 pass)
   var needR2Rows=[];
   DB.trainings.forEach(function(t){
     if(t._isR2Training)return;
@@ -5467,195 +5517,83 @@ function renderRetraining(){
     enrolled.forEach(function(eid){
       var emp=DB.employees.find(function(e){return e.id===eid;});
       if(!emp)return;
-      var att=eMap[eid]||[];
-      if(att.length===0)return;
-      var hasPass=att.some(function(r){return r.pass;});
-      if(hasPass)return;
-      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});
-      if(hasCert)return;
-      var isOffline=(t.offlineTrained||[]).includes(eid);
-      if(isOffline)return;
+      var att=eMap[eid]||[];if(att.length===0)return;
+      var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;
+      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
+      var isOffline=(t.offlineTrained||[]).includes(eid);if(isOffline)return;
       var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
       var r2TrnId=r2Record?r2Record.r2TrnId:'';
       var r2TrnObj=r2TrnId?DB.trainings.find(function(rt){return rt.id===r2TrnId;}):null;
       var r2Att=r2TrnObj?DB.testResults.filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
-      var r2HasPass=r2Att.some(function(r){return r.pass;});
-      if(r2HasPass)return;
+      var r2HasPass=r2Att.some(function(r){return r.pass;});if(r2HasPass)return;
       var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
-      needR2Rows.push({
-        empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,
-        failedTrnName:t.name,failedTrnId:t.id,failedTrnCat:t.cat,failedTrnVideo:t.youtubeLink||'',
-        firstScore:att[0].score,attempts:att.length,best:best,
-        hasR2Assigned:!!r2Record,
-        r2TrnName:r2Record?r2Record.r2TrnName:'',r2TrnId:r2TrnId,
-        r2Video:r2Record?(r2Record.r2Video||''):'',r2Deadline:r2Record?(r2Record.r2Deadline||''):'',
-        r2Trainer:r2Record?(r2Record.r2Trainer||''):'',whyReason:r2Record?(r2Record.reason||''):'',
-        r2Failed:!r2HasPass&&r2Att.length>0,r2Att:r2Att.length,r2BestScore:r2Att.length?Math.max.apply(null,r2Att.map(function(r){return r.score;})):0
-      });
+      needR2Rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,failedTrnName:t.name,failedTrnId:t.id,failedTrnCat:t.cat,firstScore:att[0].score,attempts:att.length,best:best,hasR2Assigned:!!r2Record,r2TrnName:r2Record?r2Record.r2TrnName:'',r2TrnId:r2TrnId,r2Video:r2Record?(r2Record.r2Video||''):'',r2Deadline:r2Record?(r2Record.r2Deadline||''):'',r2Trainer:r2Record?(r2Record.r2Trainer||''):'',whyReason:r2Record?(r2Record.reason||''):'',r2Failed:!r2HasPass&&r2Att.length>0,r2Att:r2Att.length,r2BestScore:r2Att.length?Math.max.apply(null,r2Att.map(function(r){return r.score;})):0});
     });
   });
-
-  // Separate into: need R2 (no assignment) and R2 assigned (show as training cards)
   var noR2=needR2Rows.filter(function(r){return !r.hasR2Assigned;});
   var hasR2=needR2Rows.filter(function(r){return r.hasR2Assigned;});
-
-  // Apply search filter
-  if(q){
-    noR2=noR2.filter(function(r){return r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);});
-    hasR2=hasR2.filter(function(r){return r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.r2TrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);});
-  }
-
-  // Apply tab filter
-  if(filter==='needR2'){hasR2=[];}
-  else if(filter==='assigned'){noR2=[];}
-
+  if(q){noR2=noR2.filter(function(r){return r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);});hasR2=hasR2.filter(function(r){return r.empName.toLowerCase().includes(q)||r.failedTrnName.toLowerCase().includes(q)||r.r2TrnName.toLowerCase().includes(q)||r.dept.toLowerCase().includes(q);});}
+  if(filter==='needR2'){hasR2=[];}else if(filter==='assigned'){noR2=[];}
   var totalNeedR2=needR2Rows.filter(function(r){return !r.hasR2Assigned;}).length;
   var totalAssigned=needR2Rows.filter(function(r){return r.hasR2Assigned;}).length;
   var totalR2Failed=needR2Rows.filter(function(r){return r.r2Failed;}).length;
-
-  // Header
   var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-amber" onclick="openCreateR2TrainingModal()"><span class="mat-ico">add</span> Create R2 Training</button></div></div>';
-
-  // Stat cards
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);cursor:pointer;" onclick="window._r2filter=\'needR2\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:var(--amber);">'+totalNeedR2+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Need R2</div></div>';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);cursor:pointer;" onclick="window._r2filter=\'assigned\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:var(--green);">'+totalAssigned+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Assigned</div></div>';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;cursor:pointer;" onclick="window._r2filter=\'all\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalR2Failed+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Also Failed</div></div>';
   h+='</div>';
-
-  // Search + filter tabs
   h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">';
   h+='<div class="search-wrap"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee or training..." oninput="window._r2search=this.value;renderRetraining()" value="'+window._r2search.replace(/"/g,'&quot;')+'"></div>';
   h+='<div style="display:flex;gap:4px;">';
   h+='<button class="btn btn-sm '+(filter==='all'?'btn-amber':'btn-outline')+'" style="font-size:11px;" onclick="window._r2filter=\'all\';renderRetraining()">All</button>';
   h+='<button class="btn btn-sm '+(filter==='needR2'?'btn-amber':'btn-outline')+'" style="font-size:11px;" onclick="window._r2filter=\'needR2\';renderRetraining()">Need R2</button>';
   h+='<button class="btn btn-sm '+(filter==='assigned'?'btn-amber':'btn-outline')+'" style="font-size:11px;" onclick="window._r2filter=\'assigned\';renderRetraining()">Assigned</button>';
-  h+='</div>';
-  h+='</div>';
-
-  // ===== SECTION 1: Employees needing R2 (no assignment yet) =====
+  h+='</div></div>';
   if(noR2.length>0){
     h+='<div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:16px;">warning</span> Need R2 Assignment ('+noR2.length+')</div>';
     h+='<div class="training-cards">';
     noR2.forEach(function(r){
       var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
-      var catColor=catInfo.color;
-      var catIcon=catInfo.icon;
-      h+='<div class="training-card" style="cursor:default;">';
-      h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catColor+'33,'+catColor+'11)">';
-      h+='<div class="overlay-grad"></div>';
-      h+='<span class="category-chip">'+escAttr(r.failedTrnCat)+'</span>';
-      h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">error</span> Failed</span>';
-      h+='<span style="font-size:48px;">'+catIcon+'</span>';
-      h+='</div>';
-      h+='<div class="training-body">';
-      // Employee info
-      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-      h+='<div style="width:40px;height:40px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
-      h+='<div style="min-width:0;"><div class="training-title" style="font-size:14px;margin-bottom:2px;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
-      h+='</div>';
-      // Failed training name
+      h+='<div class="training-card" style="cursor:default;"><div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)"><div class="overlay-grad"></div><span class="category-chip">'+escAttr(r.failedTrnCat)+'</span><span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">error</span> Failed</span><span style="font-size:48px;">'+catInfo.icon+'</span></div><div class="training-body">';
+      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="width:40px;height:40px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div><div style="min-width:0;"><div class="training-title" style="font-size:14px;margin-bottom:2px;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div></div>';
       h+='<div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">error</span> Failed: '+escAttr(r.failedTrnName)+'</div>';
-      h+='<div class="training-meta">';
-      h+='<span><span class="mat-ico" style="font-size:12px;">quiz</span>Score: <b style="color:var(--red);">'+r.firstScore+'%</b></span>';
-      h+='<span><span class="mat-ico" style="font-size:12px;">replay</span>Tries: '+r.attempts+'</span>';
-      h+='</div>';
-      // Assign button
-      h+='<div style="margin-top:10px;">';
-      h+='<button class="btn btn-sm btn-amber" style="width:100%;justify-content:center;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button>';
-      h+='</div>';
+      h+='<div class="training-meta"><span><span class="mat-ico" style="font-size:12px;">quiz</span>Score: <b style="color:var(--red);">'+r.firstScore+'%</b></span><span><span class="mat-ico" style="font-size:12px;">replay</span>Tries: '+r.attempts+'</span></div>';
+      h+='<div style="margin-top:10px;"><button class="btn btn-sm btn-amber" style="width:100%;justify-content:center;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button></div>';
       h+='</div></div>';
     });
     h+='</div>';
   }
-
-  // ===== SECTION 2: R2 Trainings Created (TRAINING cards like Training Management) =====
   if(hasR2.length>0){
-    if(noR2.length>0){
-      h+='<div style="height:1px;background:var(--bdr);margin:20px 0 16px;"></div>';
-    }
+    if(noR2.length>0){h+='<div style="height:1px;background:var(--bdr);margin:20px 0 16px;"></div>';}
     h+='<div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:16px;">school</span> R2 Trainings Created ('+hasR2.length+')</div>';
     h+='<div class="training-cards">';
     hasR2.forEach(function(r){
       var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
-      var catColor=catInfo.color;
-      var catIcon=catInfo.icon;
       var r2YtId=r.r2Video?extractYoutubeId(r.r2Video):'';
-
-      // --- TRAINING CARD (like Training Management) ---
-      h+='<div class="training-card" style="cursor:default;">';
-      // Thumbnail
-      h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catColor+'33,'+catColor+'11)">';
-      h+='<div class="overlay-grad"></div>';
-      h+='<span class="category-chip">'+escAttr(r.failedTrnCat)+'</span>';
-      h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:linear-gradient(135deg,var(--amber),var(--orange));color:#000;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">replay</span> Round 2</span>';
-      if(r.r2Failed){
-        h+='<span class="badge" style="position:absolute;bottom:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">emergency</span> R2 Failed</span>';
-      }
-      if(r2YtId){
-        h+='<span class="badge" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>';
-      }
-      h+='<span style="font-size:48px;">'+catIcon+'</span>';
-      h+='</div>';
-
-      // Body
+      h+='<div class="training-card" style="cursor:default;"><div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)"><div class="overlay-grad"></div><span class="category-chip">'+escAttr(r.failedTrnCat)+'</span><span class="badge" style="position:absolute;top:8px;right:8px;background:linear-gradient(135deg,var(--amber),var(--orange));color:#000;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">replay</span> Round 2</span>';
+      if(r.r2Failed){h+='<span class="badge" style="position:absolute;bottom:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">emergency</span> R2 Failed</span>';}
+      if(r2YtId){h+='<span class="badge" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(232,72,58,.85);color:#fff;"><span class="mat-ico" style="font-size:11px;">smart_display</span> YouTube</span>';}
+      h+='<span style="font-size:48px;">'+catInfo.icon+'</span></div>';
       h+='<div class="training-body">';
-      // R2 Training name (prominent, like Training Management)
       h+='<div class="training-title">'+escAttr(r.r2TrnName)+'</div>';
-      // Meta info (trainer, deadline, date)
       h+='<div class="training-meta">';
       if(r.r2Trainer){h+='<span><span class="mat-ico" style="font-size:12px;">person</span>'+escAttr(r.r2Trainer)+'</span>';}
-      if(r.r2Deadline){
-        var isOverdue=new Date(r.r2Deadline)<new Date();
-        h+='<span style="color:'+(isOverdue?'var(--red)':'inherit')+'"><span class="mat-ico" style="font-size:12px;">event</span>Deadline: <b>'+formatDate(r.r2Deadline)+'</b>'+(isOverdue?' \u26A0\uFE0F':'')+'</span>';
-      }
+      if(r.r2Deadline){var isOverdue=new Date(r.r2Deadline)<new Date();h+='<span style="color:'+(isOverdue?'var(--red)':'inherit')+'"><span class="mat-ico" style="font-size:12px;">event</span>Deadline: <b>'+formatDate(r.r2Deadline)+'</b>'+(isOverdue?' \u26A0\uFE0F':'')+'</span>';}
       h+='</div>';
-
-      // Employee info banner (who this R2 is for)
-      h+='<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);margin-top:8px;">';
-      h+='<div style="width:32px;height:32px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
-      h+='<div style="min-width:0;flex:1;"><div style="font-size:12px;font-weight:600;">'+escAttr(r.empName)+' <span style="color:var(--muted);font-weight:400;">'+escAttr(r.dept)+'</span></div></div>';
-      h+='<div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">1st Test</div><div style="font-size:13px;font-weight:700;color:var(--red);">'+r.firstScore+'%</div></div>';
-      h+='</div>';
-
-      // Failed training connection
+      h+='<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);margin-top:8px;"><div style="width:32px;height:32px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div><div style="min-width:0;flex:1;"><div style="font-size:12px;font-weight:600;">'+escAttr(r.empName)+' <span style="color:var(--muted);font-weight:400;">'+escAttr(r.dept)+'</span></div></div><div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">1st Test</div><div style="font-size:13px;font-weight:700;color:var(--red);">'+r.firstScore+'%</div></div></div>';
       h+='<div style="font-size:11px;color:var(--red);margin-top:6px;display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">error</span> Failed: <b>'+escAttr(r.failedTrnName)+'</b></div>';
-
-      // R2 Status
-      if(r.r2Failed){
-        h+='<div style="padding:6px 10px;background:rgba(231,76,60,.08);border-left:3px solid #e74c3c;border-radius:0 8px 8px 0;font-size:11px;color:#e74c3c;margin-top:6px;"><span class="mat-ico" style="font-size:13px;">emergency</span> R2 test also failed (best: '+r.r2BestScore+'%, '+r.r2Att+' tries)</div>';
-      }else{
-        h+='<div style="padding:6px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);margin-top:6px;"><span class="mat-ico" style="font-size:13px;">schedule</span> R2 in progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':' — awaiting test')+'</div>';
-      }
-
-      // Video embed — FULLY VISIBLE (like Training Management)
-      if(r2YtId){
-        h+='<div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r2YtId+'?rel=0" style="width:100%;height:180px;" allowfullscreen></iframe></div>';
-        h+='<a href="'+r.r2Video+'" target="_blank" style="font-size:10px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:3px;margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">open_in_new</span> Open in YouTube</a>';
-      }
-
-      // Reason
+      if(r.r2Failed){h+='<div style="padding:6px 10px;background:rgba(231,76,60,.08);border-left:3px solid #e74c3c;border-radius:0 8px 8px 0;font-size:11px;color:#e74c3c;margin-top:6px;"><span class="mat-ico" style="font-size:13px;">emergency</span> R2 test also failed (best: '+r.r2BestScore+'%, '+r.r2Att+' tries)</div>';}else{h+='<div style="padding:6px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);margin-top:6px;"><span class="mat-ico" style="font-size:13px;">schedule</span> R2 in progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':' \u2014 awaiting test')+'</div>';}
+      if(r2YtId){h+='<div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r2YtId+'?rel=0" style="width:100%;height:180px;" allowfullscreen></iframe></div><a href="'+r.r2Video+'" target="_blank" style="font-size:10px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:3px;margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">open_in_new</span> Open in YouTube</a>';}
       if(r.whyReason){h+='<div style="font-size:10px;color:var(--muted);margin-top:4px;"><span class="mat-ico" style="font-size:11px;">edit_note</span> '+escAttr(r.whyReason)+'</div>';}
-
-      // Action buttons
       h+='<div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">';
       h+='<button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:11px;">refresh</span> Re-assign</button>';
-      if(r.r2Failed){
-        h+='<button class="btn btn-sm" style="background:rgba(231,76,60,.1);color:#e74c3c;border:1px solid rgba(231,76,60,.3);" onclick="gotoView(\'offlinetraining\')"><span class="mat-ico" style="font-size:11px;">groups</span> Offline Training</button>';
-      }
-      h+='</div>';
-
-      h+='</div>'; // end training-body
-      h+='</div>'; // end training-card
+      if(r.r2Failed){h+='<button class="btn btn-sm" style="background:rgba(231,76,60,.1);color:#e74c3c;border:1px solid rgba(231,76,60,.3);" onclick="gotoView(\'offlinetraining\')"><span class="mat-ico" style="font-size:11px;">groups</span> Offline Training</button>';}
+      h+='</div></div></div>';
     });
-    h+='</div>'; // end training-cards
+    h+='</div>';
   }
-
-  // Empty state
-  if(noR2.length===0&&hasR2.length===0){
-    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>All Clear!</h3><p>'+(q?'No matching records.':'No failed employees. Everyone passed!')+'</p></div>';
-  }
-
+  if(noR2.length===0&&hasR2.length===0){h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>All Clear!</h3><p>'+(q?'No matching records.':'No failed employees. Everyone passed!')+'</p></div>';}
   el.innerHTML=h;
 }
 
@@ -5663,7 +5601,6 @@ function renderOfflineTraining(){
   if(!isAdmin){document.getElementById('view-offlinetraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
   var el=document.getElementById('view-offlinetraining');
   var empIdSet=DB.employees.map(function(e){return e.id;});
-
   var rows=[];
   DB.trainings.forEach(function(t){
     var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
@@ -5671,83 +5608,46 @@ function renderOfflineTraining(){
     var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
     Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
-
     enrolled.forEach(function(eid){
       var emp=DB.employees.find(function(e){return e.id===eid;});
       if(!emp)return;
-      var att=eMap[eid]||[];
-      if(att.length===0)return;
-      var hasPass=att.some(function(r){return r.pass;});
-      if(hasPass)return;
+      var att=eMap[eid]||[];if(att.length===0)return;
+      var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;
       var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
       if(!r2Record)return;
       var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Record.r2TrnId;});
       if(!r2Trn)return;
       var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});
       if(r2Att.length===0)return;
-      var r2HasPass=r2Att.some(function(r){return r.pass;});
-      if(r2HasPass)return;
+      var r2HasPass=r2Att.some(function(r){return r.pass;});if(r2HasPass)return;
       var best1=0;att.forEach(function(r){if(r.score>best1)best1=r.score;});
       var best2=0;r2Att.forEach(function(r){if(r.score>best2)best2=r.score;});
       var r2YtId=r2Record.r2Video?extractYoutubeId(r2Record.r2Video):'';
       rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,origTrnName:t.name,origTrnId:t.id,origCat:t.cat,r2TrnName:r2Trn.name,r2TrnId:r2Trn.id,origScore:att[0].score,origBest:best1,origTries:att.length,r2Score:r2Att[0].score,r2Best:best2,r2Tries:r2Att.length,r2Video:r2Record.r2Video||'',r2YtId:r2YtId,r2Deadline:r2Record.r2Deadline||'',r2Trainer:r2Record.r2Trainer||''});
     });
   });
-
   var h='<div class="section-header"><div class="section-title">Offline <span>Training</span></div></div>';
-  h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">';
-  h+='<span class="mat-ico" style="color:#e74c3c;font-size:20px;">emergency</span>';
-  h+='<div><b>2x Failed Employees</b> — Failed both 1st test and Round 2. Need <b>offline/in-person training</b>. Send message to schedule.</div>';
-  h+='</div>';
-
+  h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:#e74c3c;font-size:20px;">emergency</span><div><b>2x Failed Employees</b> \u2014 Failed both 1st test and Round 2. Need <b>offline/in-person training</b>. Send message to schedule.</div></div>';
   var totalCases=rows.length;
   var totalEmps=new Set(rows.map(function(r){return r.empId;})).size;
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalEmps+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Employees</div></div>';
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalCases+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Failed Cases</div></div>';
-  h+='</div>';
-
-  if(rows.length===0){
-    h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Cases!</h3><p>All R2 trainings passed.</p></div>';
-    el.innerHTML=h;return;
-  }
-
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;"><div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalEmps+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Employees</div></div><div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalCases+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Failed Cases</div></div></div>';
+  if(rows.length===0){h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Cases!</h3><p>All R2 trainings passed.</p></div>';el.innerHTML=h;return;}
   h+='<div class="training-cards">';
   rows.forEach(function(r){
-    var catInfo=CATEGORIES[r.origCat]||{color:'#ffb020',icon:'\ud83d\udcda'};
-    h+='<div class="training-card" style="cursor:default;">';
-    h+='<div class="training-thumb" style="background:linear-gradient(135deg,rgba(231,76,60,.15),rgba(231,76,60,.05))">';
-    h+='<div class="overlay-grad"></div>';
-    h+='<span class="category-chip" style="background:rgba(231,76,60,.8);">'+escAttr(r.origCat)+'</span>';
-    h+='<span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">emergency</span> 2x Failed</span>';
-    h+='<span style="font-size:48px;">'+catInfo.icon+'</span>';
-    h+='</div>';
-
-    h+='<div class="training-body">';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-    h+='<div style="width:44px;height:44px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div>';
-    h+='<div style="min-width:0;"><div class="training-title" style="font-size:15px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div>';
-    h+='</div>';
-
+    var catInfo=CATEGORIES[r.origCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
+    h+='<div class="training-card" style="cursor:default;"><div class="training-thumb" style="background:linear-gradient(135deg,rgba(231,76,60,.15),rgba(231,76,60,.05))"><div class="overlay-grad"></div><span class="category-chip" style="background:rgba(231,76,60,.8);">'+escAttr(r.origCat)+'</span><span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">emergency</span> 2x Failed</span><span style="font-size:48px;">'+catInfo.icon+'</span></div><div class="training-body">';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="width:44px;height:44px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div><div style="min-width:0;"><div class="training-title" style="font-size:15px;margin-bottom:2px;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div></div>';
     h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.15);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;">';
     h+='<div style="font-size:11px;font-weight:700;color:#e74c3c;margin-bottom:4px;"><span class="mat-ico" style="font-size:12px;">error</span> 1st Test: '+escAttr(r.origTrnName)+'</div>';
     h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);margin-bottom:4px;"><span>Score: <b style="color:#e74c3c;">'+r.origScore+'%</b></span><span>Tries: '+r.origTries+'</span><span>Best: '+r.origBest+'%</span></div>';
     h+='<div style="height:1px;background:var(--bdr);margin:6px 0;"></div>';
     h+='<div style="font-size:11px;font-weight:700;color:var(--orange);margin-bottom:4px;"><span class="mat-ico" style="font-size:12px;">replay</span> R2 Test: '+escAttr(r.r2TrnName)+'</div>';
-    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);"><span>Score: <b style="color:var(--orange);">'+r.r2Score+'%</b></span><span>Tries: '+r.r2Tries+'</span><span>Best: '+r.r2Best+'%</span></div>';
-    h+='</div>';
-
-    if(r.r2YtId){
-      h+='<div style="margin-bottom:8px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r.r2YtId+'?rel=0" style="width:100%;height:140px;" allowfullscreen></iframe></div>';
-    }
-
+    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);"><span>Score: <b style="color:var(--orange);">'+r.r2Score+'%</b></span><span>Tries: '+r.r2Tries+'</span><span>Best: '+r.r2Best+'%</span></div></div>';
+    if(r.r2YtId){h+='<div style="margin-bottom:8px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r.r2YtId+'?rel=0" style="width:100%;height:140px;" allowfullscreen></iframe></div>';}
     h+='<button class="btn btn-sm" style="background:#e74c3c;color:#fff;font-size:11px;width:100%;justify-content:center;" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-o="'+escAttr(r.origTrnName)+'" data-r="'+escAttr(r.r2TrnName)+'" onclick="openOfflineMsg(this.dataset.e,this.dataset.n,this.dataset.o,this.dataset.r)"><span class="mat-ico" style="font-size:13px;">mail</span> Send Offline Training Message</button>';
-
-    h+='</div>'; // end training-body
-    h+='</div>'; // end training-card
+    h+='</div></div>';
   });
-  h+='</div>'; // end training-cards
-
+  h+='</div>';
   el.innerHTML=h;
 }
 
@@ -5764,7 +5664,7 @@ function openOfflineMsg(empId,empName,origTrnName,r2TrnName){
     '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:#e74c3c;">Failed 2x: '+escAttr(origTrnName)+' &rarr; '+escAttr(r2TrnName)+'</span></div>'+
     '</div></div>'+
     '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Message <span style="color:var(--red);">*</span></label>'+
-    '<textarea class="form-control-sm" id="offlineMsgText" rows="4" placeholder="Schedule offline/in-person training session... e.g. Please attend offline training on [date] at [location]" style="font-size:13px;"></textarea></div>'+
+    '<textarea class="form-control-sm" id="offlineMsgText" rows="4" placeholder="Schedule offline/in-person training session..." style="font-size:13px;"></textarea></div>'+
     '</div>'+
     '<div class="modal-foot"><button class="btn" style="background:#e74c3c;color:#fff;" onclick="sendOfflineMsg()"><span class="mat-ico">send</span> Send Message</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','520px');
 }
@@ -5777,7 +5677,6 @@ function sendOfflineMsg(){
   closeModal();saveDB();updateBadges();
   toast('Offline training message sent to '+d.empName,'success');
 }
-
 
 function openCreateR2TrainingModal(){
   var empIdSet=DB.employees.map(function(e){return e.id;});
@@ -5805,11 +5704,13 @@ function openCreateR2TrainingModal(){
   });
   if(!failedList.length){toast('No failed employees found. Everyone passed!','info');return;}
   var listHtml='<div style="max-height:400px;overflow-y:auto;">';
-  failedList.forEach(function(f,i){
-    listHtml+='<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--bdr);border-radius:var(--r-sm);margin-bottom:6px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background=\'var(--sur2)\'" onmouseout="this.style.background=\'transparent\'" onclick="closeModal();openAssignR2Modal(\''+f.trnId+'\',\''+f.empId+'\',\''+escAttr(f.empName).replace(/'/g,"\\'")+'\',\''+escAttr(f.trnName).replace(/'/g,"\\'")+'\')">';
+  failedList.forEach(function(f){
+    var safeEmp=escAttr(f.empName).replace(/'/g,"\\\'");
+    var safeTrn=escAttr(f.trnName).replace(/'/g,"\\\'");
+    listHtml+='<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--bdr);border-radius:var(--r-sm);margin-bottom:6px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background=\'var(--sur2)\'" onmouseout="this.style.background=\'transparent\'" onclick="closeModal();openAssignR2Modal(\''+f.trnId+'\',\''+f.empId+'\',\''+safeEmp+'\',\''+safeTrn+'\')">';
     listHtml+='<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(f.empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(f.empName)+'</div>';
     listHtml+='<div style="min-width:0;flex:1;"><div style="font-size:13px;font-weight:600;">'+escAttr(f.empName)+' <span style="color:var(--muted);font-weight:400;font-size:11px;">'+escAttr(f.dept)+'</span></div>';
-    listHtml+='<div style="font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:11px;">error</span> Failed: '+escAttr(f.trnName)+' — <b>'+f.score+'%</b></div></div>';
+    listHtml+='<div style="font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:11px;">error</span> Failed: '+escAttr(f.trnName)+' \u2014 <b>'+f.score+'%</b></div></div>';
     listHtml+=(f.hasR2?'<span class="badge badge-warning" style="flex-shrink:0;">Re-assign</span>':'<span class="badge" style="background:rgba(255,176,32,.15);color:var(--amber);flex-shrink:0;">Assign</span>');
     listHtml+='</div>';
   });
@@ -5826,7 +5727,6 @@ function openCreateR2TrainingModal(){
     '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
 }
 
-
 function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
   if(!failedTrn)return;
@@ -5841,7 +5741,6 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
   var catOpts=TRAINING_CATS.map(function(c){return '<option'+(c===(failedTrn.cat||'General')?' selected':'')+'>'+c+'</option>';}).join('');
   var deptOpts='<option>All</option>'+DEPARTMENTS.map(function(d){return '<option'+(d===(failedTrn.dept||'All')?' selected':'')+'>'+d+'</option>';}).join('');
   var r2DefaultName='R2: '+failedTrnName;
-  // Get employee's first test score for the failed training
   var firstScore='--';
   var empResults=DB.testResults.filter(function(r){return r.training===failedTrnName&&r.empId===empId;});
   if(empResults.length){empResults.sort(function(a,b){return a.date.localeCompare(b.date);});firstScore=empResults[0].score;}
@@ -5849,45 +5748,40 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
     '<div class="modal-accent" style="background:linear-gradient(135deg,var(--amber),var(--orange));"></div>'+
     '<div class="modal-head"><div class="modal-ico" style="background:rgba(255,176,32,.15)"><span class="mat-ico" style="color:var(--amber);font-size:22px;">school</span></div><h2>Create R2 Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
     '<div class="modal-body">'+
-    // Employee info banner
     '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">'+
     '<div style="display:flex;align-items:center;gap:8px;">'+
     '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
     '<div style="min-width:0;flex:1;"><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:12px;color:var(--red);font-weight:600;">\u274C Failed: '+escAttr(failedTrnName)+'</span>'+(failedVideo?' <a href="'+failedVideo+'" target="_blank" style="font-size:11px;color:var(--red);text-decoration:none;">\uD83C\uDFAC Original Video</a>':'')+'</div>'+
     '<div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">1st Score</div><div style="font-size:20px;font-weight:800;color:var(--red);">'+firstScore+'%</div></div>'+
     '</div></div>'+
-    // Training Details section (like Training Management)
     '<div class="form-section"><div class="form-grid">'+
     '<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">R2 Training Name *</label><input class="form-control-sm" id="r2AssignName" value="'+escAttr(r2DefaultName)+'" placeholder="e.g. R2: Fire Safety Induction"></div>'+
     '<div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="r2AssignCat">'+catOpts+'</select></div>'+
     '<div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="r2AssignDept">'+deptOpts+'</select></div>'+
     '<div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="r2AssignTrainer">'+(trainerOpts?'<option value="">Select trainer...</option>'+trainerOpts:'<option value="">No trainers configured</option>')+'</select></div>'+
-    '<div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="r2AssignManager" value="'+escAttr(failedTrn.manager||'')+'" placeholder="e.g. Mr. Sharma, Site Manager"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="r2AssignManager" value="'+escAttr(failedTrn.manager||'')+'" placeholder="e.g. Mr. Sharma"></div>'+
     '<div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="r2AssignDate" type="date" value="'+today+'"></div>'+
-    '<div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="r2AssignDur" value="'+escAttr(failedTrn.duration||'')+'" placeholder="e.g. 30 min, 2 hrs"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="r2AssignDur" value="'+escAttr(failedTrn.duration||'')+'" placeholder="e.g. 30 min"></div>'+
     '<div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="r2AssignPass" type="number" value="'+(failedTrn.passing||75)+'" min="0" max="100"></div>'+
     '<div class="form-group"><label class="form-label-sm">Deadline <span style="color:var(--red);">*</span></label><input class="form-control-sm" type="date" id="r2AssignDeadline" value="'+defaultDeadline+'"></div>'+
     '</div>'+
     '<div class="form-group" style="margin-top:10px;"><label class="form-label-sm">Description</label><textarea class="form-control-sm" id="r2AssignDesc" rows="2" placeholder="R2 training description...">Round 2 retraining for: '+escAttr(failedTrnName)+'</textarea></div>'+
     '<div class="form-group" style="margin-top:6px;"><label class="form-label-sm">Reason for R2 <span style="color:var(--red);">*</span></label><textarea class="form-control-sm" id="r2AssignWhy" rows="2" placeholder="e.g. Low score, needs improvement..."></textarea></div>'+
     '</div>'+
-    // Video section (like Training Management)
     '<div class="form-section" style="margin-top:14px;border:2px solid rgba(232,72,58,.3);background:rgba(232,72,58,.04);">'+
     '<div class="form-section-title" style="color:var(--red);"><span class="mat-ico" style="font-size:14px;">play_circle</span> R2 YouTube Video Link <span style="color:var(--red);">*</span></div>'+
-    '<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." oninput="previewR2Video(this.value)" onfocus="this.select()"></div>'+
+    '<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=..." oninput="previewR2Video(this.value)" onfocus="this.select()"></div>'+
     '<div id="r2VideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div style="border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);max-height:180px;"><iframe id="r2VideoFrame" src="" style="width:100%;height:160px;" allowfullscreen></iframe></div></div>'+
     '<div style="margin-top:8px;padding:8px 12px;background:rgba(255,176,32,.06);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;font-size:11px;color:var(--amber);">'+
-    '<span class="mat-ico" style="font-size:13px;">info</span> Employee must watch <b>90% of this video</b> before the test button unlocks. Forwarding/skipping is NOT counted. Test can only be taken <b>one time</b> after video completion.'+
+    '<span class="mat-ico" style="font-size:13px;">info</span> Employee must watch <b>90% of this video</b> before the test unlocks. Forwarding/skipping is NOT counted.</div>'+
     '</div>'+
-    '</div>'+
-    // Custom questions section
     '<div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
     '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);">Custom Quiz Questions (Optional)</div>'+
     '<button class="btn btn-sm btn-outline" onclick="addR2CustomQuestion()"><span class="mat-ico" style="font-size:11px;">add</span> Add Question</button>'+
     '</div>'+
     '<div id="r2CustomQuestionsList"></div>'+
-    '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">If no custom questions added, questions will be copied from the original training or auto-generated from the question bank.</div>'+
+    '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">If no custom questions, questions will be copied from the original training.</div>'+
     '</div>'+
     '</div>'+
     '<div class="modal-foot"><button class="btn btn-amber" id="saveR2Btn" onclick="confirmAssignR2()"><span class="mat-ico">school</span> Create R2 Training</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','740px');
@@ -5928,19 +5822,14 @@ function getR2CustomQuestions(){
   var qs=[];
   var count=window._r2CustomQCount||0;
   for(var i=0;i<count;i++){
-    var el=document.getElementById('r2cq_'+i);
-    if(!el)continue;
-    var q=(document.getElementById('r2cq_q_'+i)||{}).value||'';
-    var o0=(document.getElementById('r2cq_o0_'+i)||{}).value||'';
-    var o1=(document.getElementById('r2cq_o1_'+i)||{}).value||'';
-    var o2=(document.getElementById('r2cq_o2_'+i)||{}).value||'';
-    var o3=(document.getElementById('r2cq_o3_'+i)||{}).value||'';
+    var el=document.getElementById('r2cq_'+i);if(!el)continue;
+    var q=((document.getElementById('r2cq_q_'+i)||{}).value||'').trim();
+    var o0=((document.getElementById('r2cq_o0_'+i)||{}).value||'').trim();
+    var o1=((document.getElementById('r2cq_o1_'+i)||{}).value||'').trim();
+    var o2=((document.getElementById('r2cq_o2_'+i)||{}).value||'').trim();
+    var o3=((document.getElementById('r2cq_o3_'+i)||{}).value||'').trim();
     var a=parseInt((document.getElementById('r2cq_a_'+i)||{}).value||'0');
-    q=q.trim();o0=o0.trim();o1=o1.trim();o2=o2.trim();o3=o3.trim();
-    if(q&&o0&&o1){
-      var opts=[o0,o1,o2||'N/A',o3||'N/A'].filter(function(x){return x;});
-      qs.push({q:q,o:opts,a:Math.min(a,opts.length-1)});
-    }
+    if(q&&o0&&o1){var opts=[o0,o1,o2||'N/A',o3||'N/A'].filter(function(x){return x;});qs.push({q:q,o:opts,a:Math.min(a,opts.length-1)});}
   }
   return qs;
 }
@@ -5948,37 +5837,30 @@ function getR2CustomQuestions(){
 function confirmAssignR2(){
   var p=window._r2Assign;if(!p){toast('Error','error');return;}
   var failedTrnId=p.failedTrnId,empId=p.empId,empName=p.empName,failedTrnName=p.failedTrnName;
-  var r2NameVal=(document.getElementById('r2AssignName').value||'').trim();
-  var r2CatVal=(document.getElementById('r2AssignCat').value||'').trim();
-  var r2DeptVal=(document.getElementById('r2AssignDept').value||'').trim();
-  var r2TrainerVal=(document.getElementById('r2AssignTrainer').value||'').trim();
-  var r2ManagerVal=(document.getElementById('r2AssignManager').value||'').trim();
-  var r2DateVal=(document.getElementById('r2AssignDate').value||'').trim();
-  var r2DurVal=(document.getElementById('r2AssignDur').value||'').trim();
-  var r2PassVal=parseInt(document.getElementById('r2AssignPass').value)||75;
-  var r2DescVal=(document.getElementById('r2AssignDesc').value||'').trim();
-  var r2VideoLink=(document.getElementById('r2AssignVideo').value||'').trim();
-  var deadlineVal=(document.getElementById('r2AssignDeadline').value||'').trim();
-  var whyText=(document.getElementById('r2AssignWhy').value||'').trim();
+  var r2NameVal=((document.getElementById('r2AssignName')||{}).value||'').trim();
+  var r2CatVal=((document.getElementById('r2AssignCat')||{}).value||'').trim();
+  var r2DeptVal=((document.getElementById('r2AssignDept')||{}).value||'').trim();
+  var r2TrainerVal=((document.getElementById('r2AssignTrainer')||{}).value||'').trim();
+  var r2ManagerVal=((document.getElementById('r2AssignManager')||{}).value||'').trim();
+  var r2DateVal=((document.getElementById('r2AssignDate')||{}).value||'').trim();
+  var r2DurVal=((document.getElementById('r2AssignDur')||{}).value||'').trim();
+  var r2PassVal=parseInt((document.getElementById('r2AssignPass')||{}).value)||75;
+  var r2DescVal=((document.getElementById('r2AssignDesc')||{}).value||'').trim();
+  var r2VideoLink=((document.getElementById('r2AssignVideo')||{}).value||'').trim();
+  var deadlineVal=((document.getElementById('r2AssignDeadline')||{}).value||'').trim();
+  var whyText=((document.getElementById('r2AssignWhy')||{}).value||'').trim();
   var failedTrn=DB.trainings.find(function(t){return t.id===failedTrnId;});
   if(!failedTrn){toast('Original training not found','error');return;}
-  // Validate
   if(!r2NameVal){toast('Enter R2 training name','error');return;}
   if(!r2VideoLink){toast('Paste a YouTube video link','error');return;}
   if(!extractYoutubeId(r2VideoLink)){toast('Invalid YouTube link','error');return;}
   if(!whyText){toast('Enter reason for R2 training','error');return;}
   if(!deadlineVal){toast('Set a deadline','error');return;}
-  // Get custom questions (if any)
   var r2CustomQs=getR2CustomQuestions();
-  // If no custom questions, copy from failed training
   var r2Questions=[];
-  if(r2CustomQs.length){
-    r2Questions=r2CustomQs;
-  }else if(failedTrn.questions&&failedTrn.questions.length){
-    r2Questions=failedTrn.questions.map(function(q){return{q:q.q,o:q.o.slice(),a:q.a};});
-  }
+  if(r2CustomQs.length){r2Questions=r2CustomQs;}
+  else if(failedTrn.questions&&failedTrn.questions.length){r2Questions=failedTrn.questions.map(function(q){return{q:q.q,o:q.o.slice(),a:q.a};});}
   var newR2TrnId=genId('TRN');
-  // Create the R2 training (full details, same structure as Training Management)
   var newTrn={
     id:newR2TrnId,name:r2NameVal,cat:r2CatVal||'General',dept:r2DeptVal||'All',
     trainer:r2TrainerVal,manager:r2ManagerVal,date:r2DateVal,duration:r2DurVal||'Not set',
@@ -5991,7 +5873,6 @@ function confirmAssignR2(){
     _isR2Training:true,_r2ForFailedTrnId:failedTrnId,_r2ForEmpId:empId
   };
   DB.trainings.push(newTrn);
-  // Save retraining record on the original training
   if(!failedTrn.retrainingRecords)failedTrn.retrainingRecords=[];
   failedTrn.retrainingRecords.push({
     empId:empId,empName:empName,training:failedTrn.name,trnId:failedTrnId,
@@ -6000,7 +5881,6 @@ function confirmAssignR2(){
     r2Deadline:deadlineVal,r2Trainer:r2TrainerVal,
     action:'Round 2 Training Assigned',reason:whyText,doneBy:currentUser.name||'Admin'
   });
-  // Notifications
   var notifyMsg='[Round 2] You failed "'+failedTrn.name+'". Reason: '+whyText+'. New training: "'+r2NameVal+'". Deadline: '+formatDate(deadlineVal)+'. Watch the video to unlock the test.';
   DB.notifications.unshift({id:genId('N'),msg:notifyMsg,read:false,time:'Just now',icon:'replay',forEmp:empId});
   DB.notifications.unshift({id:genId('N'),msg:'R2: '+empName+' \u2192 "'+r2NameVal+'" (failed: '+failedTrn.name+', why: '+whyText+') Deadline: '+formatDate(deadlineVal),read:false,time:'Just now',icon:'school'});
@@ -6084,7 +5964,7 @@ function exportR2Report(){
       var r2Name=r2Record?r2Record.r2TrnName:'';
       var r2Deadline=r2Record?r2Record.r2Deadline:'';
       var r2Reason=r2Record?r2Record.reason:'';
-      var r2Video=r2Record?(r2Record.r2Video||''):'';
+      var r2Video=r2Record?r2Record.r2Video||'':'';
       var isOfflineTrn=(t.offlineTrained||[]).includes(eid);
       var statusTxt=hasPass?'Passed on Retry':isOfflineTrn?'Offline Trained':r2Name?'R2 Assigned: '+r2Name:'Still Open';
       rows.push({Training:t.name,Category:t.cat,Employee:emp.name,'Employee ID':eid,Department:emp.dept,'1st Score':att[0].score+'%',Attempts:att.length,'Best Score':best+'%',Status:statusTxt,'R2 Training':r2Name,'R2 Deadline':r2Deadline?formatDate(r2Deadline):'','Why / Reason':r2Reason,'R2 Video':r2Video,Trainer:t.trainer,Duration:t.duration,'Video Link':t.youtubeLink||''});
