@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -33,7 +34,7 @@ select option{background:var(--sur);}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:3px;}
 .mono{font-family:'JetBrains Mono',monospace;}
-.mat-ico{font-family:'Material Icons Round';font-size:inherit;font-style:normal;line-height:1;vertical-align:middle;}
+.mat-ico{font-family:'Material Icons Round','Material Symbols Rounded';font-size:inherit;font-style:normal;line-height:1;vertical-align:middle;}
 .bg-layer{position:fixed;inset:0;pointer-events:none;z-index:0;}
 .bg-dots{background-image:radial-gradient(circle at 1px 1px,var(--bdr) .5px,transparent 0);background-size:28px 28px;opacity:.25;}
 .bg-glow{background:radial-gradient(ellipse at 10% 20%,rgba(255,176,32,.04) 0%,transparent 50%),radial-gradient(ellipse at 90% 80%,rgba(62,207,142,.03) 0%,transparent 50%);}
@@ -6004,7 +6005,7 @@ function renderCorrectiveActions(){
   h+='<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--red);font-size:20px;">gavel</span><div><b>BSC Audit Compliance:</b> 1st fail = retrain, 2nd = warning, 3rd = offline training + NCR.</div></div>';
   h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Detailed Corrective Actions ('+realCA.length+' employees)'+(caTrnFilter!=='All'?' — Filtered: <b style="color:var(--amber);">'+caTrnFilter+'</b>':'')+'</div>';
   if(realCA.length){
-    h+='<div class="table-wrap"><table><thead><tr><th style="min-width:90px;">Date</th><th style="min-width:160px;">Employee</th><th style="min-width:180px;">Training</th><th style="min-width:70px;">Type</th><th style="min-width:220px;">Attempt History & Scores</th><th style="min-width:150px;">Action Taken</th><th style="min-width:90px;">Done By</th><th style="min-width:70px;">Status</th><th style="min-width:60px;">Actions</th></tr></thead><tbody>';
+    h+='<div class="table-wrap"><table><thead><tr><th style="min-width:90px;">Date</th><th style="min-width:160px;">Employee</th><th style="min-width:180px;">Training</th><th style="min-width:70px;">Type</th><th style="min-width:220px;">Attempt History & Scores</th><th style="min-width:150px;">Action Taken</th><th style="min-width:90px;">Done By</th><th style="min-width:70px;">Status</th><th style="min-width:200px;">Actions</th></tr></thead><tbody>';
     realCA.forEach(function(a,idx){
       // Find the actual index in allCA for the assignTrainingFromCA function
       var actualIdx=allCA.indexOf(a);
@@ -6048,7 +6049,7 @@ function renderCorrectiveActions(){
       // Action column: show what was done
       var actionHtml='<div style="font-size:11px;">'+(a.action||'—')+'</div>';
       if(a.reason){actionHtml+='<div style="font-size:10px;color:var(--muted);margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+(a.reason||'').replace(/"/g,'&quot;')+'">'+(a.reason||'')+'</div>';}
-      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(trnName)+'</b>'+trnLink+ytBtn+'</td><td>'+tBadge+'</td><td>'+attemptHtml+'</td><td>'+actionHtml+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+actualIdx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:12px;">school</span> Assign</button></td></tr>';
+      h+='<tr><td style="font-size:11px;">'+(a.date||'')+'</td><td><b>'+(a.empName||'')+'</b><br/><span style="font-size:10px;color:var(--muted);">'+(a.empId||'')+(emp?' / '+emp.dept:'')+'</span></td><td><b>'+(trnName)+'</b>'+trnLink+ytBtn+'</td><td>'+tBadge+'</td><td>'+attemptHtml+'</td><td>'+actionHtml+'</td><td style="font-size:10px;color:var(--muted);">'+(a.doneBy||'')+'</td><td><span class="badge badge-'+sCls+'">'+sTxt+'</span>'+enrolledBadge+'</td><td><div style="display:flex;gap:4px;flex-wrap:nowrap;"><button class="btn btn-sm btn-red" onclick="removeFromTrainingCA('+actualIdx+')" title="Remove from Training"><span class="mat-ico" style="font-size:13px;">person_remove</span></button><button class="btn btn-sm btn-amber" onclick="assignTrainingFromCA('+actualIdx+')" title="Assign/reassign training"><span class="mat-ico" style="font-size:13px;">assignment_ind</span> Assign</button><button class="btn btn-sm btn-outline" onclick="sendMessageFromCA('+actualIdx+')" title="Send message to employee"><span class="mat-ico" style="font-size:13px;">mail</span></button></div></td></tr>';
     });
     h+='</tbody></table></div>';
   }else{
@@ -6057,6 +6058,59 @@ function renderCorrectiveActions(){
   el.innerHTML=h;
 }
 
+
+
+/* ============================================================
+   CORRECTIVE ACTIONS - EXTRA ACTION BUTTONS
+============================================================ */
+function removeFromTrainingCA(caIdx){
+  var ca=window._caList[caIdx];if(!ca){toast('Record not found','error');return;}
+  var empId=ca.empId;var trnName=ca.training||ca.trnName||'';
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  var empName=emp?emp.name:empId;
+  if(!confirm('Remove '+empName+' ('+empId+') from training "'+trnName+'"?\n\nThis will unenroll them from the training.'))return;
+  var t=DB.trainings.find(function(tr){return tr.name===trnName;});
+  if(t){
+    if(t.enrolled)t.enrolled=t.enrolled.filter(function(id){return id!==empId;});
+    if(t.completed)t.completed=t.completed.filter(function(id){return id!==empId;});
+    if(t.completedDates)delete t.completedDates[empId];
+    if(t.retrained)t.retrained=t.retrained.filter(function(id){return id!==empId;});
+    if(t.offlineTrained)t.offlineTrained=t.offlineTrained.filter(function(id){return id!==empId;});
+    saveDB();
+    if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('Firebase save error:',e);}})();}
+  }
+  toast(empName+' removed from "'+trnName+'"','info');
+  updateBadges();renderCorrectiveActions();
+}
+function sendMessageFromCA(caIdx){
+  var ca=window._caList[caIdx];if(!ca){toast('Record not found','error');return;}
+  var empId=ca.empId;var trnName=ca.training||ca.trnName||'';
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  var empName=emp?emp.name:empId;
+  var failInfo='Failed: '+trnName+(ca.previousBest?' (Best: '+ca.previousBest+'%)':'');
+  openModal(
+    '<div class="modal-accent"></div>'+
+    '<div class="modal-head"><div class="modal-ico" style="background:rgba(62,160,232,.15)"><span class="mat-ico" style="color:var(--blue);font-size:22px;">mail</span></div>'+
+    '<div><h2>Message '+empName+'</h2><div style="font-size:12px;color:var(--muted);">'+empId+(emp?' · '+emp.dept:'')+'</div></div>'+
+    '<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
+    '<div class="modal-body">'+
+    '<div style="background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.2);border-radius:var(--r-sm);padding:10px;margin-bottom:12px;font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:12px;">warning</span> '+failInfo+'</div>'+
+    '<div class="form-group"><label class="form-label-sm">Message</label>'+
+    '<textarea class="form-control-sm" id="caMsgText" rows="3" placeholder="Type message to '+empName+'..." onkeydown="if(event.key===\x27Enter\x27&&!event.shiftKey){event.preventDefault();sendCAMsg(\x27'+empId+'\x27);}"></textarea></div>'+
+    '</div>'+
+    '<div class="modal-foot"><button class="btn btn-amber" onclick="sendCAMsg(\x27'+empId+'\x27)"><span class="mat-ico">send</span> Send</button>'+
+    '<button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','520px');
+  setTimeout(function(){var ta=document.getElementById('caMsgText');if(ta)ta.focus();},200);
+}
+function sendCAMsg(empId){
+  var text=(document.getElementById('caMsgText')||{}).value;if(!text||!text.trim()){toast('Type a message','error');return;}
+  text=text.trim();
+  var emp=DB.employees.find(function(e){return e.id===empId;});
+  DB.notifications.unshift({id:genId('N'),msg:text,read:false,time:'Just now',icon:'mail',forEmp:empId,fromEmp:currentUser.id||'admin',fromEmpName:currentUser.name||'Admin'});
+  saveDB();updateBadges();
+  toast('Message sent to '+(emp?emp.name:empId),'success');
+  closeModal();
+}
 
 /* ============================================================
    NOTIFICATIONS
