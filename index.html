@@ -4969,14 +4969,26 @@ if(fb.suggestions){html+='<div class="enjoy-section"><div class="label">Suggesti
 html+='<div class="footer-note">IMSP 29 F05 Rev.02 | Generated on '+new Date().toLocaleString()+' | '+DB.settings.companyName+'</div>';
 html+='</body></html>';
 return html;}
+// Track Drive connection status — set by testDriveConnection()
+var _driveConnected=false;
+var _driveTested=false;
+
 function uploadToDrive(folderId,fileName,htmlContent,onDone){
 // Uses hidden form + iframe — same pattern as pushToSheet, avoids CORS on mobile
   try{
     var url=getDriveUrl();
     if(!url){if(onDone)onDone(false);return;}
+    // Skip upload if Drive was tested and failed — prevents auto-download on every submit
+    if(_driveTested && !_driveConnected){
+      console.log('Drive upload skipped — connection not established. Run "Test Drive" in Settings.');
+      if(onDone)onDone(false);
+      return;
+    }
     var fname='_drv_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
     var iframe=document.createElement('iframe');
     iframe.name=fname;iframe.style.display='none';
+    // sandbox prevents the iframe from triggering file downloads when Apps Script doesn't handle the POST
+    iframe.sandbox='allow-scripts allow-same-origin allow-forms';
     document.body.appendChild(iframe);
     var form=document.createElement('form');
     form.method='POST';form.action=url;form.target=fname;
@@ -6596,18 +6608,44 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
         <div id="syncStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
         <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (full test results with employee, trainer, manager, cert details), <b>Employees</b> (master list with stats), <b>Trainings</b> (all trainings + enrolled/completed employees), <b>Certificates</b> (all issued certs with trainer & validity), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback</b> (IMSP 29 F05 responses with scores). Each sync replaces the sheet data to stay in sync. All sheets include Company name for audit trail.</div>
       </div>
-      <div class="form-section">
-        <div class="form-section-title"><span class="mat-ico" style="color:var(--green);">cloud_upload</span> Google Drive Connection</div>
+      <div class="form-section" style="border:1px solid ${_driveTested?(_driveConnected?'rgba(62,207,142,.35)':'rgba(232,72,58,.35)'):'rgba(62,207,142,.15)'};background:${_driveTested?(_driveConnected?'rgba(62,207,142,.04)':'rgba(232,72,58,.04)'):'rgba(62,207,142,.02)'};">
+        <div class="form-section-title" style="color:var(--green);display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="color:var(--green);">cloud_upload</span> Google Drive Connection <span id="driveStatusDot" style="width:12px;height:12px;border-radius:50%;display:inline-block;background:${_driveTested?(_driveConnected?'var(--green)':'var(--red)'):'var(--muted)'};" title="${_driveTested?(_driveConnected?'Drive Connected':'Drive Not Connected'):'Not tested yet'}"></span> <span id="driveStatusLabel" style="font-size:11px;font-weight:400;color:${_driveTested?(_driveConnected?'var(--green)':'var(--red)'):'var(--muted)'};">${_driveTested?(_driveConnected?'Connected':'Not Connected'):'Not tested'}</span></div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Drive script uploads feedback PDFs and NCR forms as documents to your Google Drive folder.</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
           <span style="font-size:12px;color:var(--txt);min-width:80px;">Drive URL:</span>
-          <input class="form-control-sm" id="st_driveurl" placeholder="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec" value="${DRIVE_PDF_SCRIPT_URL||''}" style="flex:1;min-width:260px;">
+          <input class="form-control-sm" id="st_driveurl" placeholder="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec" value="${DB.settings.driveUrl||DRIVE_PDF_SCRIPT_URL||''}" style="flex:1;min-width:260px;">
           <button class="btn btn-outline" onclick="testDriveConnection()" style="border-color:var(--green);color:var(--green);"><span class="mat-ico">wifi_tethering</span> Test Drive</button>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
           <span style="font-size:12px;color:var(--txt);min-width:80px;">Folder ID:</span>
-          <input class="form-control-sm" id="st_drivefolder" placeholder="1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov" value="${DRIVE_FOLDER_ID||''}" style="flex:1;min-width:260px;">
+          <input class="form-control-sm" id="st_drivefolder" placeholder="1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov" value="${DB.settings.driveFolder||DRIVE_FOLDER_ID||''}" style="flex:1;min-width:260px;">
         </div>
+        <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin:10px 0 8px;line-height:1.7;overflow-x:auto;max-height:340px;overflow-y:auto;">
+          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">REQUIRED: Drive Apps Script (paste in your Apps Script editor):</div>
+function doPost(e){<br>
+&nbsp;&nbsp;try{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var action=e.parameter.action||'';<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(action==='ping'){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:'OK'})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(action==='createDoc'){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var folderId=e.parameter.folderId;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var fileName=e.parameter.fileName||'Document';<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var html=e.parameter.html||'<p>Empty</p>';<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var blob=HtmlService.createHtmlOutput(html).getBlob();<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;blob.setName(fileName+'.doc');<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var folder=DriveApp.getFolderById(folderId);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;folder.createFile(blob);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:'OK',file:fileName})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:'unknown action'}));<br>
+&nbsp;&nbsp;}catch(err){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:'error',msg:err.toString()}));<br>
+&nbsp;&nbsp;}<br>
+}<br>
+function doGet(e){return ContentService.createTextOutput('PTS Safety Drive API is running.');}
+        </div>
+        <div style="font-size:10.5px;color:var(--muted);line-height:1.5;"><b>Steps:</b> 1) Create a new Google Apps Script project. 2) Paste the code above. 3) Deploy > New Deployment > Web App > Execute as: Me > Access: <b>Anyone</b> > Deploy. 4) Copy the URL and paste above. 5) Enter your Drive Folder ID. 6) Click <b>Test Drive</b>.</div>
         <div id="driveStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
       </div>
       <div class="form-section">
@@ -6936,10 +6974,14 @@ function testDriveConnection(){
   if(!url){if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">Enter the Drive Apps Script URL first.</span>';toast('Enter Drive URL','error');return;}
   if(!folder){if(statusEl)statusEl.innerHTML='<span style="color:var(--red);">Enter the Drive Folder ID.</span>';toast('Enter Folder ID','error');return;}
   if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">Testing Drive connection...</span>';
+  // Update the indicator dot
+  var dotEl=document.getElementById('driveStatusDot');
+  if(dotEl){dotEl.style.background='var(--amber)';dotEl.title='Testing...';}
   // Use form+iframe to test (same as actual upload)
   var fname='_drv_test_'+Date.now();
   var iframe=document.createElement('iframe');
   iframe.name=fname;iframe.style.display='none';
+  iframe.sandbox='allow-scripts allow-same-origin allow-forms';
   document.body.appendChild(iframe);
   var form=document.createElement('form');
   form.method='POST';form.action=url;form.target=fname;
@@ -6952,8 +6994,37 @@ function testDriveConnection(){
     try{document.body.removeChild(iframe);}catch(e){}
     try{document.body.removeChild(form);}catch(e){}
     if(statusEl)statusEl.innerHTML='<span style="color:var(--'+color+');">'+msg+'</span>';
+    // Update global flag and indicator dot
+    _driveConnected=ok;
+    _driveTested=true;
+    if(dotEl){dotEl.style.background=ok?'var(--green)':'var(--red)';dotEl.title=ok?'Drive Connected':'Drive Not Connected';}
+    // Update the label text
+    var labelEl=document.getElementById('driveStatusLabel');
+    if(labelEl)labelEl.textContent=ok?'Connected':'Not Connected';
+    if(labelEl)labelEl.style.color=ok?'var(--green)':'var(--red)';
   }
-  iframe.onload=function(){finish(true,'Drive connection OK! Script is reachable. Feedback PDFs and NCR forms will be saved to this folder.','green');toast('Drive connection OK','success');};
+  iframe.onload=function(){
+    // Try to read the iframe content to verify the Apps Script actually responded correctly
+    try{
+      var doc=iframe.contentDocument||iframe.contentWindow.document;
+      var body=doc.body?doc.body.innerText||doc.body.textContent:'';
+      // If the response contains known error keywords, it's not a proper Drive script
+      var errorWords=['Error','Exception','Sorry','Login','Sign in','not found','redirect'];
+      var isError=errorWords.some(function(w){return body.toLowerCase().indexOf(w.toLowerCase())>=0;});
+      if(isError){
+        finish(false,'Drive script responded with an error. Your Apps Script needs a <b>doPost</b> function (see code below). Response: '+(body.substring(0,120)),'red');
+        toast('Drive script needs doPost function','error');
+      }else{
+        finish(true,'Drive connection OK! Script is reachable. Feedback PDFs and NCR forms will be saved to this folder.','green');
+        toast('Drive connection OK','success');
+      }
+    }catch(e){
+      // Cross-origin — can't read iframe content, but iframe loaded = script is reachable
+      finish(true,'Drive connection OK! Script is reachable (cross-origin — could not verify response content, but no download occurred).','green');
+      toast('Drive connection OK','success');
+    }
+  };
+  iframe.onerror=function(){finish(false,'Could not reach Drive script. Check the URL and ensure the Apps Script is deployed as Web App with access "Anyone".','red');toast('Drive test failed','error');};
   form.submit();
   setTimeout(function(){finish(false,'Drive test timed out (15s). Check: 1) URL is correct, 2) Script is deployed as Web App with access "Anyone", 3) Script has a doPost function that handles action="ping".','red');toast('Drive test failed','error');},15000);
 }
@@ -7903,4 +7974,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
