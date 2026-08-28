@@ -7135,6 +7135,36 @@ async function loadDBFromFirestore(){
     DB.trainings.forEach(function(t){if(!t.duration||t.duration==='--'||t.duration==='-'){t.duration='';df2++;}});
     if(df2>0)console.log('[Firestore] Fixed '+df2+' training(s) with broken duration');
 
+    // DEDUP: Remove duplicate test results (same emp+training+date+score)
+    var dupCount=0;
+    var seenTestKeys=new Set();
+    DB.testResults=DB.testResults.filter(function(r){
+      var key=r.empId+'|'+r.training+'|'+r.date+'|'+r.score;
+      if(seenTestKeys.has(key)){dupCount++;return false;}
+      seenTestKeys.add(key);return true;
+    });
+    if(dupCount>0){
+      console.log('[Firestore] Removed '+dupCount+' duplicate test result(s)');
+      // Also remove duplicates from Firebase
+      if(firebaseReady){
+        (async function(){
+          try{
+            await authAsAdmin();
+            var allSnap=await fbDB.collection('testResults').get();
+            var cloudKeys=new Set();
+            var delBatch=fbDB.batch();
+            allSnap.docs.forEach(function(d){
+              var r=d.data();
+              var key=r.empId+'|'+r.training+'|'+r.date+'|'+r.score;
+              if(cloudKeys.has(key)){delBatch.delete(d.ref);}
+              cloudKeys.add(key);
+            });
+            if(delBatch._ops.length){await delBatch.commit();console.log('[Firestore] Deleted '+delBatch._ops.length+' duplicate(s) from cloud');}
+          }catch(e){console.warn('Dedup cloud error:',e);}
+        })();
+      }
+    }
+
     // Filter out permanently deleted items (tombstone)
     applyTombstones();
 
