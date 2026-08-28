@@ -3130,46 +3130,209 @@ function sendQuickMsg(empId){
 }
 
 /* ============================================================
-   EXCEL EXPORT ALL DATA
+   FIREBASE / FIRESTORE STORAGE USAGE
+============================================================ */
+function getFirestoreUsage(){
+  // Calculate approximate Firestore storage usage from local DB data
+  var totalBytes=0;
+  var collections={};
+  var items={
+    employees:DB.employees,
+    trainings:DB.trainings,
+    testResults:DB.testResults,
+    certificates:DB.certificates,
+    notifications:DB.notifications,
+    sops:DB.sops,
+    admins:DB.admins,
+    correctiveActions:DB.correctiveActions||[],
+    customQuestions:DB.customQuestions||[],
+    customEquipment:DB.customEquipment||[],
+    feedbackForms:DB.feedbackForms||[]
+  };
+  Object.keys(items).forEach(function(col){
+    var data=JSON.stringify(items[col]);
+    var bytes=new Blob([data]).size;
+    collections[col]={count:items[col].length,sizeBytes:bytes,sizeKB:Math.round(bytes/1024*10)/10};
+    totalBytes+=bytes;
+  });
+  // Also count deletedItems (tombstones)
+  var tombBytes=JSON.stringify(_deletedIds).length;
+  collections.deletedItems={count:Object.values(_deletedIds).reduce(function(s,a){return s+a.length;},0),sizeBytes:tombBytes,sizeKB:Math.round(tombBytes/1024*10)/10};
+  totalBytes+=tombBytes;
+  // Add overhead estimate (document IDs, metadata, indexes ~30% overhead)
+  var withOverhead=Math.round(totalBytes*1.3);
+  var FREE_LIMIT=1*1024*1024; // 1 GB free tier
+  var usedMB=Math.round(withOverhead/1024/1024*100)/100;
+  var freeMB=Math.round((FREE_LIMIT-withOverhead)/1024/1024*100)/100;
+  var pct=Math.min(Math.round(withOverhead/FREE_LIMIT*100),100);
+  return {collections:collections,totalBytes:totalBytes,withOverhead:withOverhead,usedMB:usedMB,freeMB:freeMB,pct:pct,freeLimitMB:FREE_LIMIT/1024/1024};
+}
+function renderStorageBar(usage){
+  var barColor=usage.pct>80?'var(--red)':usage.pct>50?'var(--amber)':'var(--green)';
+  return '<div style="margin-top:10px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
+      '<span style="font-size:12px;font-weight:600;color:var(--txt);">Storage Used</span>'+
+      '<span style="font-size:12px;color:'+barColor+';font-weight:700;">'+usage.usedMB+' MB / '+usage.freeLimitMB+' MB ('+usage.pct+'%)</span>'+
+    '</div>'+
+    '<div style="width:100%;height:14px;background:var(--sur2);border-radius:7px;overflow:hidden;border:1px solid var(--bdr);">'+
+      '<div style="width:'+usage.pct+'%;height:100%;background:'+barColor+';border-radius:7px;transition:width .5s ease;"></div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:4px;">Free: <b style="color:var(--green);">'+usage.freeMB+' MB</b> available</div>'+
+  '</div>';
+}
+
+/* ============================================================
+   MASTER AUDIT EXCEL — Multi-sheet XLSX with ALL data
+============================================================ */
+function exportMasterAuditExcel(){
+  try{
+    var wb=XLSX.utils.book_new();
+    var dateStr=new Date().toISOString().split('T')[0];
+    // --- Sheet 1: Summary ---
+    var summaryData=[
+      {Item:'Company',Value:DB.settings.companyName||'PTS Safety'},
+      {Item:'Report Generated',Value:new Date().toLocaleString()},
+      {Item:'Total Employees',Value:DB.employees.length},
+      {Item:'Total Trainings',Value:DB.trainings.length},
+      {Item:'Total Test Results',Value:DB.testResults.length},
+      {Item:'Total Certificates',Value:DB.certificates.length},
+      {Item:'Total SOPs',Value:DB.sops.length},
+      {Item:'Corrective Actions',Value:(DB.correctiveActions||[]).length},
+      {Item:'Admin Accounts',Value:DB.admins.length},
+      {Item:'Notifications',Value:DB.notifications.length},
+      {Item:'Pass Rate',Value:DB.testResults.length?Math.round(DB.testResults.filter(function(r){return r.pass;}).length/DB.testResults.length*100)+'%':'N/A'},
+      {Item:'Min Cert Score',Value:(DB.settings.minCertScore||70)+'%'},
+      {Item:'Firebase Connected',Value:firebaseReady?'Yes':'No'}
+    ];
+    var ws1=XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb,ws1,'Summary');
+
+    // --- Sheet 2: Employees ---
+    var empData=DB.employees.map(function(e){
+      var testCount=DB.testResults.filter(function(r){return r.empId===e.id;}).length;
+      var passCount=DB.testResults.filter(function(r){return r.empId===e.id&&r.pass;}).length;
+      var certCount=DB.certificates.filter(function(c){return c.empId===e.id;}).length;
+      var trnCount=DB.trainings.filter(function(t){return (t.enrolled||[]).includes(e.id);}).length;
+      return {
+        'Employee ID':e.id,'Name':e.name,'Department':e.dept,'Designation':e.desig,
+        'Shift':e.shift||'','Mobile':e.mobile,'Email':e.email||'','Location':e.location||'Site',
+        'Status':e.status||'active','Joining Date':e.joining||'',
+        'Trainings Assigned':trnCount,'Tests Taken':testCount,'Tests Passed':passCount,
+        'Certificates':certCount,'Pass Rate':testCount?Math.round(passCount/testCount*100)+'%':'N/A'
+      };
+    });
+    var ws2=XLSX.utils.json_to_sheet(empData);
+    XLSX.utils.book_append_sheet(wb,ws2,'Employees');
+
+    // --- Sheet 3: Trainings ---
+    var trnData=DB.trainings.map(function(t){
+      var enrolledNames=(t.enrolled||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
+      var completedNames=(t.completed||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
+      return {
+        'Training ID':t.id,'Training Name':t.name,'Category':t.cat,'Department':t.dept||'',
+        'Trainer':t.trainer||'','Manager':t.manager||'','Date':t.date||'','Duration':t.duration||'',
+        'Passing Score':t.passing||70,'Validity':t.validity||'','Certificate':t.cert?'Yes':'No',
+        'Enrolled Count':(t.enrolled||[]).length,'Completed Count':(t.completed||[]).length,
+        'Enrolled Employees':enrolledNames,'Completed Employees':completedNames,
+        'Custom Questions':t.customQuestions||0
+      };
+    });
+    var ws3=XLSX.utils.json_to_sheet(trnData);
+    XLSX.utils.book_append_sheet(wb,ws3,'Trainings');
+
+    // --- Sheet 4: Test Results ---
+    var trData=DB.testResults.map(function(r){
+      return {
+        'Test ID':r.id,'Date':r.date,'Employee ID':r.empId,'Employee Name':r.empName,
+        'Department':r.dept,'Training':r.training,'Category':r.cat||'',
+        'Score (%)':r.score,'Correct':r.correct,'Wrong':r.wrong,'Total Questions':r.total,
+        'Attempt #':r.attempt,'Time Taken':r.timeTakenStr||'','Result':r.pass?'PASS':'FAIL',
+        'Certificate No':r.cert||''
+      };
+    });
+    var ws4=XLSX.utils.json_to_sheet(trData);
+    XLSX.utils.book_append_sheet(wb,ws4,'Test Results');
+
+    // --- Sheet 5: Certificates ---
+    var certData=DB.certificates.map(function(c){
+      return {
+        'Certificate No':c.num,'Employee ID':c.empId,'Employee Name':c.empName,
+        'Department':c.dept,'Training':c.training,'Score':c.score,
+        'Trainer':c.trainer||'','Issued Date':c.issued,'Expiry Date':c.expiry,
+        'Status':c.expiry&&new Date(c.expiry)<new Date()?'EXPIRED':'VALID'
+      };
+    });
+    var ws5=XLSX.utils.json_to_sheet(certData);
+    XLSX.utils.book_append_sheet(wb,ws5,'Certificates');
+
+    // --- Sheet 6: Corrective Actions ---
+    var caData=(DB.correctiveActions||[]).map(function(ca){
+      return {
+        'ID':ca.id,'Date':ca.date||'','Employee ID':ca.empId,'Employee Name':ca.empName,
+        'Training':ca.training||'','Type':ca.type||'','Fail Count':ca.failCount||0,
+        'Best Score':ca.bestScore||0,'Pass Mark':ca.passMark||70,
+        'Action Taken':ca.action||'','Reason':ca.reason||'',
+        'Done By':ca.doneBy||'','Status':ca.done?'Completed':'Open'
+      };
+    });
+    var ws6=XLSX.utils.json_to_sheet(caData.length?caData:[{'Note':'No corrective actions recorded'}]);
+    XLSX.utils.book_append_sheet(wb,ws6,'Corrective Actions');
+
+    // --- Sheet 7: Notifications ---
+    var notifData=DB.notifications.slice(0,500).map(function(n){
+      return {
+        'ID':n.id,'Time':n.time,'Message':n.msg||'',
+        'For Employee':n.forEmp||'','From Employee':n.fromEmp||'',
+        'From Name':n.fromEmpName||'','Read':n.read?'Yes':'No',
+        'Replies':(n.replies||[]).length
+      };
+    });
+    var ws7=XLSX.utils.json_to_sheet(notifData);
+    XLSX.utils.book_append_sheet(wb,ws7,'Notifications');
+
+    // --- Sheet 8: Admin Accounts ---
+    var adminData=DB.admins.map(function(a){
+      var isPromoted=DB.employees.find(function(e){return e.id===a.username;});
+      return {
+        'Username':a.username,'Name':a.name,'Role':a.role,
+        'Source':isPromoted?'Promoted Employee':'Direct Admin'
+      };
+    });
+    var ws8=XLSX.utils.json_to_sheet(adminData);
+    XLSX.utils.book_append_sheet(wb,ws8,'Admin Accounts');
+
+    // --- Sheet 9: Storage Usage ---
+    var usage=getFirestoreUsage();
+    var storageData=[
+      {Collection:'employees',Documents:usage.collections.employees.count,'Size (KB)':usage.collections.employees.sizeKB},
+      {Collection:'trainings',Documents:usage.collections.trainings.count,'Size (KB)':usage.collections.trainings.sizeKB},
+      {Collection:'testResults',Documents:usage.collections.testResults.count,'Size (KB)':usage.collections.testResults.sizeKB},
+      {Collection:'certificates',Documents:usage.collections.certificates.count,'Size (KB)':usage.collections.certificates.sizeKB},
+      {Collection:'notifications',Documents:usage.collections.notifications.count,'Size (KB)':usage.collections.notifications.sizeKB},
+      {Collection:'sops',Documents:usage.collections.sops.count,'Size (KB)':usage.collections.sops.sizeKB},
+      {Collection:'correctiveActions',Documents:usage.collections.correctiveActions.count,'Size (KB)':usage.collections.correctiveActions.sizeKB},
+      {Collection:'admins',Documents:usage.collections.admins.count,'Size (KB)':usage.collections.admins.sizeKB},
+      {Collection:'deletedItems (tombstones)',Documents:usage.collections.deletedItems.count,'Size (KB)':usage.collections.deletedItems.sizeKB},
+      {Item:'TOTAL (with 30% overhead)',Value:'',Documents:'','Size (KB)':'','Used (MB)':usage.usedMB,'Free (MB)':usage.freeMB,'Usage %':usage.pct+'%'}
+    ];
+    var ws9=XLSX.utils.json_to_sheet(storageData);
+    XLSX.utils.book_append_sheet(wb,ws9,'Storage Usage');
+
+    // Download
+    XLSX.writeFile(wb,'PTS_Master_Audit_'+dateStr+'.xlsx');
+    toast('Master Audit Excel downloaded! (9 sheets, '+
+      DB.employees.length+' employees, '+DB.testResults.length+' test results, '+DB.certificates.length+' certificates)','success',6000);
+  }catch(err){
+    console.error('Master Audit export error:',err);
+    toast('Export failed: '+err.message,'error');
+  }
+}
+
+/* ============================================================
+   EXCEL EXPORT ALL DATA (Legacy - now uses master audit)
 ============================================================ */
 function exportAllDataExcel(){
-  try{
-    var rows=[];
-    // Employees sheet
-    DB.employees.forEach(function(e){rows.push({Sheet:'Employees',ID:e.id,Name:e.name,Department:e.dept,Designation:e.desig,Shift:e.shift,Mobile:e.mobile,Email:e.email||'',Location:e.location||'',Status:e.status,Joining:e.joining||''});});
-    // Trainings sheet
-    DB.trainings.forEach(function(t){rows.push({Sheet:'Trainings',ID:t.id,Name:t.name,Category:t.cat,Department:t.dept,Trainer:t.trainer||'',Manager:t.manager||'',Date:t.date||'',Duration:t.duration||'',Passing:t.passing||70,Validity:t.validity||'',Certificate:t.cert?'Yes':'No',Enrolled:(t.enrolled||[]).length,Completed:(t.completed||[]).length,CustomQuestions:t.customQuestions||0});});
-    // Test Results sheet
-    DB.testResults.forEach(function(r){rows.push({Sheet:'TestResults',ID:r.id,EmployeeID:r.empId,EmployeeName:r.empName,Department:r.dept,Training:r.training,Category:r.cat||'',Score:r.score,Correct:r.correct,Wrong:r.wrong,Total:r.total,Result:r.pass?'PASS':'FAIL',Attempt:r.attempt,Date:r.date,Certificate:r.cert||''});});
-    // Certificates sheet
-    DB.certificates.forEach(function(c){rows.push({Sheet:'Certificates',CertNo:c.num,EmployeeID:c.empId,EmployeeName:c.empName,Department:c.dept,Training:c.training,Score:c.score,Trainer:c.trainer||'',Issued:c.issued,Expiry:c.expiry});});
-    // Corrective Actions sheet
-    (DB.correctiveActions||[]).forEach(function(ca){rows.push({Sheet:'CorrectiveActions',ID:ca.id,EmployeeID:ca.empId,EmployeeName:ca.empName,Training:ca.training||'',Type:ca.type||'',FailCount:ca.failCount||0,BestScore:ca.bestScore||0,PassMark:ca.passMark||70,Action:ca.action||'',Reason:ca.reason||'',DoneBy:ca.doneBy||'',Date:ca.date||''});});
-    // Notifications sheet
-    DB.notifications.forEach(function(n){rows.push({Sheet:'Notifications',ID:n.id,Message:n.msg,Time:n.time,ForEmployee:n.forEmp||'',FromEmployee:n.fromEmp||'',FromName:n.fromEmpName||'',Read:n.read?'Yes':'No',Replies:(n.replies||[]).length});});
-    if(!rows.length){toast('No data to export','warning');return;}
-    // Build CSV content (Excel can open CSV)
-    var sheets={};
-    rows.forEach(function(r){var s=r.Sheet;delete r.Sheet;if(!sheets[s])sheets[s]=[];sheets[s].push(r);});
-    var allCSV='';
-    Object.keys(sheets).forEach(function(sheetName){
-      var data=sheets[sheetName];
-      var headers=Object.keys(data[0]);
-      var csv=headers.join(',')+'\n';
-      data.forEach(function(row){
-        csv+=headers.map(function(h){var v=''+(row[h]===undefined?'':row[h]);if(v.includes(',')||v.includes('"')||v.includes('\n'))v='"'+v.replace(/"/g,'""')+'"';return v;}).join(',')+'\n';
-      });
-      allCSV+=csv+'\n';
-    });
-    var blob=new Blob([allCSV],{type:'text/csv;charset=utf-8;'});
-    var url=URL.createObjectURL(blob);
-    var a=document.createElement('a');
-    a.href=url;
-    a.download='PTS_Safety_AllData_'+new Date().toISOString().split('T')[0]+'.csv';
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('Excel export downloaded! ('+rows.length+' rows across '+Object.keys(sheets).length+' sheets)','success',5000);
-  }catch(err){console.error('Export error:',err);toast('Export failed: '+err.message,'error');}
+  exportMasterAuditExcel();
 }
 
 function giveAdminAccess(empId){
@@ -4947,6 +5110,13 @@ function renderReports(){
   const failCount=DB.testResults.filter(r=>!r.pass).length;
   document.getElementById("view-reports").innerHTML=`
     <div class="section-header"><div class="section-title">Reports & <span>Analytics</span></div></div>
+    <div style="background:linear-gradient(135deg,rgba(255,176,32,.1),rgba(139,109,232,.1));border:1px solid rgba(255,176,32,.3);border-radius:var(--r);padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:15px;font-weight:700;color:var(--amber);display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="font-size:20px;">download</span> Master Audit Excel</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;">Download ALL data in one Excel file with <b style="color:var(--txt);">9 separate sheets</b>: Summary, Employees (with stats), Trainings (with enrolled names), Test Results, Certificates, Corrective Actions, Notifications, Admin Accounts, Storage Usage.</div>
+      </div>
+      <button class="btn btn-amber" onclick="exportMasterAuditExcel()" style="padding:12px 24px;font-size:14px;font-weight:700;white-space:nowrap;"><span class="mat-ico">download</span> Download Master Excel</button>
+    </div>
     <div class="report-grid">
       ${reportCard("people","Employee Report","All employee details","#3ea0e8","exportEmpExcel()")}
       ${reportCard("school","Training Report","All training records","#8b6de8","exportTrnReport()")}
@@ -6251,6 +6421,12 @@ function renderSettings(){
       <div style="font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.5;">Click "Fix Employee Phone Login" if any employee cannot login from their phone. It writes EVERY employee individually to Firebase and creates login accounts.</div>
       <div id="fbTestResult" style="margin-top:8px;font-size:11px;display:none;"></div>
     </div>
+    <!-- FIRESTORE STORAGE USAGE -->
+    <div style="background:rgba(139,109,232,.08);border:1px solid rgba(139,109,232,.2);border-radius:var(--r);padding:14px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--purple);margin-bottom:8px;display:flex;align-items:center;gap:6px;"><span class="mat-ico">database</span> Firestore Storage Usage</div>
+      ${(()=>{var u=getFirestoreUsage();var cols=Object.keys(u.collections);var rows=cols.map(function(c){var d=u.collections[c];return '<tr><td style="font-size:11px;color:var(--txt);">'+c+'</td><td style="font-size:11px;font-weight:600;color:var(--amber);">'+d.count+'</td><td style="font-size:11px;color:var(--blue);">'+d.sizeKB+' KB</td></tr>';}).join('');return '<div class="table-wrap" style="margin-bottom:4px;"><table><thead><tr><th>Collection</th><th>Documents</th><th>Size</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+renderStorageBar(u);})()}
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5;">Firestore free tier: <b style="color:var(--txt);">1 GB</b> storage. Usage is estimated from local data (includes ~30% overhead for document metadata & indexes). For exact usage, check <a href="https://console.firebase.google.com" target="_blank" style="color:var(--purple);">Firebase Console</a>.</div>
+    </div>
     <div class="settings-grid">
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">business</span> Company Settings</div>
@@ -6376,6 +6552,7 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
           <div>SOPs: <b style="color:var(--txt);">${DB.sops.length}</b></div>
           <div>Equipment: <b style="color:var(--txt);">${EQUIPMENT_DATA.length}</b></div>
           <div>Min Cert Score: <b style="color:var(--amber);">${DB.settings.minCertScore||70}%</b></div>
+          <div>Firestore Storage: <b style="color:var(--purple);">${(()=>{var u=getFirestoreUsage();return u.usedMB+' MB used / '+u.freeLimitMB+' MB free ('+u.pct+'%)';})()}</b></div>
         </div>
       </div>`:""}
     </div>
