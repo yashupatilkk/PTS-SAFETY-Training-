@@ -928,6 +928,7 @@ let DB={
   settings:{
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"https://script.google.com/macros/s/AKfycbwLyrt9-3dS7MroEH1BJ2kfwAbgqKF0IuzvaBGuOMTkPXVIMPJTt3r3ceyDqoP1VMVoIw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
+    managerList:["Site Manager","Operations Manager","HSE Manager"],defaultManager:"",
     theme:"dark",language:"English",minCertScore:70
   },
   customQuestions:[],  // persisted custom questions from admin
@@ -3611,7 +3612,7 @@ function openAddTrnModal(){
         <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="nt_dept"><option>All</option>${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="nt_trainer">${DB.settings.trainerList.map(t=>`<option>${t}</option>`).join("")}</select></div>
-        <div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="nt_manager" placeholder="e.g. Mr. Sharma, Site Manager"></div>
+        <div class="form-group"><label class="form-label-sm">Manager</label><select class="form-control-sm" id="nt_manager_select" onchange="var v=this.value;if(v==='__custom__'){document.getElementById('nt_manager').value='';document.getElementById('nt_manager').style.display='block';document.getElementById('nt_manager').focus();}else{document.getElementById('nt_manager').value=v;document.getElementById('nt_manager').style.display=v?'none':'block';}"><option value="">-- Select Manager --</option>${(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(DB.settings.defaultManager||'')?' selected':'')+'>'+m+'</option>';}).join('')}<option value="__custom__">+ Custom...</option></select><input class="form-control-sm" id="nt_manager" placeholder="Type custom manager name" style="margin-top:4px;display:${DB.settings.defaultManager?'none':'block'};" value="${DB.settings.defaultManager||''}"></div>
         <div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="nt_date" type="date" value="${today}"></div>
         <div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="nt_dur" placeholder="e.g. 30 min, 2 hrs"></div>
         <div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="nt_pass" type="number" value="75" min="0" max="100"></div>
@@ -4938,7 +4939,8 @@ likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10px
 var overallCols=['Excellent','Good','Average','Poor','Very Poor'];
 var overallChecks='';
 for(var c=0;c<5;c++){var v=c+1;var marked=v===fb.overallRating?'<b style="font-size:14px;">\u2713</b>':'<span style=\'color:#ccc;\'>\u25A1</span>';overallChecks+='<td style="border:1px solid #000;text-align:center;padding:5px 4px;width:13%;font-size:9px;">'+marked+'</td>';}
-var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Times New Roman,serif;font-size:11px;color:#000;padding:15px 18px;}table{border-collapse:collapse;width:100%;}td,th{border:1px solid #000;padding:3px 5px;vertical-align:top;}.header-table{width:100%;margin-bottom:8px;border:none;}.header-table td{border:none;vertical-align:middle;}.header-table td.logo-cell{width:80px;padding:2px;}.header-table td.logo-cell img{width:65px;height:65px;}.header-table td.title-cell{text-align:center;font-weight:bold;padding:2px 6px;}.header-table td.title-cell .company{font-size:13px;}.header-table td.title-cell .sub{font-size:11px;}.header-table td.title-cell .form-title{font-size:11px;margin-top:2px;}.header-table td.doc-cell{width:130px;font-size:8px;padding:2px 4px;text-align:right;vertical-align:top;}.section-title{background:#d9d9d9;font-weight:bold;font-size:10px;padding:3px 6px;border:1px solid #000;text-align:center;}.info-label{font-weight:bold;font-size:10px;white-space:nowrap;width:18%;}.info-value{font-size:10px;width:32%;}.rating-header{background:#d9d9d9;font-weight:bold;font-size:8px;text-align:center;padding:3px 2px;border:1px solid #000;}.enjoy-section{margin-top:6px;}.enjoy-section .label{font-weight:bold;font-size:10px;margin-bottom:3px;}.enjoy-section .box{border:1px solid #000;min-height:45px;padding:5px;font-size:10px;}.footer-note{margin-top:8px;font-size:7px;color:#888;text-align:center;}</style></head><body>';
+var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>*{margin:0;padding:0;box-sizing:border-box;}@page{size:A4;margin:10mm 12mm 10mm 10mm;}body{font-family:Calibri,Times New Roman,serif;font-size:10pt;color:#000;padding:0;border:1px solid #000;}table{border-collapse:collapse;width:100%;}td,th{padding:3px 5px;vertical-align:top;}/* HEADER TABLE - black border outside, no inside borders */.header-table{width:100%;margin-bottom:6px;border:1px solid #000;}.header-table td{padding:2px 4px;vertical-align:middle;}.header-table td.logo-cell{width:85px;padding:3px;border:none;}.header-table td.logo-cell img{width:65px;height:65px;}.header-table td.title-cell{text-align:center;font-weight:bold;padding:4px 6px;border:none;}.header-table td.title-cell .company{font-size:12pt;}.header-table td.title-cell .sub{font-size:10pt;letter-spacing:1px;}.header-table td.title-cell .form-title{font-size:10pt;margin-top:2px;}.header-table td.doc-cell{width:120px;font-size:8pt;padding:2px 4px;text-align:right;vertical-align:top;border:none;}/* EMPLOYEE INFO TABLE - blue borders like reference #B4C5E7 */.info-table{width:100%;border:1pt solid #B4C5E7;margin-bottom:6px;}.info-table td{border:1pt solid #B4C5E7;padding:4px 6px;font-size:10pt;vertical-align:top;}.section-title{background:#B4C5E7;font-weight:bold;font-size:10pt;padding:4px 6px;text-align:center;border:1pt solid #B4C5E7;}.info-label{font-weight:bold;font-size:10pt;white-space:nowrap;}.info-value{font-size:10pt;}/* FEEDBACK TABLE */.fb-table{width:100%;border:1pt solid #000;}.fb-table td{border:1pt solid #000;padding:3px 5px;font-size:9pt;vertical-align:top;}.rating-header{background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;}.enjoy-section{margin-top:6px;}.enjoy-section .label{font-weight:bold;font-size:10pt;margin-bottom:3px;}.enjoy-section .box{border:1pt solid #000;min-height:40px;padding:5px;font-size:10pt;}.footer-note{margin-top:8px;font-size:7pt;color:#888;text-align:center;}</style></head><body>';
+/* HEADER TABLE - Logo | Company Title | Document Info - black border */
 html+='<table class="header-table"><tr>';
 html+='<td class="logo-cell" rowspan="4"><img src="'+PTS_LOGO_B64+'" /></td>';
 html+='<td class="title-cell"><div class="company">Prestige Office Management Private Limited</div><div class="sub">Integrated Management System</div><div class="form-title">Training Feedback Form</div></td>';
@@ -4946,23 +4948,27 @@ html+='<td class="doc-cell">Document Number:<br/><b>IMSP 29 F05</b></td>';
 html+='</tr><tr><td></td><td class="doc-cell">Issued Date:<br/>01/06/2024</td></tr>';
 html+='<tr><td></td><td class="doc-cell">Rev.02</td></tr>';
 html+='<tr><td></td><td class="doc-cell">Revision Date:<br/>01/08/2025</td></tr></table>';
-html+='<table style="margin-bottom:6px;">';
-html+='<tr><td colspan="3" class="section-title">EMPLOYEE INFORMATION</td></tr>';
-html+='<tr><td class="info-label" style="border:1px solid #000;">Name:</td><td class="info-value" style="border:1px solid #000;">'+(fb.empName||'')+'</td><td class="info-label" style="border:1px solid #000;">Employee ID:</td><td class="info-value" style="border:1px solid #000;">'+(fb.empId||'')+'</td><td class="info-label" style="border:1px solid #000;">Department</td><td class="info-value" style="border:1px solid #000;">'+(fb.dept||'')+'</td></tr>';
-html+='<tr><td class="info-label" style="border:1px solid #000;">Job Title:</td><td class="info-value" style="border:1px solid #000;">'+(fb.desig||'')+'</td><td class="info-label" style="border:1px solid #000;">Date:</td><td class="info-value" style="border:1px solid #000;">'+(fb.date||'')+'</td><td class="info-label" style="border:1px solid #000;">Manager</td><td class="info-value" style="border:1px solid #000;">'+(fb.manager||'')+'</td></tr>';
-html+='<tr><td class="info-label" style="border:1px solid #000;">Training Course:</td><td colspan="3" class="info-value" style="border:1px solid #000;"><b>'+(fb.training||'')+'</b></td><td class="info-label" style="border:1px solid #000;">Trainer:</td><td class="info-value" style="border:1px solid #000;">'+(fb.trainer||'')+'</td></tr>';
+/* EMPLOYEE INFORMATION TABLE - blue border (#B4C5E7), 3-column layout like reference */
+html+='<table class="info-table">';
+html+='<tr><td colspan="6" class="section-title">EMPLOYEE INFORMATION</td></tr>';
+html+='<tr><td class="info-label">Name:</td><td class="info-value">'+(fb.empName||'')+'</td><td class="info-label">Employee ID:</td><td class="info-value">'+(fb.empId||'')+'</td><td class="info-label">Department</td><td class="info-value">'+(fb.dept||'')+'</td></tr>';
+html+='<tr><td class="info-label">Job Title:</td><td class="info-value">'+(fb.desig||'')+'</td><td class="info-label">Date:</td><td class="info-value">'+(fb.date||'')+'</td><td class="info-label">Manager</td><td class="info-value">'+(fb.manager||'')+'</td></tr>';
+html+='<tr><td class="info-label" style="border-bottom:none;">Training Course:</td><td colspan="3" class="info-value" style="border-bottom:none;"><b>'+(fb.training||'')+'</b></td><td class="info-label" style="border-bottom:none;">Trainer:</td><td class="info-value" style="border-bottom:none;">'+(fb.trainer||'')+'</td></tr>';
 html+='</table>';
-html+='<table>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10px;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:3px;"></td>';
+/* FEEDBACK RATING TABLE */
+html+='<table class="fb-table">';
+html+='<tr><td colspan="6" style="padding:4px 6px;font-size:10pt;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
+html+='<tr><td style="padding:3px;"></td>';
 html+='<td class="rating-header">Strongly Agree</td><td class="rating-header">Agree</td><td class="rating-header">Neutral</td><td class="rating-header">Disagree</td><td class="rating-header">Strongly Disagree</td></tr>';
 html+=likertRows;
 html+='</table>';
-html+='<table style="margin-top:4px;">';
-html+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10px;width:40%;"><b>How do you rate the training overall?</b></td>';
+/* OVERALL RATING TABLE */
+html+='<table class="fb-table" style="margin-top:4px;">';
+html+='<tr><td style="padding:4px 6px;font-size:10pt;width:40%;"><b>How do you rate the training overall?</b></td>';
 html+='<td class="rating-header">Excellent</td><td class="rating-header">Good</td><td class="rating-header">Average</td><td class="rating-header">Poor</td><td class="rating-header">Very Poor</td></tr>';
 html+='<tr><td></td>'+overallChecks+'</tr>';
 html+='</table>';
+/* OPEN QUESTIONS */
 html+='<div class="enjoy-section"><div class="label">What did you enjoy most about the training?</div><div class="box">'+(fb.enjoy||'')+'</div></div>';
 if(fb.suggestions){html+='<div class="enjoy-section"><div class="label">Suggestions for improvement:</div><div class="box">'+fb.suggestions+'</div></div>';}
 html+='<div class="footer-note">IMSP 29 F05 Rev.02 | Generated on '+new Date().toLocaleString()+' | '+DB.settings.companyName+'</div>';
@@ -5068,7 +5074,7 @@ for(var qi=0;qi<FB_QUESTIONS.length;qi++){if(!_fbRatings[qi]){toast('Please answ
 if(!_fbOverall){toast('Please rate the training overall','error');return;}
 var enjoyEl=document.getElementById('fb_enjoy');var suggestEl=document.getElementById('fb_suggest');
 var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
-var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',desig:currentUser.desig||'',manager:trnMatch?trnMatch.manager||'':'',training:quizState.training,trainer:trnMatch?trnMatch.trainer||'':'',category:quizState.category,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),
+var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',desig:currentUser.desig||'',manager:trnMatch?(trnMatch.manager||DB.settings.defaultManager||''):(DB.settings.defaultManager||''),training:quizState.training,trainer:trnMatch?trnMatch.trainer||'':'',category:quizState.category,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),
   ratings:{} ,overallRating:_fbOverall,overallLabel:FB_OVERALL[_fbOverall-1]||'',enjoy:enjoyEl?enjoyEl.value.trim():'',suggestions:suggestEl?suggestEl.value.trim():''};
 FB_QUESTIONS.forEach(function(q,i){fb.ratings['q'+(i+1)]={text:q,score:_fbRatings[i],label:FB_SCALE[_fbRatings[i]-1]||''};});
 DB.feedbackForms.push(fb);
@@ -6042,7 +6048,7 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
     '<div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="r2AssignCat">'+catOpts+'</select></div>'+
     '<div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="r2AssignDept">'+deptOpts+'</select></div>'+
     '<div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="r2AssignTrainer">'+(trainerOpts?'<option value="">Select trainer...</option>'+trainerOpts:'<option value="">No trainers configured</option>')+'</select></div>'+
-    '<div class="form-group"><label class="form-label-sm">Manager</label><input class="form-control-sm" id="r2AssignManager" value="'+escAttr(failedTrn.manager||'')+'" placeholder="e.g. Mr. Sharma"></div>'+
+    '<div class="form-group"><label class="form-label-sm">Manager</label><select class="form-control-sm" id="r2AssignManager_select" onchange="document.getElementById(\'r2AssignManager\').value=this.value;"><option value="">-- Select Manager --</option>'+(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(failedTrn.manager||DB.settings.defaultManager)?' selected':'')+'>'+m+'</option>';}).join('')+'<option value="__custom__">+ Custom...</option></select><input class="form-control-sm" id="r2AssignManager" value="'+escAttr(failedTrn.manager||DB.settings.defaultManager||'')+'" placeholder="Custom manager name" style="margin-top:4px;"></div>'+
     '<div class="form-group"><label class="form-label-sm">Training Date</label><input class="form-control-sm" id="r2AssignDate" type="date" value="'+today+'"></div>'+
     '<div class="form-group"><label class="form-label-sm">Duration</label><input class="form-control-sm" id="r2AssignDur" value="'+escAttr(failedTrn.duration||'')+'" placeholder="e.g. 30 min"></div>'+
     '<div class="form-group"><label class="form-label-sm">Passing Marks (%)</label><input class="form-control-sm" id="r2AssignPass" type="number" value="'+(failedTrn.passing||75)+'" min="0" max="100"></div>'+
@@ -6542,6 +6548,15 @@ function renderSettings(){
           <div style="display:flex;gap:8px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>
         </div>`:`<div style="display:flex;gap:8px;margin-bottom:10px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>`}"
       </div>
+      <div class="form-section" style="grid-column:1/-1;">
+        <div class="form-section-title"><span class="mat-ico">supervisor_account</span> Manager List</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Managers are auto-filled in training creation and feedback PDFs. Set a default manager below.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          ${(s.managerList||[]).map(function(m,i){return '<div style="display:flex;align-items:center;gap:6px;background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:5px 10px;font-size:12px;">'+m+(isAdmin?'<button onclick="removeManager('+i+')" style="color:var(--red);"><span class="mat-ico" style="font-size:13px;">close</span></button>':'')+'</div>';}).join("")}
+        </div>
+        <div class="form-group" style="margin-bottom:10px;"><label class="form-label-sm">Default Manager (auto-fills in new trainings & feedback)</label><input class="form-control-sm" id="st_defaultManager" placeholder="e.g. Site Manager" value="${s.defaultManager||''}"></div>
+        ${isAdmin?`<div style="display:flex;gap:8px;"><input class="form-control-sm" id="newManager" placeholder="Add new manager name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addManager()"><span class="mat-ico">add</span> Add</button></div>`:''}
+      </div>
       ${isAdmin?`
       <div class="form-section" style="grid-column:1/-1;">
         <div class="form-section-title"><span class="mat-ico">manage_accounts</span> Admin Accounts</div>
@@ -6689,12 +6704,15 @@ function saveSettings(){
   DB.settings.sheetUrl=(document.getElementById("st_sheeturl")?.value||"").trim();
   DB.settings.driveUrl=(document.getElementById("st_driveurl")?.value||"").trim();
   DB.settings.driveFolder=(document.getElementById("st_drivefolder")?.value||"").trim();
+  DB.settings.defaultManager=(document.getElementById("st_defaultManager")?.value||"").trim();
   DRIVE_PDF_SCRIPT_URL=DB.settings.driveUrl||DRIVE_PDF_SCRIPT_URL;
   DRIVE_FOLDER_ID=DB.settings.driveFolder||DRIVE_FOLDER_ID;
   var autoSyncEl=document.getElementById("st_sheetAutoSync");
   if(autoSyncEl) DB.settings.sheetAutoSync=autoSyncEl.checked;
   toast("Settings saved","success");saveDB();
 }
+function addManager(){var v=document.getElementById("newManager")?.value.trim();if(!v)return;if(!DB.settings.managerList)DB.settings.managerList=[];DB.settings.managerList.push(v);document.getElementById("newManager").value="";renderSettings();saveDB();toast("Manager added","success");}
+function removeManager(i){DB.settings.managerList.splice(i,1);renderSettings();saveDB();}
 function addTrainer(){const v=document.getElementById("newTrainer")?.value.trim();if(!v)return;DB.settings.trainerList.push(v);document.getElementById("newTrainer").value="";renderSettings();saveDB();toast("Trainer added","success");}
 function removeTrainer(i){DB.settings.trainerList.splice(i,1);renderSettings();saveDB();}
 function changeAdminPw(username){const pw=prompt(`New password for ${username}:`);if(pw){const a=DB.admins.find(x=>x.username===username);if(a){a.password=pw;toast("Password changed","success");saveDB();}}}
