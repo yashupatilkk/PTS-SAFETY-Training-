@@ -3232,6 +3232,25 @@ async function deleteEmp(id){
     for(const cnum of certNums){
       try{await fbDB.collection('certificates').doc(String(cnum)).delete();}catch(e){console.warn('FB del cert:',e);}
     }
+    // CRITICAL: Also update Firebase training docs to remove employee from enrolled/completed
+    // Without this, training docs still contain the deleted employee ID and it comes back on next load
+    try{
+      var affectedTrainings=DB.trainings.filter(function(t){return (t.enrolled&&t.enrolled.includes(id))||(t.completed&&t.completed.includes(id));});
+      for(var i=0;i<affectedTrainings.length;i++){
+        var trn=affectedTrainings[i];
+        var updateData={};
+        if(trn.enrolled&&trn.enrolled.includes(id)) updateData.enrolled=trn.enrolled;
+        if(trn.completed&&trn.completed.includes(id)) updateData.completed=trn.completed;
+        if(trn.completedDates&&trn.completedDates[id]!==undefined){
+          var cleanDates=Object.assign({},trn.completedDates);
+          delete cleanDates[id];
+          updateData.completedDates=cleanDates;
+        }
+        if(Object.keys(updateData).length>0){
+          try{await fbDB.collection('trainings').doc(String(trn.id)).update(updateData);}catch(e2){console.warn('FB update training '+trn.id+':',e2);}
+        }
+      }
+    }catch(e){console.warn('FB update trainings for deleted employee:',e);}
   }
 
   // === STEP 5: Push cleaned data to cloud ===
@@ -6897,6 +6916,36 @@ function applyTombstones(){
   if(_deletedIds.sops?.length){const before=DB.sops.length;DB.sops=DB.sops.filter(s=>!_deletedIds.sops.includes(s.id));removed+=before-DB.sops.length;}
   if(_deletedIds.testResults?.length){const before=DB.testResults.length;DB.testResults=DB.testResults.filter(r=>!_deletedIds.testResults.includes(r.id));removed+=before-DB.testResults.length;}
   if(_deletedIds.certificates?.length){const before=DB.certificates.length;DB.certificates=DB.certificates.filter(c=>!_deletedIds.certificates.includes(c.num));removed+=before-DB.certificates.length;}
+  // CRITICAL: Also clean training enrolled/completed for tombstoned employees
+  // Firebase training docs may still contain deleted employee IDs in enrolled[]
+  if(_deletedIds.employees?.length){
+    var tombEmpSet=new Set(_deletedIds.employees);
+    // Also filter test results & certificates for tombstoned employees (safety net)
+    var beforeTR=DB.testResults.length;
+    DB.testResults=DB.testResults.filter(function(r){return !tombEmpSet.has(r.empId);});
+    if(DB.testResults.length!==beforeTR)removed+=beforeTR-DB.testResults.length;
+    var beforeCert=DB.certificates.length;
+    DB.certificates=DB.certificates.filter(function(c){return !tombEmpSet.has(c.empId);});
+    if(DB.certificates.length!==beforeCert)removed+=beforeCert-DB.certificates.length;
+    // Clean training enrollment/completion data
+    DB.trainings.forEach(function(t){
+      if(t.enrolled&&t.enrolled.length){
+        var before=t.enrolled.length;
+        t.enrolled=t.enrolled.filter(function(eid){return !tombEmpSet.has(eid);});
+        if(t.enrolled.length!==before)removed+=before-t.enrolled.length;
+      }
+      if(t.completed&&t.completed.length){
+        var before2=t.completed.length;
+        t.completed=t.completed.filter(function(eid){return !tombEmpSet.has(eid);});
+        if(t.completed.length!==before2)removed+=before2-t.completed.length;
+      }
+      if(t.completedDates){
+        Object.keys(t.completedDates).forEach(function(eid){
+          if(tombEmpSet.has(eid))delete t.completedDates[eid];
+        });
+      }
+    });
+  }
   if(removed)console.log('Tombstones removed '+removed+' resurrected docs');
   return removed;
 }
@@ -7057,11 +7106,13 @@ function loadDBFromLocal(){
 /* Reconcile: rebuild every training's completed/completedDates from testResults (source of truth) */
 function reconcileTrainingsFromResults(){
   let updated=0;
+  // Skip test results for deleted employees (their tombstones are still active)
+  var tombEmpSet=_deletedIds.employees?.length?new Set(_deletedIds.employees):null;
   DB.trainings.forEach(trn=>{
     if(!trn.completed)trn.completed=[];
     if(!trn.completedDates)trn.completedDates={};
-    // Find ALL passing test results for this training
-    const passResults=DB.testResults.filter(r=>r.pass&&r.training===trn.name);
+    // Find ALL passing test results for this training (excluding tombstoned employees)
+    const passResults=DB.testResults.filter(r=>r.pass&&r.training===trn.name&&(!tombEmpSet||!tombEmpSet.has(r.empId)));
     passResults.forEach(r=>{
       if(!trn.completed.includes(r.empId)){
         trn.completed.push(r.empId);
@@ -7172,7 +7223,29 @@ async function loadDBFromFirestore(){
     }
 
     // Filter out permanently deleted items (tombstone)
-    applyTombstones();
+    var tombRemoved=applyTombstones();
+
+    // If tombstones cleaned training enrollments, push cleaned trainings to Firebase
+    // so the cloud data is permanently fixed (not just cleaned in memory)
+    if(tombRemoved>0&&firebaseReady&&_deletedIds.employees?.length){
+      (async function(){
+        try{
+          await authAsAdmin();
+          var tombEmpSet=new Set(_deletedIds.employees);
+          var batch=fbDB.batch();
+          var updateCount=0;
+          DB.trainings.forEach(function(t){
+            var needsUpdate=false;
+            var updateData={};
+            if(t.enrolled){var clean=t.enrolled.filter(function(e){return !tombEmpSet.has(e);});if(clean.length!==t.enrolled.length){updateData.enrolled=clean;needsUpdate=true;}}
+            if(t.completed){var clean2=t.completed.filter(function(e){return !tombEmpSet.has(e);});if(clean2.length!==t.completed.length){updateData.completed=clean2;needsUpdate=true;}}
+            if(t.completedDates){var hasDeleted=false;Object.keys(t.completedDates).forEach(function(eid){if(tombEmpSet.has(eid))hasDeleted=true;});if(hasDeleted){var cd=Object.assign({},t.completedDates);_deletedIds.employees.forEach(function(eid){delete cd[eid];});updateData.completedDates=cd;needsUpdate=true;}}
+            if(needsUpdate){batch.update(fbDB.collection('trainings').doc(String(t.id)),updateData);updateCount++;}
+          });
+          if(updateCount>0){await batch.commit();console.log('[Firestore] Cleaned '+updateCount+' training doc(s) of deleted employee enrollments');}
+        }catch(e){console.warn('Tombstone training cleanup error:',e);}
+      })();
+    }
 
     // Clean orphan test results & certificates (reference trainings that no longer exist)
     var validTrnNames=new Set(DB.trainings.map(function(t){return t.name;}));
