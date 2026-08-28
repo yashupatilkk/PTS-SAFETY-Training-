@@ -3289,8 +3289,11 @@ function renderTrainings(){
       ${filtered.map(t=>{
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
         const enrolledCount=(t.enrolled||[]).length;
-        const completedFromResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
-        const completedCount=Math.max((t.completed||[]).length,completedFromResults.size);
+        const testedEmps=new Set(DB.testResults.filter(r=>r.training===t.name).map(r=>r.empId));
+        const passedEmps=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
+        const failedEmpCount=testedEmps.size-passedEmps.size;
+        const completedCount=testedEmps.size;
+        const passedCount=passedEmps.size;
         const pct=enrolledCount?Math.round(completedCount/enrolledCount*100):0;
         return`<div class="training-card" onclick="openTrainingDetail('${t.id}')">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
@@ -3309,7 +3312,7 @@ function renderTrainings(){
             ${t.manager?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">supervisor_account</span> Manager: <b>${t.manager}</b></div>`:''}
             <div class="training-progress"><div class="fill" style="width:${pct}%"></div></div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:10.5px;color:var(--muted);">${completedCount}/${enrolledCount} completed (${pct}%)</span>
+              <span style="font-size:10.5px;color:var(--muted);">${completedCount}/${enrolledCount} tested — ✅${passedCount} passed${failedEmpCount>0?" — ❌"+failedEmpCount+" failed":""}</span>
               <span class="badge badge-${t.cert?"amber":"info"}">${t.cert?"📜 Cert":"No Cert"}</span>
             </div>
             <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
@@ -3594,7 +3597,9 @@ function openTrainingDetail(id){
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Attempts</th><th>Score</th><th>Certificate</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
           const bestPass=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
-          const allResults=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
+          let allResults=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
+          // Dedup: keep only one result per date (remove same-day duplicates)
+          const seenDates=new Set();allResults=allResults.filter(r=>{if(seenDates.has(r.date))return false;seenDates.add(r.date);return true;});
           const doneFromResult=!!bestPass;
           const done=doneFromResult||(t.completed||[]).includes(e.id);
           const completedDate=bestPass?bestPass.date:((t.completedDates||{})[e.id]||"");
@@ -4452,6 +4457,8 @@ function nextQuestion(){if(quizState.current<quizState.questions.length-1){quizS
 function prevQuestion(){if(quizState.current>0){quizState.current--;renderQuizActive();}}
 function jumpToQuestion(i){quizState.current=i;renderQuizActive();}
 function submitQuiz(){
+  if(window._quizSubmitting){toast('Please wait, result is being saved','error');return;}
+  window._quizSubmitting=true;
   clearInterval(quizState.timer);
   const qs=quizState.questions;
   const answers=quizState.answers;
@@ -4475,6 +4482,8 @@ function submitQuiz(){
   const timeTakenStr=timeTakenSec>=60?Math.floor(timeTakenSec/60)+'m '+String(timeTakenSec%60).padStart(2,'0')+'s':timeTakenSec+'s';
   const certNum=qualifiesForCert&&pass?"CERT-"+Date.now().toString(36).toUpperCase():"";
   const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||"",timeTaken:timeTakenSec,timeTakenStr:timeTakenStr};
+  // Dedup: remove any existing result for same emp+training+date+score (double-submit protection)
+  DB.testResults=DB.testResults.filter(r=>!(r.empId===empId&&r.training===quizState.training&&r.date===today&&r.score===score));
   DB.testResults.push(result);
   if(certNum){
     const expiry=new Date();
@@ -4502,8 +4511,10 @@ function submitQuiz(){
         }
         console.log('Quiz result saved to Firebase immediately');
       }catch(e){console.warn('Firebase quiz save error:',e);}
+      finally{window._quizSubmitting=false;}
     })();
   }
+  if(!firebaseReady){window._quizSubmitting=false;}
   // Auto-sync this test result to Google Sheets (fire-and-forget)
   (async function(){
     try{
