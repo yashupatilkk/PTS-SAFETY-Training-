@@ -3994,10 +3994,11 @@ function uploadOfflineNCR_ToDrive(rec,trn,emp){
   var payload={action:'createDoc',folderId:DRIVE_FOLDER_ID,fileName:fileName,html:html};
   var xhr=new XMLHttpRequest();
   xhr.open('POST',DRIVE_PDF_SCRIPT_URL,true);
-  xhr.setRequestHeader('Content-Type','application/json');
+  xhr.timeout=15000;
+  var formD=new FormData();formD.append('json',JSON.stringify(payload));
   xhr.onload=function(){if(xhr.status===200){try{var res=JSON.parse(xhr.responseText);if(res.status==='OK'){toast('NCR PDF saved to Drive: '+res.fileName,'success',5000);}else{toast('Drive: '+res.msg,'warning',5000);}}catch(e){toast('NCR PDF sent to Drive','success',3000);}}else{toast('Drive upload status: '+xhr.status,'warning',3000);}};
   xhr.onerror=function(){toast('Drive upload failed','error',5000);};
-  xhr.send(JSON.stringify(payload));
+  xhr.send(formD);
   console.log('NCR PDF upload initiated:',fileName);
   }catch(e){console.warn('NCR upload error:',e);toast('NCR upload failed: '+e.message,'error',5000);}
 }
@@ -4973,27 +4974,29 @@ function uploadFeedbackPDFToDrive(fb){
 try{
 var htmlContent=generateFeedbackPDF_HTML(fb);
 var fileName='IMSP_29_F05_Feedback_'+fb.empName.replace(/\s+/g,'_')+'_'+fb.training.replace(/\s+/g,'_')+'_'+fb.date;
-// === ATTEMPT 1: Upload to Google Drive via Apps Script ===
+// === Upload to Google Drive via Apps Script (form-encoded POST) ===
 var payload={action:'createDoc',folderId:DRIVE_FOLDER_ID,fileName:fileName,html:htmlContent};
 var xhr=new XMLHttpRequest();
 xhr.open('POST',DRIVE_PDF_SCRIPT_URL,true);
-xhr.setRequestHeader('Content-Type','application/json');
 xhr.timeout=15000;
 var driveSuccess=false;
+// Use form-encoded POST — Google Apps Script parses e.parameter correctly
+var formData=new FormData();
+formData.append('json',JSON.stringify(payload));
 xhr.onload=function(){
   if(xhr.status===200){
     try{
       var res=JSON.parse(xhr.responseText);
       if(res.status==='OK'){driveSuccess=true;toast('Feedback PDF saved to Drive: '+res.fileName,'success',5000);return;}
       else{console.warn('Drive script error:',res.msg);}
-    }catch(e){console.warn('Drive response parse error:',e,xhr.responseText.substring(0,200));}
+    }catch(e){console.warn('Drive response parse error:',e);}
   }
   console.warn('Drive upload failed, status:',xhr.status,'response:',xhr.responseText?xhr.responseText.substring(0,200):'empty');
   fallbackDownloadFeedback(htmlContent,fileName);
 };
 xhr.onerror=function(){console.warn('Drive XHR network error');fallbackDownloadFeedback(htmlContent,fileName);};
 xhr.ontimeout=function(){console.warn('Drive upload timeout (15s)');fallbackDownloadFeedback(htmlContent,fileName);};
-xhr.send(JSON.stringify(payload));
+xhr.send(formData);
 console.log('Feedback PDF upload initiated for:',fileName);
 }catch(e){console.warn('Drive PDF upload error:',e);fallbackDownloadFeedback(htmlContent,fileName);}
 }
@@ -5050,8 +5053,8 @@ _fbRatings={};_fbOverall=0;
 if(firebaseReady){try{fbDB.collection('feedbackForms').doc(String(fb.id)).set(JSON.parse(JSON.stringify(fb)),{merge:true});console.log('Feedback saved to Firebase');}catch(e){console.warn('Firebase feedback save error:',e);}}
 // Upload IMSP 29 F05 Feedback PDF to Google Drive
 setTimeout(function(){uploadFeedbackPDFToDrive(fb);},500);
-// Push to Google Sheet
-(function(){try{var sheetUrl=DB.settings.sheetUrl||'';if(!sheetUrl)return;var f=document.createElement('form');f.method='POST';f.action=sheetUrl;f.target='_gsq_fb_'+Date.now();f.style.display='none';var inp=document.createElement('input');inp.type='hidden';inp.name='json';var row={Company:DB.settings.companyName||"PTS SAFETY",Date:fb.date,EmployeeID:fb.empId,EmployeeName:fb.empName,Department:fb.dept,Designation:fb.desig,Manager:fb.manager,Training:fb.training,Trainer:fb.trainer,Category:fb.category||''};FB_QUESTIONS.forEach(function(q,i){row['Q'+(i+1)+' ('+q.substring(0,30)+')']=fb.ratings['q'+(i+1)].label+' ('+fb.ratings['q'+(i+1)].score+'/5)';});row['Overall Rating']=fb.overallLabel+' ('+fb.overallRating+'/5)';row['What did you enjoy most?']=fb.enjoy;row['Suggestions']=fb.suggestions;inp.value=JSON.stringify({sheet:'Feedback',data:[row]});f.appendChild(inp);document.body.appendChild(f);f.submit();setTimeout(function(){try{document.body.removeChild(f);}catch(e){}},5000);}catch(e){console.warn('Feedback sheet sync error:',e);}})();
+// Push feedback to Google Sheet via the debounced queueSheetSync system
+queueSheetSync(["Feedback"]);
 submitQuiz();
 }
 
@@ -6745,6 +6748,20 @@ function buildSopPayload(){
   var company=DB.settings.companyName||"PTS SAFETY";
   return DB.sops.map(s=>({Company:company,ID:s.id,Title:s.title||s.name||"",Category:s.cat||"",Version:s.version||"1.0",Created:s.created||"",ApplicableDept:(s.dept||"").toString(),Status:s.status||"Active"}));
 }
+function buildFeedbackPayload(){
+  var company=DB.settings.companyName||"PTS SAFETY";
+  return (DB.feedbackForms||[]).map(function(fb){
+    var qScores=[];for(var k in (fb.ratings||{})){var r=fb.ratings[k];if(r&&r.score)qScores.push(r.score);}
+    var avgScore=qScores.length?Math.round(qScores.reduce(function(a,b){return a+b;},0)/qScores.length*10)/10:'—';
+    var row={Company:company,Date:fb.date||"",EmployeeID:fb.empId||"",EmployeeName:fb.empName||"",Department:fb.dept||"",Designation:fb.desig||"",Manager:fb.manager||"",Training:fb.training||"",Trainer:fb.trainer||"",Category:fb.category||""};
+    for(var i=0;i<FB_QUESTIONS.length;i++){var rk='q'+(i+1);var rd=(fb.ratings||{})[rk];row['Q'+(i+1)+' ('+FB_QUESTIONS[i].substring(0,30)+')']=rd?(rd.label+' ('+rd.score+'/5)'):'—';}
+    row['Overall Rating']=fb.overallLabel?(fb.overallLabel+' ('+fb.overallRating+'/5)'):'—';
+    row['Average Score']=avgScore+'/5';
+    row['What did you enjoy most?']=fb.enjoy||'';
+    row['Suggestions']=fb.suggestions||'';
+    return row;
+  });
+}
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
   var json=JSON.stringify({sheet:sheetName,data:payload});
@@ -6799,9 +6816,12 @@ async function syncToGoogleSheet(){
     // 6. SOPs
     var sopPayload=buildSopPayload();
     if(sopPayload.length>0){var r6=await pushToSheet(url,sopPayload,"SOPs");totalSent+=r6.sent;details.push(sopPayload.length+' SOPs');}
+    // 7. Feedback
+    var fbPayload=buildFeedbackPayload();
+    if(fbPayload.length>0){var r7=await pushToSheet(url,fbPayload,"Feedback");totalSent+=r7.sent;details.push(fbPayload.length+' feedback');}
     _lastSheetSync=Date.now();
     if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Sync complete on '+new Date().toLocaleString()+' — '+totalSent+' records across '+details.length+' sheets ('+details.join(', ')+'). Check your Google Sheet tabs.</span>';
-    toast('All data synced to Google Sheet! ('+totalSent+' records in 6 tabs)','success',4000);
+    toast('All data synced to Google Sheet! ('+totalSent+' records in 7 tabs)','success',4000);
     DB.notifications.unshift({id:genId("N"),msg:'Google Sheets sync: '+totalSent+' records sent ('+details.join(', ')+').',time:"Just now",read:false,icon:"table_chart"});
     updateBadges();
   }catch(err){
@@ -6824,7 +6844,7 @@ function queueSheetSync(sheetNames){
   if(!url) return;
   // Store which sheets need syncing (accumulates until timer fires)
   if(!window._pendingSheetSyncs) window._pendingSheetSyncs=new Set();
-  if(!sheetNames) sheetNames=["Training Data","Employees","Trainings","Certificates","Equipment","SOPs"];
+  if(!sheetNames) sheetNames=["Training Data","Employees","Trainings","Certificates","Equipment","SOPs","Feedback"];
   sheetNames.forEach(function(s){window._pendingSheetSyncs.add(s);});
   // Debounce: reset timer on each call
   if(_sheetSyncTimer) clearTimeout(_sheetSyncTimer);
@@ -6861,6 +6881,9 @@ async function executeSheetSync(){
     }
     if(sheetsToSync.includes("SOPs")){
       var p=buildSopPayload();if(p.length>0){await pushToSheet(url,p,"SOPs");totalSent+=p.length;}
+    }
+    if(sheetsToSync.includes("Feedback")){
+      var p=buildFeedbackPayload();if(p.length>0){await pushToSheet(url,p,"Feedback");totalSent+=p.length;}
     }
     _lastSheetSync=Date.now();
     console.log('[Sheet Auto-Sync] Done: '+totalSent+' records across '+sheetsToSync.length+' sheets');
