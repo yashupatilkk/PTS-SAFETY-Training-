@@ -4922,7 +4922,7 @@ const FB_OVERALL=['Excellent','Good','Average','Poor','Very Poor'];
 function setFbRating(qIdx,val){_fbRatings[qIdx]=val;var btns=document.querySelectorAll('.fb_likert_'+qIdx);btns.forEach(function(b){b.style.background=parseInt(b.dataset.val)===val?'var(--amber)':'var(--sur2)';b.style.color=parseInt(b.dataset.val)===val?'#151515':'var(--txt)';b.style.borderColor=parseInt(b.dataset.val)===val?'var(--amber)':'var(--bdr)';});}
 function setFbOverall(val){_fbOverall=val;var btns=document.querySelectorAll('.fb_overall_btn');btns.forEach(function(b){b.style.background=parseInt(b.dataset.val)===val?'var(--amber)':'var(--sur2)';b.style.color=parseInt(b.dataset.val)===val?'#151515':'var(--txt)';b.style.borderColor=parseInt(b.dataset.val)===val?'var(--amber)':'var(--bdr)';});}
 // Default Drive config — overridden by DB.settings if admin changes them
-var DRIVE_FOLDER_ID='1OSv-H_90D7lOXKLVZxM4soDr1_OPkPov';
+var DRIVE_FOLDER_ID='1Lko3eUwqrq_CnyvIiPLrz6_lAX_x_BMJ';
 var DRIVE_PDF_SCRIPT_URL='https://script.google.com/macros/s/AKfycby1qkIZKvOLJ1S4OLvQwwJJZwlooEfQ5vKWkutaf9GM8EVkJ0ANR9raspBwAOmyrFmfuA/exec';
 function getDriveUrl(){return (DB.settings.driveUrl||DRIVE_PDF_SCRIPT_URL).trim();}
 function getDriveFolder(){return (DB.settings.driveFolder||DRIVE_FOLDER_ID).trim();}
