@@ -3683,6 +3683,8 @@ function confirmAssign(trnId){
   closeModal();toast(`✅ ${selected.length} employee(s) assigned to "${t.name}"`,"success");
   DB.notifications.unshift({id:genId("N"),msg:`${selected.length} employee(s) assigned to "${t.name}". Date: ${formatDate(t.date)}`,time:"Just now",read:false,icon:"school"});
   updateBadges();renderTrainings();saveDB();
+  // Immediate Firebase save for training enrollment
+  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('Firebase assign save error:',e);}})();}
 }
 function confirmAssignAllDept(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
@@ -3694,6 +3696,8 @@ function confirmAssignAllDept(trnId){
   t.enrolled=[...new Set([...t.enrolled,...toAssign.map(e=>e.id)])];
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
   updateBadges();renderTrainings();saveDB();
+  // Immediate Firebase save for training enrollment
+  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('Firebase dept assign save error:',e);}})();}
 }
 function removeEmployeeFromTraining(trnId,empId,empName){
   if(!confirm('Remove '+empName+' ('+empId+') from this training?'))return;
@@ -3705,6 +3709,8 @@ function removeEmployeeFromTraining(trnId,empId,empName){
   if(t.completedDates)delete t.completedDates[empId];
   toast(empName+' removed from "'+t.name+'"',"info");
   updateBadges();saveDB();
+  // Immediate Firebase save
+  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('Firebase remove save error:',e);}})();}
   // Re-render the training detail modal
   var trn=DB.trainings.find(function(x){return x.id===trnId;});
   if(trn)openTrainingDetail(trn.id);
