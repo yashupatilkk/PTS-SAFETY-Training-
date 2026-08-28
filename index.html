@@ -3816,7 +3816,7 @@ function openTrainingDetail(id){
             <td style="display:flex;gap:4px;">${actionBtns}</td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)</div>
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)${trnFeedbacks.length?`<button class="btn btn-sm btn-outline" style="margin-left:auto;border-color:var(--green);color:var(--green);" onclick="downloadAllFeedbackDocs()"><span class="mat-ico" style="font-size:11px;">download</span> Download All as .doc</button>`:''}</div>
       ${trnFeedbacks.length?`<div class="table-wrap" style="max-height:280px;overflow-y:auto;"><table>
         <thead><tr><th>Emp ID</th><th>Name</th><th>Date</th><th>Overall</th><th>Q1-Q10 Avg</th><th>Enjoyed</th><th>Details</th></tr></thead>
         <tbody>${trnFeedbacks.map(function(fb){var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=fb.overallRating||0;var olColor=overallScore>=4?'var(--green)':overallScore>=3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
@@ -4973,15 +4973,67 @@ function uploadFeedbackPDFToDrive(fb){
 try{
 var htmlContent=generateFeedbackPDF_HTML(fb);
 var fileName='IMSP_29_F05_Feedback_'+fb.empName.replace(/\s+/g,'_')+'_'+fb.training.replace(/\s+/g,'_')+'_'+fb.date;
+// === ATTEMPT 1: Upload to Google Drive via Apps Script ===
 var payload={action:'createDoc',folderId:DRIVE_FOLDER_ID,fileName:fileName,html:htmlContent};
 var xhr=new XMLHttpRequest();
 xhr.open('POST',DRIVE_PDF_SCRIPT_URL,true);
 xhr.setRequestHeader('Content-Type','application/json');
-xhr.onload=function(){if(xhr.status===200){try{var res=JSON.parse(xhr.responseText);if(res.status==='OK'){toast('Feedback PDF saved to Drive: '+res.fileName,'success',5000);}else{toast('Drive upload: '+res.msg,'warning',5000);}}catch(e){toast('PDF sent to Drive','success',3000);}}else{toast('Drive upload status: '+xhr.status,'warning',3000);}};
-xhr.onerror=function(){toast('Drive upload failed - check network','error',5000);};
+xhr.timeout=15000;
+var driveSuccess=false;
+xhr.onload=function(){
+  if(xhr.status===200){
+    try{
+      var res=JSON.parse(xhr.responseText);
+      if(res.status==='OK'){driveSuccess=true;toast('Feedback PDF saved to Drive: '+res.fileName,'success',5000);return;}
+      else{console.warn('Drive script error:',res.msg);}
+    }catch(e){console.warn('Drive response parse error:',e,xhr.responseText.substring(0,200));}
+  }
+  console.warn('Drive upload failed, status:',xhr.status,'response:',xhr.responseText?xhr.responseText.substring(0,200):'empty');
+  fallbackDownloadFeedback(htmlContent,fileName);
+};
+xhr.onerror=function(){console.warn('Drive XHR network error');fallbackDownloadFeedback(htmlContent,fileName);};
+xhr.ontimeout=function(){console.warn('Drive upload timeout (15s)');fallbackDownloadFeedback(htmlContent,fileName);};
 xhr.send(JSON.stringify(payload));
 console.log('Feedback PDF upload initiated for:',fileName);
-}catch(e){console.warn('Drive PDF upload error:',e);toast('Drive PDF upload failed: '+e.message,'error',5000);}
+}catch(e){console.warn('Drive PDF upload error:',e);fallbackDownloadFeedback(htmlContent,fileName);}
+}
+function fallbackDownloadFeedback(htmlContent,fileName){
+// Save as .doc file (Word can open HTML .doc files)
+try{
+  var blob=new Blob([htmlContent],{type:'application/msword'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download=fileName+'.doc';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Drive upload failed — downloaded as .doc file instead. You can upload it to Drive manually.','warning',6000);
+}catch(e){
+  console.error('Fallback download error:',e);
+  toast('Could not save feedback file. Check console for details.','error',5000);
+}
+}
+function downloadSingleFeedbackDoc(fbId){
+  var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});
+  if(!fb){toast('Feedback not found','error');return;}
+  var html=generateFeedbackPDF_HTML(fb);
+  var fileName='IMSP_29_F05_Feedback_'+fb.empName.replace(/\s+/g,'_')+'_'+fb.training.replace(/\s+/g,'_')+'_'+fb.date;
+  try{
+    var blob=new Blob([html],{type:'application/msword'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;a.download=fileName+'.doc';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Feedback downloaded: '+fileName+'.doc','success');
+  }catch(e){toast('Download failed: '+e.message,'error');}
+}
+function downloadAllFeedbackDocs(){
+  var trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===quizState.training;});
+  if(!trnFeedbacks.length){toast('No feedback to download','warning');return;}
+  trnFeedbacks.forEach(function(fb,i){
+    setTimeout(function(){downloadSingleFeedbackDoc(fb.id);},i*500);
+  });
+  toast('Downloading '+trnFeedbacks.length+' feedback file(s)...','info');
 }
 function submitFeedbackAndQuiz(){
 // Validate all 10 Likert questions answered
@@ -7773,3 +7825,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
