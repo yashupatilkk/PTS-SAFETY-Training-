@@ -8511,6 +8511,7 @@ async function initApp(){
       // === AUTH SUCCEEDED — cloud connected ===
       if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--green)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings.';}
       if(cloudBtnsEarly)cloudBtnsEarly.style.display='none';
+      if(syncBtnBg)syncBtnBg.style.display='none';
       // Background sync: push missing employees
       (async function(){
         try{
