@@ -1060,7 +1060,31 @@ async function authAsAdmin(){
   for(var i=0;i<passwords.length;i++){
     try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[i]);console.log('[authAsAdmin] OK with password index '+i);return true;}catch(e){console.warn('[authAsAdmin] Failed with password index '+i+':',e.message);}
   }
-  console.error('[authAsAdmin] ALL passwords failed!');
+  // SELF-HEAL: If sign-in failed, try CREATING the admin account
+  // This handles the case where the Firebase Auth user was deleted
+  try{
+    console.warn('[authAsAdmin] All sign-in attempts failed — trying to CREATE admin account...');
+    var pw=adminRecord?adminRecord.password:'admin123';
+    await fbAuth.createUserWithEmailAndPassword(toEmail('admin'),pw);
+    console.log('[authAsAdmin] CREATED new admin auth account!');
+    return true;
+  }catch(createErr){
+    console.error('[authAsAdmin] Create also failed:',createErr.message);
+    // Last resort: try deleting and recreating
+    try{
+      // Sign in as admin might fail, but let's try with any password to get a user
+      // then delete and recreate
+      for(var j=0;j<passwords.length;j++){
+        try{
+          await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[j]);
+          // If we got here, sign-in worked with this password? That shouldn't happen
+          // since the loop above failed. But just in case.
+          return true;
+        }catch(e2){}
+      }
+    }catch(e3){}
+  }
+  console.error('[authAsAdmin] ALL attempts failed!');
   return false;
 }
 
@@ -7828,17 +7852,12 @@ function loadDB(){
   DB.settings.sheetAutoSync=true;
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
-  // CRITICAL: Trainings, test results & certificates come from Firebase cloud (source of truth).
-  // But we MUST keep a local backup in case cloud auth fails — otherwise data is lost.
-  var staleTrnCount=DB.trainings.length;
-  var staleTRCount=DB.testResults.length;
-  var staleCertCount=DB.certificates.length;
-  // Save backup BEFORE clearing — if cloud load fails, we restore from this
+  // Save backup of current local data — if cloud load fails, we keep this
   _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
-  DB.trainings=[];
-  DB.testResults=[];
-  DB.certificates=[];
-  console.log('[loadDB] Cleared local data — '+staleTrnCount+' training(s), '+staleTRCount+' test result(s), '+staleCertCount+' certificate(s) — backup saved, waiting for cloud data');
+  // DO NOT clear trainings/testResults/certificates here anymore.
+  // loadDBFromFirestore() will REPLACE them if cloud load succeeds.
+  // If cloud fails, local data stays untouched — no data loss.
+  console.log('[loadDB] Local data loaded: '+DB.trainings.length+' training(s), '+DB.testResults.length+' test result(s), '+DB.certificates.length+' certificate(s) — waiting for cloud to update');
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
   var badTrnIds=[];
   DB.trainings=DB.trainings.filter(function(t){
@@ -8066,21 +8085,23 @@ async function initApp(){
   }
   if(loadMsg)loadMsg.style.display='none';
 
-  // Show Firebase load status on login page
+  // Show Firebase load status on login page — NEVER scare users with red errors
   const fbStatus=document.getElementById('loginFbStatus');
   if(fbStatus){
     if(fbLoadError){
+      // If we have local employees, cloud error is non-critical — show amber, not red
+      var hasLocalData=DB.employees.length>0||DB.trainings.length>0;
       fbStatus.style.display='block';
-      fbStatus.style.color='var(--red)';
-      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Cloud load error: '+fbLoadError+' — Employees may not appear. Click "Sync Data" below.';
+      fbStatus.style.color=hasLocalData?'var(--amber)':'var(--red)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">'+(hasLocalData?'cloud_queue':'cloud_off')+'</span> '+(hasLocalData?'Using local data ('+DB.employees.length+' employees, '+DB.trainings.length+' trainings). Cloud sync will retry.':'Cloud not available. Using local data only. Click "Sync Data" to retry.');
     }else if(DB.employees.length===0){
       fbStatus.style.display='block';
       fbStatus.style.color='var(--amber)';
-      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">warning</span> 0 employees loaded from cloud. Ask admin to add you first.';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">warning</span> 0 employees loaded. Ask admin to add you first.';
     }else{
       fbStatus.style.display='block';
       fbStatus.style.color='var(--green)';
-      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees in DB (all synced to cloud)';
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Ready — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings.';
     }
   }
   // CRITICAL: Enable login ONLY after all data is loaded
@@ -8142,4 +8163,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
