@@ -1161,7 +1161,7 @@ async function authAsAdmin(){
     }catch(e){
       _authState.lastCode=e.code||'';_authState.lastError=e.message||'';
       console.warn('[authAsAdmin] R2 pw['+i+'] failed:',_authState.lastCode);
-      if(_authState.lastCode.indexOf('too-many')>-1){_authState.rateLimited=true;return false;}
+      if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){_authState.rateLimited=true;return false;}
     }
   }
 
@@ -1182,7 +1182,7 @@ async function authAsAdmin(){
       }catch(e){
         _authState.lastCode=e.code||'';_authState.lastError=e.message||'';
         console.warn('[authAsAdmin] R3 pw['+j+'] failed:',_authState.lastCode);
-        if(_authState.lastCode.indexOf('too-many')>-1){_authState.rateLimited=true;return false;}
+        if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){_authState.rateLimited=true;return false;}
       }
     }
   }catch(pErr){console.error('[authAsAdmin] R3 error:',pErr.message);}
@@ -1211,7 +1211,7 @@ async function authAsAdmin(){
       }catch(e){
         _authState.lastCode=e.code||'';_authState.lastError=e.message||'';
         console.warn('[authAsAdmin] R4 pw['+k+'] failed:',_authState.lastCode);
-        if(_authState.lastCode.indexOf('too-many')>-1){_authState.rateLimited=true;return false;}
+        if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){_authState.rateLimited=true;return false;}
       }
     }
   }catch(nucErr){console.error('[authAsAdmin] R4 error:',nucErr.message);}
@@ -1248,7 +1248,7 @@ function showCloudPasswordDialog(errCode,errMsg){
   // Remove existing dialog if present
   var existing=document.getElementById('cloudPwOverlay');
   if(existing)existing.remove();
-  var isRateLimited=(errCode||'').indexOf('too-many')>-1;
+  var isRateLimited=(errCode||'').indexOf('too-many')>-1||(errCode||'').indexOf('quota-exceeded')>-1;
   var isInvalidCred=(errCode||'').indexOf('invalid-credential')>-1||(errCode||'').indexOf('wrong-password')>-1;
   var errorHint='';
   if(isRateLimited)errorHint='<div style="margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(232,72,58,.1);border:1px solid rgba(232,72,58,.3);font-size:11.5px;color:var(--red,#e8483a);line-height:1.5;"><b>Rate limited by Firebase.</b> Too many sign-in attempts.<br>Wait <b>5 minutes</b> and try again, or enter the correct password below.</div>';
@@ -1329,7 +1329,7 @@ async function submitCloudPassword(){
       errEl.style.display='block';
       if((e.code||'').indexOf('wrong-password')>-1||(e.code||'').indexOf('invalid-credential')>-1){
         errEl.textContent='Wrong password. Try again or check your Firebase Console.';
-      }else if((e.code||'').indexOf('too-many')>-1){
+      }else if((e.code||'').indexOf('too-many')>-1||(e.code||'').indexOf('quota-exceeded')>-1){
         errEl.textContent='Too many attempts. Wait a few minutes and try again.';
       }else if((e.code||'').indexOf('network')>-1){
         errEl.textContent='Network error. Check your internet connection.';
@@ -8083,54 +8083,34 @@ async function loadDBFromFirestore(){
     // But Chrome can have a STALE auth session: fbAuth.currentUser exists, getIdToken() works,
     // yet Firestore rejects every read with permission-denied.
     // Solution: read 'employees' first as a canary. If it fails with permission-denied,
-    // do a fresh signOut+signIn to get a real token, then retry.
-    var freshAuth=false;
+    // do ONE fresh signOut+signIn (no password loop — avoid quota-exceeded), then continue.
     try{
       var canary=await fbDB.collection('employees').limit(1).get();
       console.log('[loadDBFromFirestore] Auth canary OK (employees readable)');
     }catch(canaryErr){
       var cc=(canaryErr.code||canaryErr.message||'');
-      console.warn('[loadDBFromFirestore] Canary read failed: '+cc+' — attempting fresh sign-in...');
+      console.warn('[loadDBFromFirestore] Canary failed: '+cc);
       _authState.lastCode=cc;
       if(cc.indexOf('permission-denied')>-1||cc.indexOf('unauthenticated')>-1){
-        // Stale session — force a completely fresh sign-in
+        // Stale session — one clean signOut+signIn attempt using cached password only
         try{
           await fbAuth.signOut();
-          await new Promise(function(r){setTimeout(r,300);});
-          var adminEmail=toEmail('admin');
-          var adminRec=DB.admins.find(function(a){return a.username==='admin';});
-          var pwList=[];
-          if(adminRec&&adminRec.password)pwList.push(adminRec.password);
-          if(pwList.indexOf('admin123')===-1)pwList.push('admin123');
-          if(_authState.cachedPw&&pwList.indexOf(_authState.cachedPw)===-1)pwList.unshift(_authState.cachedPw);
-          var signInOk=false;
-          for(var pi=0;pi<pwList.length;pi++){
-            try{
-              await fbAuth.signInWithEmailAndPassword(adminEmail,pwList[pi]);
-              console.log('[loadDBFromFirestore] Fresh sign-in OK with pw['+pi+']');
-              _authState.cachedPw=pwList[pi];
-              signInOk=true;break;
-            }catch(sie){
-              console.warn('[loadDBFromFirestore] Fresh sign-in pw['+pi+'] failed:',sie.code||sie.message);
-            }
-          }
-          if(signInOk){
-            // Verify the fresh sign-in actually works
-            try{
-              await fbDB.collection('employees').limit(1).get();
-              console.log('[loadDBFromFirestore] Fresh auth verified!');
-              freshAuth=true;
-            }catch(vErr){
-              console.error('[loadDBFromFirestore] Fresh auth STILL fails:',vErr.code||vErr.message);
-            }
+          await new Promise(function(r){setTimeout(r,500);});
+          if(_authState.cachedPw){
+            await fbAuth.signInWithEmailAndPassword(toEmail('admin'),_authState.cachedPw);
+            // Verify it works
+            await fbDB.collection('employees').limit(1).get();
+            console.log('[loadDBFromFirestore] Fresh sign-in with cached pw verified');
+          }else{
+            // No cached password — can't recover here, report failure
+            // Caller (loginForceSync) will show the password dialog
+            console.error('[loadDBFromFirestore] No cached password for fresh sign-in');
+            return {ok:false,loaded:0,failed:['all ('+cc+')'],error:'Auth failed: '+cc};
           }
         }catch(freshErr){
-          console.error('[loadDBFromFirestore] Fresh sign-in error:',freshErr.message);
+          console.error('[loadDBFromFirestore] Fresh sign-in failed:',freshErr.code||freshErr.message);
+          return {ok:false,loaded:0,failed:['all ('+cc+')'],error:'Auth failed: '+(freshErr.code||cc)};
         }
-      }
-      if(!freshAuth&&cc.indexOf('permission-denied')>-1){
-        console.error('[loadDBFromFirestore] Auth broken after fresh attempt — all reads will fail');
-        return {ok:false,loaded:0,failed:['all ('+cc+')'],error:'Auth failed: '+cc};
       }
     }
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
