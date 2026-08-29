@@ -1449,6 +1449,8 @@ async function forceSyncFromCloud(){
   toast('Pulling latest data from cloud...','info',2000);
   updateSyncUI('syncing');
   try{
+    // Ensure admin auth before reading from Firestore
+    try{await authAsAdmin();}catch(e){console.warn('forceSyncFromCloud: admin auth failed:',e);}
     await loadDBFromFirestore();
     // Save to localStorage only (don't push back — cloud is source of truth)
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
@@ -1468,6 +1470,10 @@ function startAutoSync(){
   setInterval(async function(){
     if(!currentUser||document.hidden||_syncBusy)return;
     try{
+      // Only admin should push data — employees don't have write access to most collections
+      if(!isAdmin)return;
+      // Ensure admin auth before any Firestore operations
+      try{await authAsAdmin();}catch(e){console.warn('Auto-sync admin auth failed:',e);return;}
       // CRITICAL: Pull tombstones from cloud FIRST before pushing anything
       // This prevents pushing back items that were deleted by admin on another device
       const newTombstones=await loadTombstonesFromCloud();
@@ -1482,9 +1488,6 @@ function startAutoSync(){
         }
       }
       // STEP 1: Push all local data to cloud (now filtered — no deleted items)
-      // SAFETY: Skip pushing testResults/certificates if empty — they may not have
-      // loaded from Firestore yet (loadDB() clears them, loadDBFromFirestore() fills them).
-      // Empty push is a no-op in fbSaveCollection, but this also avoids confusing logs.
       var syncPromises=[
         fbSaveCollection('employees',DB.employees,'id'),
         fbSaveCollection('trainings',DB.trainings,'id'),
@@ -1527,6 +1530,7 @@ function startAutoSync(){
   document.addEventListener('visibilitychange',async function(){
     if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&(Date.now()-_lastDeleteTime)>10000){
       try{
+        if(isAdmin){try{await authAsAdmin();}catch(e){}}
         await loadDBFromFirestore();
         // Save to localStorage only (don't push back to cloud — cloud is source of truth)
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
@@ -1772,6 +1776,8 @@ async function loginForceSync(){
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
   try{
     _initDone=false;
+    // CRITICAL: Authenticate as admin FIRST — Firebase Security Rules block reads without auth
+    try{await authAsAdmin();}catch(e){console.warn('loginForceSync: admin auth failed:',e);}
     const result=await loadDBFromFirestore();
     _initDone=true;
     // Update the Firebase status display
@@ -7906,6 +7912,8 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
+    // CRITICAL: Authenticate as admin FIRST — Firebase Security Rules block reads without auth
+    try{await authAsAdmin();}catch(e){console.warn('Pre-load admin auth failed:',e);}
     // Run sample data cleanup in background (don't block login)
     cleanupSampleDataFromCloud();
     const loadResult=await loadDBFromFirestore();
