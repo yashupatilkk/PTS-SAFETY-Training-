@@ -1268,6 +1268,12 @@ async function autoSyncMissingEmployees(){
     var localEmps=DB.employees||[];
     if(localEmps.length===0)return;
     
+    // CRITICAL: Auth as admin BEFORE reading Firestore
+    var adminAuthOk=await authAsAdmin();
+    if(!adminAuthOk){
+      console.warn('[autoSyncMissingEmployees] Admin auth failed — skipping cloud sync');
+      return;
+    }
     var snap=await fbDB.collection('employees').get();
     var cloudIds=new Set();
     snap.docs.forEach(function(d){cloudIds.add(d.data().id);});
