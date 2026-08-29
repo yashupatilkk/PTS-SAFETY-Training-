@@ -8079,22 +8079,14 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
-    // SELF-HEAL: If not authenticated as admin, try to auth now
-    if(!fbAuth.currentUser||(fbAuth.currentUser.email&&fbAuth.currentUser.email.split('@')[0].toLowerCase()!=='admin')){
-      try{await authAsAdmin();}catch(e){console.warn('[loadDBFromFirestore] Self-heal auth failed:',e);}
-    }
-    // VERIFY auth is actually working — try a test read
-    var authVerified=false;
-    try{var testSnap=await fbDB.collection('admins').limit(1).get();authVerified=true;}catch(testErr){
-      console.warn('[loadDBFromFirestore] Auth test read failed:',testErr.code||testErr.message);
-      _authState.lastCode=testErr.code||'';
-    }
-    // DO NOT retry auth here — authAsAdmin already tried everything.
-    // Retrying here causes rate-limiting. The password dialog handles recovery.
-    if(!authVerified){
-      console.error('[loadDBFromFirestore] Auth not working ('+_authState.lastCode+') — skipping cloud reads');
-      return {ok:false,loaded:0,failed:['all ('+(_authState.lastCode||'auth failed')+')'],error:'Authentication failed: '+(_authState.lastCode||'unknown')};
-    }
+    // NOTE: All callers (initApp, loginForceSync, forceSyncFromCloud, submitCloudPassword,
+    // visibilitychange) already call authAsAdmin() BEFORE calling this function.
+    // We do NOT do an auth pre-check here because:
+    // 1. Redundant authAsAdmin() calls disrupt an already-working session (signOut+re-signIn)
+    // 2. Test reads on specific collections (e.g. 'admins') may fail due to security rules
+    //    even when auth is valid, blocking ALL collections from loading.
+    // 3. Individual collection reads below use Promise.allSettled — one failure won't block others.
+    // If auth is truly broken, all collections will fail gracefully and callers handle that.
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
     // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
     var localSnapshot={
