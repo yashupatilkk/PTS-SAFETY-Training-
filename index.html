@@ -1131,14 +1131,24 @@ async function authAsAdmin(){
   var allPw=Array.from(new Set(passwords.concat(['Admin@123','password','admin'])));
 
   // === ROUND 1: Token refresh if already signed in ===
+  // In Chrome, a stale session can have a valid-looking token that Firestore rejects.
+  // So we VERIFY the token actually works by reading 'employees' (not 'admins' — different rules).
   if(fbAuth.currentUser){
     try{
       var cEmail=fbAuth.currentUser.email;
       if(cEmail&&cEmail.toLowerCase()===adminEmail){
         try{
           await fbAuth.currentUser.getIdToken(true);
-          console.log('[authAsAdmin] R1: Token refresh OK');
-          return true;
+          // VERIFY: token refresh succeeded, but does Firestore accept it?
+          try{
+            await fbDB.collection('employees').limit(1).get();
+            console.log('[authAsAdmin] R1: Token refresh + Firestore verify OK');
+            return true;
+          }catch(verifyErr){
+            console.warn('[authAsAdmin] R1: Token refresh OK but Firestore rejects it:',verifyErr.code||verifyErr.message);
+            _authState.lastCode=verifyErr.code||'';
+            // Don't return true — fall through to R2 for a fresh sign-in
+          }
         }catch(refreshErr){
           _authState.lastCode=refreshErr.code||'';
           _authState.lastError=refreshErr.message||'';
@@ -8079,40 +8089,9 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
-    // All callers already call authAsAdmin() before this function.
-    // But Chrome can have a STALE auth session: fbAuth.currentUser exists, getIdToken() works,
-    // yet Firestore rejects every read with permission-denied.
-    // Solution: read 'employees' first as a canary. If it fails with permission-denied,
-    // do ONE fresh signOut+signIn (no password loop — avoid quota-exceeded), then continue.
-    try{
-      var canary=await fbDB.collection('employees').limit(1).get();
-      console.log('[loadDBFromFirestore] Auth canary OK (employees readable)');
-    }catch(canaryErr){
-      var cc=(canaryErr.code||canaryErr.message||'');
-      console.warn('[loadDBFromFirestore] Canary failed: '+cc);
-      _authState.lastCode=cc;
-      if(cc.indexOf('permission-denied')>-1||cc.indexOf('unauthenticated')>-1){
-        // Stale session — one clean signOut+signIn attempt using cached password only
-        try{
-          await fbAuth.signOut();
-          await new Promise(function(r){setTimeout(r,500);});
-          if(_authState.cachedPw){
-            await fbAuth.signInWithEmailAndPassword(toEmail('admin'),_authState.cachedPw);
-            // Verify it works
-            await fbDB.collection('employees').limit(1).get();
-            console.log('[loadDBFromFirestore] Fresh sign-in with cached pw verified');
-          }else{
-            // No cached password — can't recover here, report failure
-            // Caller (loginForceSync) will show the password dialog
-            console.error('[loadDBFromFirestore] No cached password for fresh sign-in');
-            return {ok:false,loaded:0,failed:['all ('+cc+')'],error:'Auth failed: '+cc};
-          }
-        }catch(freshErr){
-          console.error('[loadDBFromFirestore] Fresh sign-in failed:',freshErr.code||freshErr.message);
-          return {ok:false,loaded:0,failed:['all ('+cc+')'],error:'Auth failed: '+(freshErr.code||cc)};
-        }
-      }
-    }
+    // Auth verification is handled by authAsAdmin() (called by all callers before this function).
+    // authAsAdmin() R1 now verifies the token with a Firestore read, falling through to R2+ if stale.
+    // We just load data here.
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
     // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
     var localSnapshot={
@@ -8614,4 +8593,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
