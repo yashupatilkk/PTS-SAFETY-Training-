@@ -4923,7 +4923,7 @@ function submitQuiz(){
     const expiry=new Date();
     const validityYears=trnMatch?.validity?.includes("2")?2:trnMatch?.validity?.includes("6")?0.5:1;
     expiry.setFullYear(expiry.getFullYear()+Math.floor(validityYears));
-    DB.certificates.push({num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
+    DB.certificates.push({num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",manager:trnMatch?.manager||DB.settings.defaultManager||"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
     DB.notifications.unshift({id:genId("N"),msg:`Certificate ${certNum} auto-generated for ${empName} — ${quizState.training} (Score: ${score}%)`,time:"Just now",read:false,icon:"workspace_premium"});
   }
   if(trnMatch){
@@ -5416,47 +5416,128 @@ function renderCertificates(){
 function downloadCertificate(certNum){
   const cert=DB.certificates.find(c=>c.num===certNum);
   if(!cert){toast("Certificate not found","error");return;}
+  const emp=DB.employees.find(e=>e.id===cert.empId);
+  const trn=DB.trainings.find(t=>t.name===cert.training);
+  const company=DB.settings.companyName||"PTS SAFETY";
+  const logo=DB.settings.companyLogo||"";
+  const managerName=cert.manager||trn?.manager||DB.settings.defaultManager||"Safety Manager";
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
   const W=297,H=210;
-  doc.setFillColor(13,17,23);doc.rect(0,0,W,H,"F");
-  doc.setFillColor(255,176,32);doc.rect(0,0,W,5,"F");doc.rect(0,H-5,W,5,"F");
-  doc.setFillColor(62,207,142);doc.rect(0,5,5,H-10,"F");doc.rect(W-5,5,5,H-10,"F");
-  doc.setDrawColor(255,176,32);doc.setLineWidth(1.5);doc.rect(10,10,W-20,H-20,"S");
-  doc.setFont("helvetica","bold");doc.setTextColor(255,176,32);
-  doc.setFontSize(24);doc.text("MEP & SAFETY VAULT",W/2,32,{align:"center"});
-  doc.setFontSize(9);doc.setTextColor(125,133,144);
-  doc.text("Training Management System · Certificate of Achievement",W/2,40,{align:"center"});
-  doc.setDrawColor(255,176,32);doc.setLineWidth(0.5);doc.line(40,44,W-40,44);
-  doc.setFont("helvetica","bold");doc.setTextColor(230,237,243);
-  doc.setFontSize(17);doc.text("CERTIFICATE OF COMPLETION",W/2,56,{align:"center"});
-  doc.setFontSize(10);doc.setTextColor(125,133,144);
-  doc.text("This is to certify that the following employee has successfully completed the training:",W/2,65,{align:"center"});
-  doc.setFont("helvetica","bold");doc.setTextColor(255,176,32);
-  doc.setFontSize(30);doc.text(cert.empName.toUpperCase(),W/2,82,{align:"center"});
-  const nw=doc.getTextWidth(cert.empName.toUpperCase());
-  doc.setDrawColor(255,176,32);doc.setLineWidth(0.8);doc.line(W/2-nw/2,84,W/2+nw/2,84);
-  doc.setFont("helvetica","normal");doc.setTextColor(201,209,217);doc.setFontSize(11);
-  doc.text(`Employee ID: ${cert.empId}   |   Department: ${cert.dept}`,W/2,94,{align:"center"});
-  doc.text("has successfully completed the training program:",W/2,103,{align:"center"});
-  doc.setFont("helvetica","bold");doc.setTextColor(62,207,142);doc.setFontSize(15);
-  doc.text(cert.training.toUpperCase(),W/2,115,{align:"center"});
-  doc.setFont("helvetica","normal");doc.setTextColor(125,133,144);doc.setFontSize(9);
-  const infoY=127;
-  doc.text(`Score Achieved: ${cert.score}%`,60,infoY);
-  doc.text(`Completion Date: ${formatDate(cert.completedDate||cert.issued)}`,120,infoY);
-  doc.text(`Issued: ${formatDate(cert.issued)}`,190,infoY);
-  doc.text(`Valid Until: ${formatDate(cert.expiry)}`,240,infoY);
-  doc.setDrawColor(45,51,59);doc.setLineWidth(0.5);doc.line(40,133,W-40,133);
-  doc.setDrawColor(125,133,144);doc.setLineWidth(0.5);
-  doc.line(45,158,105,158);doc.line(W/2-30,158,W/2+30,158);doc.line(W-105,158,W-45,158);
-  doc.setFontSize(8);doc.setTextColor(125,133,144);
-  doc.text("Trainer: "+cert.trainer,75,162,{align:"center"});
-  doc.text("Safety Manager",W/2,162,{align:"center"});
-  doc.text("Authorized Signatory",W-75,162,{align:"center"});
-  doc.setFontSize(8);doc.setTextColor(100,108,116);
-  doc.text(`Certificate No: ${cert.num}   ·   ${DB.settings.companyName}   ·   Printed: ${formatDate(new Date().toISOString().split("T")[0])}`,W/2,175,{align:"center"});
-  doc.save(`Certificate_${cert.empId}_${cert.num}.pdf`);
+  // === WHITE BACKGROUND (like Google Sheet) ===
+  doc.setFillColor(255,255,255);doc.rect(0,0,W,H,"F");
+  // === OUTER BORDER (thick black) ===
+  doc.setDrawColor(0,0,0);doc.setLineWidth(2);doc.rect(8,8,W-16,H-16,"S");
+  // === HEADER BAR: Dark background with company name + logo ===
+  doc.setFillColor(25,30,40);doc.rect(8,8,W-16,28,"F");
+  if(logo){doc.setFontSize(22);doc.setTextColor(255,255,255);doc.text(logo,22,27);}
+  doc.setFont("helvetica","bold");doc.setFontSize(18);doc.setTextColor(255,255,255);
+  doc.text(company.toUpperCase(),logo?45:W/2,22,{align:logo?"left":"center"});
+  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(180,185,190);
+  doc.text("TRAINING MANAGEMENT SYSTEM",logo?45:W/2,29,{align:logo?"left":"center"});
+  doc.setFont("helvetica","bold");doc.setFontSize(14);doc.setTextColor(255,176,32);
+  doc.text("CERTIFICATE",W-22,24,{align:"right"});
+  doc.setFontSize(7);doc.setTextColor(180,185,190);
+  doc.text("OF COMPLETION",W-22,29,{align:"right"});
+  // === AMBER ACCENT LINE below header ===
+  doc.setDrawColor(255,176,32);doc.setLineWidth(1.5);doc.line(8,36,W-8,36);
+  // === GREEN THIN LINE ===
+  doc.setDrawColor(62,207,142);doc.setLineWidth(0.5);doc.line(8,37.5,W-8,37.5);
+  // === CERTIFICATE TITLE ===
+  doc.setFont("helvetica","bold");doc.setTextColor(25,30,40);
+  doc.setFontSize(14);doc.text("CERTIFICATE OF COMPLETION",W/2,47,{align:"center"});
+  // === DATA TABLE (grid layout like Google Sheet) ===
+  var tableX=40,tableY=53,tableW=W-80,rowH=11;
+  doc.setDrawColor(60,65,75);doc.setLineWidth(0.8);doc.rect(tableX,tableY,tableW,5*rowH,"S");
+  var col1W=55,col2W=(tableW-col1W)/2,col3W=(tableW-col1W)/2;
+  doc.setDrawColor(180,185,190);doc.setLineWidth(0.3);
+  for(var ri=1;ri<5;ri++){doc.line(tableX,tableY+ri*rowH,tableX+tableW,tableY+ri*rowH);}
+  doc.line(tableX+col1W,tableY,tableX+col1W,tableY+5*rowH);
+  doc.line(tableX+col1W+col2W,tableY,tableX+col1W+col2W,tableY+5*rowH);
+  // Row 1: Employee Name
+  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,tableY+0.4,col1W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Employee Name",tableX+4,tableY+rowH/2+3);
+  doc.setFillColor(255,255,240);doc.rect(tableX+col1W+0.4,tableY+0.4,col2W+col3W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(12);doc.setTextColor(25,30,40);
+  doc.text((cert.empName||"").toUpperCase(),tableX+col1W+col2W/2+col3W/2,tableY+rowH/2+3,{align:"center"});
+  // Row 2: Employee ID | Department
+  var r2y=tableY+rowH;
+  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r2y+0.4,col1W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Employee ID",tableX+4,r2y+rowH/2+3);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
+  doc.text(cert.empId||"",tableX+col1W+8,r2y+rowH/2+3);
+  doc.setFillColor(240,242,245);doc.rect(tableX+col1W+col2W+0.4,r2y+0.4,col3W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Department",tableX+col1W+col2W+4,r2y+rowH/2+3);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
+  doc.text(emp?emp.desig?cert.dept+" / "+emp.desig:cert.dept:cert.dept||"",tableX+col1W+col2W+col3W/2+2,r2y+rowH/2+3,{align:"center"});
+  // Row 3: Training Name
+  var r3y=tableY+2*rowH;
+  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r3y+0.4,col1W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Training Program",tableX+4,r3y+rowH/2+3);
+  doc.setFillColor(232,245,233);doc.rect(tableX+col1W+0.4,r3y+0.4,col2W+col3W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(27,94,32);
+  doc.text((cert.training||"").toUpperCase(),tableX+col1W+col2W/2+col3W/2,r3y+rowH/2+3,{align:"center"});
+  // Row 4: Score | Completion Date
+  var r4y=tableY+3*rowH;
+  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r4y+0.4,col1W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Score Achieved",tableX+4,r4y+rowH/2+3);
+  var isPass=cert.score>=75;
+  doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(isPass?27:198,isPass?94:40,isPass?32:40);
+  doc.text((cert.score||0)+"%",tableX+col1W+8,r4y+rowH/2+3);
+  doc.setFillColor(240,242,245);doc.rect(tableX+col1W+col2W+0.4,r4y+0.4,col3W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Completion Date",tableX+col1W+col2W+4,r4y+rowH/2+3);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
+  doc.text(formatDate(cert.completedDate||cert.issued)||"",tableX+col1W+col2W+col3W/2+2,r4y+rowH/2+3,{align:"center"});
+  // Row 5: Issued | Valid Until
+  var r5y=tableY+4*rowH;
+  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r5y+0.4,col1W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Certificate Issued",tableX+4,r5y+rowH/2+3);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
+  doc.text(formatDate(cert.issued)||"",tableX+col1W+8,r5y+rowH/2+3);
+  doc.setFillColor(240,242,245);doc.rect(tableX+col1W+col2W+0.4,r5y+0.4,col3W-0.8,rowH-0.8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+  doc.text("Valid Until",tableX+col1W+col2W+4,r5y+rowH/2+3);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
+  doc.text(formatDate(cert.expiry)||"",tableX+col1W+col2W+col3W/2+2,r5y+rowH/2+3,{align:"center"});
+  // === TRAINER + MANAGER INFO ROW ===
+  var infoY=tableY+5*rowH+8;
+  doc.setFillColor(240,242,245);doc.rect(tableX,infoY,col2W+10,10,"FD");
+  doc.setDrawColor(180,185,190);doc.setLineWidth(0.3);doc.rect(tableX,infoY,col2W+10,10,"S");
+  doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(60,65,75);
+  doc.text("Trainer: ",tableX+3,infoY+6.5);
+  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(25,30,40);
+  doc.text(cert.trainer||"N/A",tableX+18,infoY+6.5);
+  doc.setFillColor(240,242,245);doc.rect(tableX+col2W+14,infoY,col2W+10,10,"FD");
+  doc.setDrawColor(180,185,190);doc.rect(tableX+col2W+14,infoY,col2W+10,10,"S");
+  doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(60,65,75);
+  doc.text("Manager: ",tableX+col2W+17,infoY+6.5);
+  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(25,30,40);
+  doc.text(managerName,tableX+col2W+32,infoY+6.5);
+  // === SIGNATURE BLOCK (3 boxes) ===
+  var sigY=infoY+20;
+  var sigW=(tableW-20)/3;
+  var sigLabels=["Trainer",managerName,"Authorized Signatory"];
+  for(var si=0;si<3;si++){
+    var sx=tableX+si*(sigW+10);
+    doc.setDrawColor(60,65,75);doc.setLineWidth(0.5);doc.rect(sx,sigY,sigW,28,"S");
+    doc.setFillColor(250,250,252);doc.rect(sx+0.4,sigY+0.4,sigW-0.8,27.2,"F");
+    doc.setDrawColor(60,65,75);doc.setLineWidth(0.5);doc.line(sx+5,sigY+20,sx+sigW-5,sigY+20);
+    doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
+    doc.text(sigLabels[si],sx+sigW/2,sigY+25,{align:"center"});
+  }
+  // === FOOTER BAR ===
+  doc.setFillColor(25,30,40);doc.rect(8,H-22,W-16,14,"F");
+  doc.setDrawColor(255,176,32);doc.setLineWidth(1);doc.line(8,H-22,W-8,H-22);
+  doc.setFont("helvetica","normal");doc.setFontSize(7);doc.setTextColor(180,185,190);
+  doc.text("Certificate No: "+cert.num+"   |   "+company+"   |   Printed: "+new Date().toISOString().split("T")[0],W/2,H-14,{align:"center"});
+  doc.save("Certificate_"+cert.empId+"_"+cert.num+".pdf");
   toast("Certificate downloaded successfully","success");
 }
 function exportCertExcel(){
@@ -5464,9 +5545,9 @@ function exportCertExcel(){
   const ws=XLSX.utils.json_to_sheet(certs.map(c=>({
     "Certificate No":c.num,"Employee ID":c.empId,"Employee Name":c.empName,
     "Training":c.training,"Score":c.score+"%","Department":c.dept,
-    "Trainer":c.trainer,"Completion Date":c.completedDate||c.issued,"Issued":c.issued,"Expiry":c.expiry
+    "Trainer":c.trainer,"Manager":c.manager||"","Completion Date":c.completedDate||c.issued,"Issued":c.issued,"Expiry":c.expiry
   })));
-  ws["!cols"]=[{wch:20},{wch:12},{wch:22},{wch:30},{wch:8},{wch:18},{wch:18},{wch:16},{wch:14},{wch:14}];
+  ws["!cols"]=[{wch:20},{wch:12},{wch:22},{wch:30},{wch:8},{wch:18},{wch:18},{wch:18},{wch:16},{wch:14},{wch:14}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Certificates");
   XLSX.writeFile(wb,"MEP_Certificates_"+new Date().toISOString().split("T")[0]+".xlsx");toast("Certificates exported","success");
 }
@@ -6833,13 +6914,17 @@ function renderSettings(){
           <div style="display:flex;gap:8px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>
         </div>`:`<div style="display:flex;gap:8px;margin-bottom:10px;"><input class="form-control-sm" id="newTrainer" placeholder="Add new trainer name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addTrainer()"><span class="mat-ico">add</span> Add</button></div>`}"
       </div>
-      <div class="form-section" style="grid-column:1/-1;">
-        <div class="form-section-title"><span class="mat-ico">supervisor_account</span> Manager List</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Managers are auto-filled in training creation and feedback PDFs. Set a default manager below.</div>
+      <div class="form-section" style="grid-column:1/-1;border:1px solid rgba(255,176,32,.25);background:rgba(255,176,32,.03);">
+        <div class="form-section-title" style="color:var(--amber);"><span class="mat-ico">supervisor_account</span> Manager Settings</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;line-height:1.5;">The Default Manager name appears on <b style="color:var(--txt);">certificates</b>, <b style="color:var(--txt);">Google Sheets</b>, and <b style="color:var(--txt);">feedback PDFs</b>. Set it once, and it auto-fills when creating new trainings.</div>
+        <div class="form-group" style="margin-bottom:10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px;">
+          <label class="form-label-sm" style="font-weight:700;color:var(--amber);">Default Manager Name</label>
+          <input class="form-control-sm" id="st_defaultManager" placeholder="e.g. Site Manager - John Smith" value="${s.defaultManager||''}" style="font-size:14px;font-weight:600;">
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Manager List (used in dropdown when creating trainings):</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
           ${(s.managerList||[]).map(function(m,i){return '<div style="display:flex;align-items:center;gap:6px;background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;padding:5px 10px;font-size:12px;">'+m+(isAdmin?'<button onclick="removeManager('+i+')" style="color:var(--red);"><span class="mat-ico" style="font-size:13px;">close</span></button>':'')+'</div>';}).join("")}
         </div>
-        <div class="form-group" style="margin-bottom:10px;"><label class="form-label-sm">Default Manager (auto-fills in new trainings & feedback)</label><input class="form-control-sm" id="st_defaultManager" placeholder="e.g. Site Manager" value="${s.defaultManager||''}"></div>
         ${isAdmin?`<div style="display:flex;gap:8px;"><input class="form-control-sm" id="newManager" placeholder="Add new manager name" style="flex:1;"><button class="btn btn-amber btn-sm" onclick="addManager()"><span class="mat-ico">add</span> Add</button></div>`:''}
       </div>
       ${isAdmin?`
@@ -7113,7 +7198,7 @@ function buildCertificatePayload(){
   return DB.certificates.map(c=>{
     const emp=DB.employees.find(e=>e.id===c.empId);
     const trn=DB.trainings.find(t=>t.name===c.training);
-    return{Company:company,CertificateNo:c.num,EmployeeID:c.empId,EmployeeName:emp?emp.name:(c.empName||""),Designation:emp?emp.desig||"":"",Department:emp?emp.dept:(c.dept||""),Training:c.training||"",Trainer:trn?trn.trainer||"":(c.trainer||""),Manager:trn?trn.manager||"":"",Score:c.score||"",CompletionDate:c.completedDate||c.issued||"",IssueDate:c.issued||c.date||"",ExpiryDate:c.expiry||"",Validity:trn?trn.validity||"1 Year":"1 Year",Status:c.status||"Active"};
+    return{Company:company,CertificateNo:c.num,EmployeeID:c.empId,EmployeeName:emp?emp.name:(c.empName||""),Designation:emp?emp.desig||"":"",Department:emp?emp.dept:(c.dept||""),Training:c.training||"",Trainer:trn?trn.trainer||"":(c.trainer||""),Manager:c.manager||trn?trn.manager||"":"",Score:c.score||"",CompletionDate:c.completedDate||c.issued||"",IssueDate:c.issued||c.date||"",ExpiryDate:c.expiry||"",Validity:trn?trn.validity||"1 Year":"1 Year",Status:c.status||"Active"};
   });
 }
 function buildEquipmentPayload(){
