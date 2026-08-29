@@ -1182,8 +1182,113 @@ async function authAsAdmin(){
     console.error('[authAsAdmin] Round 4: Nuclear auth error:',nucErr.message);
   }
 
-  console.error('[authAsAdmin] ALL 4 ROUNDS FAILED — cloud operations will fail');
+  console.error('[authAsAdmin] ALL 4 ROUNDS FAILED — asking user for password...');
+  // === ROUND 5: Ask user for their Firebase password ===
+  // This handles the case where the admin set a custom password we don't know
+  if(typeof window._authAsAdmin_userPw==='string'&&window._authAsAdmin_userPw){
+    try{
+      await fbAuth.signOut();
+      await fbAuth.signInWithEmailAndPassword(adminEmail,window._authAsAdmin_userPw);
+      console.log('[authAsAdmin] Round 5: User-provided password worked!');
+      // Save this password so we don't ask again
+      var ar2=DB.admins.find(function(a){return a.username==='admin';});
+      if(ar2){ar2.password=window._authAsAdmin_userPw;}
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      window._authAsAdmin_userPw=null;
+      return true;
+    }catch(e5){
+      console.warn('[authAsAdmin] Round 5: User-provided password also failed:',e5.code||e5.message);
+      window._authAsAdmin_userPw=null;
+    }
+  }
+  // Trigger the password ask dialog (async, result comes back via _authAsAdmin_userPw)
+  if(!window._authAskShown){
+    window._authAskShown=true;
+    showCloudPasswordDialog();
+  }
   return false;
+}
+
+// Visual dialog to ask user for their Firebase/Cloud password
+function showCloudPasswordDialog(){
+  var overlay=document.createElement('div');
+  overlay.id='cloudPwOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
+  overlay.innerHTML='<div style="background:var(--sur1,var(--bg2,#1a1d28));border:1px solid var(--amber,#ffb020);border-radius:16px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.5);">'+
+    '<div style="text-align:center;margin-bottom:18px;">'+
+      '<div style="width:48px;height:48px;border-radius:12px;background:rgba(255,176,32,.15);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><span class="mat-ico" style="font-size:24px;color:var(--amber,#ffb020);">vpn_key</span></div>'+
+      '<div style="font-size:18px;font-weight:700;color:var(--txt,#e5e9f0);margin-bottom:6px;">Cloud Password Required</div>'+
+      '<div style="font-size:12.5px;color:var(--muted,#8d919b);line-height:1.5;">Could not sign in to Firebase with saved passwords.<br>Enter the password you use for <b style="color:var(--amber,#ffb020);">admin@pts-safety.app</b></div>'+
+    '</div>'+
+    '<div style="margin-bottom:16px;">'+
+      '<label style="display:block;font-size:11px;font-weight:600;color:var(--muted,#8d919b);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em;">Firebase Cloud Password</label>'+
+      '<input type="password" id="cloudPwInput" placeholder="Enter your cloud password" style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--bdr,#2d333b);background:var(--bg1,#0d1117);color:var(--txt,#e5e9f0);font-size:14px;outline:none;box-sizing:border-box;" onkeydown="if(event.key===\'Enter\')submitCloudPassword()" onfocus="this.style.borderColor=\'rgba(255,176,32,.6)\'" onblur="this.style.borderColor=\'var(--bdr,#2d333b)\'">'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;">'+
+      '<button onclick="closeCloudPasswordDialog()" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--bdr,#2d333b);background:transparent;color:var(--muted,#8d919b);font-size:13px;font-weight:600;cursor:pointer;">Skip</button>'+
+      '<button onclick="submitCloudPassword()" id="cloudPwSubmitBtn" style="flex:1;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#ffb020,#e0961a);color:#151515;font-size:13px;font-weight:700;cursor:pointer;">Connect</button>'+
+    '</div>'+
+    '<div id="cloudPwError" style="margin-top:10px;font-size:11px;color:var(--red,#e8483a);text-align:center;display:none;"></div>'+
+  '</div>';
+  document.body.appendChild(overlay);
+  setTimeout(function(){var inp=document.getElementById('cloudPwInput');if(inp)inp.focus();},200);
+}
+function closeCloudPasswordDialog(){
+  var el=document.getElementById('cloudPwOverlay');
+  if(el)el.remove();
+  window._authAskShown=false;
+}
+async function submitCloudPassword(){
+  var pw=document.getElementById('cloudPwInput');
+  var errEl=document.getElementById('cloudPwError');
+  var btn=document.getElementById('cloudPwSubmitBtn');
+  if(!pw||!pw.value.trim()){if(errEl){errEl.style.display='block';errEl.textContent='Please enter a password';}return;}
+  var pwVal=pw.value.trim();
+  if(btn){btn.disabled=true;btn.textContent='Connecting...';}
+  if(errEl)errEl.style.display='none';
+  try{
+    var adminEmail=toEmail('admin');
+    await fbAuth.signOut();
+    await new Promise(function(r){setTimeout(r,300);});
+    await fbAuth.signInWithEmailAndPassword(adminEmail,pwVal);
+    // SUCCESS! Save the password
+    var ar=DB.admins.find(function(a){return a.username==='admin';});
+    if(ar){ar.password=pwVal;}
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    console.log('[submitCloudPassword] Auth SUCCESS! Password saved.');
+    closeCloudPasswordDialog();
+    toast('Cloud connected! Loading data...','success',3000);
+    // Now load from cloud
+    var loadResult=await loadDBFromFirestore();
+    if(loadResult&&loadResult.ok){
+      _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.stringify(DB)));}catch(e){}
+      // Update UI
+      var fbSt=document.getElementById('loginFbStatus');
+      if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--green)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings';}
+      var statusBar=document.getElementById('loginStatusBar');
+      var statusText=document.getElementById('loginStatusText');
+      if(statusBar&&statusText){statusBar.classList.remove('error');statusText.textContent='System Ready — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings';}
+      toast('Synced! '+DB.employees.length+' employees, '+DB.trainings.length+' trainings loaded.','success',4000);
+    }else{
+      toast('Connected but some data failed to load','warning',4000);
+    }
+  }catch(e){
+    console.error('[submitCloudPassword] Failed:',e.code||e.message);
+    if(errEl){
+      errEl.style.display='block';
+      if((e.code||'').indexOf('wrong-password')>-1||(e.code||'').indexOf('invalid-credential')>-1){
+        errEl.textContent='Wrong password. Try again or check your Firebase Console.';
+      }else if((e.code||'').indexOf('too-many')>-1){
+        errEl.textContent='Too many attempts. Wait a few minutes and try again.';
+      }else if((e.code||'').indexOf('network')>-1){
+        errEl.textContent='Network error. Check your internet connection.';
+      }else{
+        errEl.textContent='Error: '+(e.code||e.message);
+      }
+    }
+    if(btn){btn.disabled=false;btn.textContent='Connect';}
+  }
 }
 
 function toEmail(user){
@@ -1958,10 +2063,11 @@ async function loginForceSync(){
     var authOk=await authAsAdmin();
     console.log('[loginForceSync] Auth result: '+(authOk?'SUCCESS':'FAILED'));
     if(!authOk){
-      toast('Cloud auth FAILED — check your internet connection and try again','error',6000);
+      // Auth failed — show password dialog instead of scary toast
       _initDone=true;
       if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry';}
       if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+      showCloudPasswordDialog();
       return;
     }
     const result=await loadDBFromFirestore();
