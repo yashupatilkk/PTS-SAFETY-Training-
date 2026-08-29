@@ -2165,7 +2165,12 @@ async function loginForceSync(){
         fbStatus.style.display='block';
         fbStatus.style.color='var(--amber)';
         fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Partial sync: '+result.failed.join(', ')+' failed. Using local data for those. '+DB.employees.length+' employees loaded.';
-        toast('Partial sync — '+result.failed.length+' collection(s) failed. Local data used as fallback.','warning',5000);
+        if(result.failed.length>=10){
+          // ALL failed — don't scare user, just show Connect option
+          toast('Cloud sync failed. Click <b>Connect</b> to enter your password and retry.','warning',5000);
+        }else{
+          toast('Partial sync — '+result.failed.length+' collection(s) failed. Local data used as fallback.','warning',5000);
+        }
       }else{
         fbStatus.style.display='block';
         fbStatus.style.color='var(--green)';
@@ -8492,36 +8497,53 @@ async function initApp(){
     // Do NOT set firebaseReady=false — keep trying to save
   }
 
-  // === Push missing employees + Auth accounts — NON-BLOCKING ===
+  // === ENABLE LOGIN — handle auth-success vs auth-failure ===
   if(firebaseReady && DB.employees.length>0){
     // ENABLE LOGIN FIRST — don't make users wait
     if(loadMsg)loadMsg.style.display='none';
     var fbSt=document.getElementById('loginFbStatus');
-    if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--amber)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">sync</span> Cloud connected — '+DB.employees.length+' employees. Syncing in background...';}
+    var cloudBtnsEarly=document.getElementById('loginCloudBtns');
     _initDone=true;
     if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
     var syncBtnBg=document.getElementById('loginSyncBtn');
-    if(syncBtnBg)syncBtnBg.style.display='inline-block';
+
+    if(firstAuthOk && !fbLoadError){
+      // === AUTH SUCCEEDED — cloud connected ===
+      if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--green)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings.';}
+      if(cloudBtnsEarly)cloudBtnsEarly.style.display='none';
+      // Background sync: push missing employees
+      (async function(){
+        try{
+          var bgAdminOk=await authAsAdmin();
+          if(!bgAdminOk){console.warn('[bg] Admin auth failed — skipping background employee sync (non-critical)');return;}
+          var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
+          var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
+          if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');
+          var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we){await authAsAdmin();}}}
+          var af=0;for(var ai=0;ai<DB.employees.length;ai++){var ae=DB.employees[ai];if(!ae||!ae.id)continue;try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(ae.id),ae.password||'emp123');af++;}catch(ae2){}}
+          await authAsAdmin();
+          var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
+          if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+fs.size+'/'+DB.employees.length+' employees'+(pok>0?' (fixed '+pok+' missing)':'')+(af>0?' + '+af+' login(s) fixed':'');}
+          console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
+        }catch(e){console.warn('[bg] Background sync error (non-critical):',e);}
+      })();
+    }else{
+      // === AUTH FAILED — show Connect/Close, use local data ===
+      var hasLocal=DB.employees.length>0||DB.trainings.length>0;
+      if(fbSt){fbSt.style.display='block';fbSt.style.color=hasLocal?'var(--amber)':'var(--red)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">'+(hasLocal?'cloud_queue':'cloud_off')+'</span> '+(hasLocal?'Local data loaded ('+DB.employees.length+' employees). Cloud sync failed — click <b>Connect</b> below.':'Cloud not available ('+(_authState.lastCode||'error')+'). Click <b>Connect</b> below.');}
+      if(cloudBtnsEarly)cloudBtnsEarly.style.display='block';
+      if(syncBtnBg)syncBtnBg.style.display='inline-block';
+      // Update status bar
+      var statusBarE=document.getElementById('loginStatusBar');
+      var statusTextE=document.getElementById('loginStatusText');
+      if(statusBarE&&statusTextE){statusBarE.classList.add('error');statusTextE.textContent='Using local data ('+DB.employees.length+' employees) — cloud unavailable';}
+      console.warn('[initApp] Auth failed ('+(_authState.lastCode||'unknown')+'). Login enabled with local data. User can click Connect to retry.');
+    }
+
     var tBg=localStorage.getItem("mep_theme")||"dark";
     document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
     document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
     if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
-    // Background sync
-    (async function(){
-      try{
-        var bgAdminOk=await authAsAdmin();
-        if(!bgAdminOk){console.warn('[bg] Admin auth failed — skipping background employee sync (non-critical)');return;}
-        var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
-        var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
-        if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');
-        var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we){await authAsAdmin();}}}
-        var af=0;for(var ai=0;ai<DB.employees.length;ai++){var ae=DB.employees[ai];if(!ae||!ae.id)continue;try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(ae.id),ae.password||'emp123');af++;}catch(ae2){}}
-        await authAsAdmin();
-        var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
-        if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+fs.size+'/'+DB.employees.length+' employees'+(pok>0?' (fixed '+pok+' missing)':'')+(af>0?' + '+af+' login(s) fixed':'');}
-        console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
-      }catch(e){console.warn('[bg] Background sync error (non-critical):',e);}
-    })();
     // Auth persistence + session check (needed for auto-login)
     try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
     var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
@@ -8623,3 +8645,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
