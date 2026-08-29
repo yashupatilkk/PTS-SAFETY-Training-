@@ -8079,14 +8079,60 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
-    // NOTE: All callers (initApp, loginForceSync, forceSyncFromCloud, submitCloudPassword,
-    // visibilitychange) already call authAsAdmin() BEFORE calling this function.
-    // We do NOT do an auth pre-check here because:
-    // 1. Redundant authAsAdmin() calls disrupt an already-working session (signOut+re-signIn)
-    // 2. Test reads on specific collections (e.g. 'admins') may fail due to security rules
-    //    even when auth is valid, blocking ALL collections from loading.
-    // 3. Individual collection reads below use Promise.allSettled — one failure won't block others.
-    // If auth is truly broken, all collections will fail gracefully and callers handle that.
+    // All callers already call authAsAdmin() before this function.
+    // But Chrome can have a STALE auth session: fbAuth.currentUser exists, getIdToken() works,
+    // yet Firestore rejects every read with permission-denied.
+    // Solution: read 'employees' first as a canary. If it fails with permission-denied,
+    // do a fresh signOut+signIn to get a real token, then retry.
+    var freshAuth=false;
+    try{
+      var canary=await fbDB.collection('employees').limit(1).get();
+      console.log('[loadDBFromFirestore] Auth canary OK (employees readable)');
+    }catch(canaryErr){
+      var cc=(canaryErr.code||canaryErr.message||'');
+      console.warn('[loadDBFromFirestore] Canary read failed: '+cc+' — attempting fresh sign-in...');
+      _authState.lastCode=cc;
+      if(cc.indexOf('permission-denied')>-1||cc.indexOf('unauthenticated')>-1){
+        // Stale session — force a completely fresh sign-in
+        try{
+          await fbAuth.signOut();
+          await new Promise(function(r){setTimeout(r,300);});
+          var adminEmail=toEmail('admin');
+          var adminRec=DB.admins.find(function(a){return a.username==='admin';});
+          var pwList=[];
+          if(adminRec&&adminRec.password)pwList.push(adminRec.password);
+          if(pwList.indexOf('admin123')===-1)pwList.push('admin123');
+          if(_authState.cachedPw&&pwList.indexOf(_authState.cachedPw)===-1)pwList.unshift(_authState.cachedPw);
+          var signInOk=false;
+          for(var pi=0;pi<pwList.length;pi++){
+            try{
+              await fbAuth.signInWithEmailAndPassword(adminEmail,pwList[pi]);
+              console.log('[loadDBFromFirestore] Fresh sign-in OK with pw['+pi+']');
+              _authState.cachedPw=pwList[pi];
+              signInOk=true;break;
+            }catch(sie){
+              console.warn('[loadDBFromFirestore] Fresh sign-in pw['+pi+'] failed:',sie.code||sie.message);
+            }
+          }
+          if(signInOk){
+            // Verify the fresh sign-in actually works
+            try{
+              await fbDB.collection('employees').limit(1).get();
+              console.log('[loadDBFromFirestore] Fresh auth verified!');
+              freshAuth=true;
+            }catch(vErr){
+              console.error('[loadDBFromFirestore] Fresh auth STILL fails:',vErr.code||vErr.message);
+            }
+          }
+        }catch(freshErr){
+          console.error('[loadDBFromFirestore] Fresh sign-in error:',freshErr.message);
+        }
+      }
+      if(!freshAuth&&cc.indexOf('permission-denied')>-1){
+        console.error('[loadDBFromFirestore] Auth broken after fresh attempt — all reads will fail');
+        return {ok:false,loaded:0,failed:['all ('+cc+')'],error:'Auth failed: '+cc};
+      }
+    }
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
     // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
     var localSnapshot={
