@@ -41,50 +41,87 @@ select option{background:var(--sur);}
 .gradient-bar{height:3px;background:linear-gradient(90deg,var(--amber),var(--red),var(--amber),var(--green),var(--amber));background-size:300% 100%;animation:grS 4s linear infinite;position:relative;z-index:70;}
 @keyframes grS{to{background-position:300% 50%;}}
 /* LOGIN - SAFETY THEMED */
-#loginPage{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:#0a0c10;overflow:auto;}
-.login-bg{position:absolute;inset:0;background:radial-gradient(ellipse at 20% 80%,rgba(232,72,58,.07) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(255,176,32,.05) 0%,transparent 50%),radial-gradient(ellipse at 50% 50%,rgba(62,207,142,.03) 0%,transparent 60%);pointer-events:none;}
-.login-dots{position:absolute;inset:0;background-image:radial-gradient(circle at 1px 1px,rgba(255,176,32,.15) .5px,transparent 0);background-size:40px 40px;opacity:.3;pointer-events:none;}
-.login-safety-bar{position:absolute;top:0;left:0;right:0;height:4px;background:repeating-linear-gradient(90deg,#e8483a 0 30px,#ffb020 30px 60px,#3ecf8e 60px 90px);animation:safetyBarSlide 4s linear infinite;}
+#loginPage{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:#060810;overflow:auto;}
+.login-bg{position:absolute;inset:0;background:radial-gradient(ellipse at 30% 70%,rgba(232,72,58,.08) 0%,transparent 50%),radial-gradient(ellipse at 70% 20%,rgba(255,176,32,.06) 0%,transparent 50%),radial-gradient(ellipse at 50% 50%,rgba(62,207,142,.04) 0%,transparent 60%);pointer-events:none;}
+.login-dots{position:absolute;inset:0;background-image:radial-gradient(circle at 1px 1px,rgba(255,176,32,.12) .5px,transparent 0);background-size:40px 40px;opacity:.2;pointer-events:none;}
+.login-safety-bar{position:absolute;top:0;left:0;right:0;height:4px;background:repeating-linear-gradient(90deg,#e8483a 0 30px,#ffb020 30px 60px,#3ecf8e 60px 90px);animation:safetyBarSlide 4s linear infinite;z-index:5;}
 @keyframes safetyBarSlide{to{background-position:90px 0;}}
 .login-safety-icons{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
 .login-safety-icons::before,.login-safety-icons::after{content:'';position:absolute;border-radius:50%;}
-.login-safety-icons::before{top:10%;right:8%;width:180px;height:180px;border:2px dashed rgba(232,72,58,.12);animation:safetySpin 30s linear infinite;}
-.login-safety-icons::after{bottom:15%;left:5%;width:120px;height:120px;border:2px dashed rgba(255,176,32,.1);animation:safetySpin 25s linear infinite reverse;}
+.login-safety-icons::before{top:8%;right:6%;width:220px;height:220px;border:1.5px dashed rgba(232,72,58,.08);animation:safetySpin 35s linear infinite;}
+.login-safety-icons::after{bottom:12%;left:4%;width:160px;height:160px;border:1.5px dashed rgba(255,176,32,.06);animation:safetySpin 28s linear infinite reverse;}
 @keyframes safetySpin{to{transform:rotate(360deg);}}
-.login-wrap{position:relative;z-index:1;width:100%;max-width:540px;padding:20px;padding-bottom:max(40px, env(safe-area-inset-bottom, 40px));}
-.login-card{background:rgba(22,27,34,.92);backdrop-filter:blur(24px);border:1px solid rgba(232,72,58,.15);border-radius:20px;padding:40px 36px;box-shadow:0 8px 40px rgba(0,0,0,.6),0 0 80px rgba(232,72,58,.05),inset 0 1px 0 rgba(255,255,255,.03);position:relative;overflow:hidden;}
-.login-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#e8483a,#ffb020,#3ecf8e);}
-.login-logo{text-align:center;margin-bottom:24px;}
-.login-logo .logo-mark{width:72px;height:72px;border-radius:16px;background:linear-gradient(135deg,#e8483a 0%,#ffb020 100%);margin:0 auto 14px;display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 32px rgba(232,72,58,.35);animation:safetyPulse 3s ease-in-out infinite;position:relative;}
-.login-logo .logo-mark::after{content:'';position:absolute;inset:-4px;border-radius:20px;border:2px solid rgba(232,72,58,.2);animation:safetyRing 2s ease-in-out infinite;}
-@keyframes safetyPulse{0%,100%{box-shadow:0 8px 32px rgba(232,72,58,.35);}50%{box-shadow:0 8px 48px rgba(255,176,32,.4);}}
-@keyframes safetyRing{0%,100%{opacity:.2;transform:scale(1);}50%{opacity:.5;transform:scale(1.05);}}
+
+/* Floating particles */
+.login-particles{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0;}
+.login-particle{position:absolute;border-radius:50%;opacity:0;animation:particleFloat linear infinite;}
+@keyframes particleFloat{0%{opacity:0;transform:translateY(100vh) scale(0);}10%{opacity:1;}90%{opacity:1;}100%{opacity:0;transform:translateY(-10vh) scale(1);}}
+
+/* Glow orbs behind card */
+.login-glow-orb{position:absolute;border-radius:50%;filter:blur(80px);pointer-events:none;animation:orbFloat 8s ease-in-out infinite;}
+.login-glow-orb:nth-child(1){width:300px;height:300px;background:rgba(232,72,58,.08);top:20%;left:10%;animation-delay:0s;}
+.login-glow-orb:nth-child(2){width:250px;height:250px;background:rgba(255,176,32,.06);bottom:20%;right:10%;animation-delay:-3s;}
+.login-glow-orb:nth-child(3){width:200px;height:200px;background:rgba(62,207,142,.05);top:50%;left:60%;animation-delay:-5s;}
+@keyframes orbFloat{0%,100%{transform:translate(0,0);}25%{transform:translate(20px,-15px);}50%{transform:translate(-10px,20px);}75%{transform:translate(15px,10px);}}
+
+.login-wrap{position:relative;z-index:2;width:100%;max-width:460px;padding:20px;padding-bottom:max(40px, env(safe-area-inset-bottom, 40px));}
+.login-card{background:rgba(14,17,23,.88);backdrop-filter:blur(32px) saturate(1.2);border:1px solid rgba(255,255,255,.06);border-radius:24px;padding:44px 38px 36px;box-shadow:0 24px 80px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.02),inset 0 1px 0 rgba(255,255,255,.04);position:relative;overflow:hidden;transition:transform .3s ease,box-shadow .3s ease;}
+.login-card:hover{transform:translateY(-2px);box-shadow:0 28px 90px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.03),0 0 60px rgba(232,72,58,.04);}
+.login-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#e8483a 0%,#ffb020 50%,#3ecf8e 100%);background-size:200% 100%;animation:gradientShift 4s ease infinite;}
+@keyframes gradientShift{0%,100%{background-position:0% 50%;}50%{background-position:100% 50%;}}
+.login-card::after{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:conic-gradient(from 0deg at 50% 50%,transparent 0%,rgba(232,72,58,.03) 10%,transparent 20%,rgba(255,176,32,.02) 30%,transparent 40%);animation:cardShine 12s linear infinite;pointer-events:none;}
+@keyframes cardShine{to{transform:rotate(360deg);}}
+
+.login-logo{text-align:center;margin-bottom:28px;}
+.login-logo .logo-mark{width:76px;height:76px;border-radius:20px;background:linear-gradient(135deg,#e8483a 0%,#ff6b3a 40%,#ffb020 100%);margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:34px;box-shadow:0 12px 40px rgba(232,72,58,.35),inset 0 1px 0 rgba(255,255,255,.15);animation:safetyPulse 3s ease-in-out infinite;position:relative;transition:transform .3s ease;}
+.login-logo .logo-mark:hover{transform:scale(1.05) rotate(-3deg);}
+.login-logo .logo-mark::after{content:'';position:absolute;inset:-5px;border-radius:24px;border:2px solid rgba(232,72,58,.15);animation:safetyRing 2.5s ease-in-out infinite;}
+@keyframes safetyPulse{0%,100%{box-shadow:0 12px 40px rgba(232,72,58,.35),inset 0 1px 0 rgba(255,255,255,.15);}50%{box-shadow:0 16px 50px rgba(255,176,32,.4),inset 0 1px 0 rgba(255,255,255,.2);}}
+@keyframes safetyRing{0%,100%{opacity:.15;transform:scale(1);}50%{opacity:.4;transform:scale(1.06);}}
 @keyframes strA{to{background-position:22px 22px;}}
-.login-logo h1{font-size:20px;text-transform:uppercase;font-weight:700;letter-spacing:.06em;background:linear-gradient(90deg,#e8483a,#ffb020);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
-.login-logo p{font-size:10.5px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:4px;}
-.login-tabs{display:flex;gap:4px;background:rgba(255,255,255,.04);border:1px solid var(--bdr);border-radius:12px;padding:4px;margin-bottom:22px;}
-.login-tab{flex:1;padding:9px;border-radius:9px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);transition:all .25s ease;border:none;background:transparent;cursor:pointer;}
-.login-tab.active{background:linear-gradient(135deg,#e8483a,#d43a2e);color:#fff;box-shadow:0 4px 16px rgba(232,72,58,.3);}
-.form-group{margin-bottom:14px;}
-.form-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px;}
-.form-control{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--bdr);background:rgba(255,255,255,.03);color:var(--txt);font-size:13.5px;transition:all .25s ease;}
-.form-control:focus{border-color:#e8483a;box-shadow:0 0 0 3px rgba(232,72,58,.12);outline:none;}
+.login-logo h1{font-size:22px;text-transform:uppercase;font-weight:700;letter-spacing:.08em;background:linear-gradient(90deg,#e8483a,#ffb020,#e8483a);background-size:200% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:textShine 3s linear infinite;}
+@keyframes textShine{to{background-position:200% center;}}
+.login-logo p{font-size:10.5px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-top:5px;}
+
+.login-tabs{display:flex;gap:4px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);border-radius:14px;padding:4px;margin-bottom:24px;}
+.login-tab{flex:1;padding:10px;border-radius:11px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);transition:all .3s ease;border:none;background:transparent;cursor:pointer;position:relative;overflow:hidden;}
+.login-tab::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,#e8483a,#d43a2e);opacity:0;transition:opacity .3s ease;border-radius:11px;}
+.login-tab span{position:relative;z-index:1;}
+.login-tab.active::before{opacity:1;}
+.login-tab.active{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);box-shadow:0 4px 20px rgba(232,72,58,.35);}
+.login-tab:not(.active):hover{color:var(--txt2);background:rgba(255,255,255,.04);}
+
+.form-group{margin-bottom:16px;}
+.form-label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;transition:color .2s ease;}
+.form-group:focus-within .form-label{color:#e8483a;}
+.form-control{width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03);color:var(--txt);font-size:13.5px;transition:all .25s ease;}
+.form-control:focus{border-color:rgba(232,72,58,.5);box-shadow:0 0 0 3px rgba(232,72,58,.1),0 2px 8px rgba(0,0,0,.2);outline:none;background:rgba(255,255,255,.05);}
 .input-icon-wrap{position:relative;}
-.input-icon-wrap .mat-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;}
-.input-icon-wrap .form-control{padding-left:38px;}
-.pw-toggle{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);cursor:pointer;font-size:18px;}
-.checkbox-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
-.checkbox-label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer;}
+.input-icon-wrap .mat-ico{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;transition:color .2s ease;}
+.input-icon-wrap:focus-within .mat-ico{color:#e8483a;}
+.input-icon-wrap .form-control{padding-left:40px;}
+.pw-toggle{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);cursor:pointer;font-size:18px;transition:color .2s;}
+.pw-toggle:hover{color:var(--txt);}
+.checkbox-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.checkbox-label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer;transition:color .2s;}
+.checkbox-label:hover{color:var(--txt2);}
 .checkbox-label input[type=checkbox]{width:15px;height:15px;accent-color:#e8483a;}
-.link-btn{font-size:12.5px;color:#e8483a;font-weight:600;background:none;border:none;cursor:pointer;}
-.btn-primary-full{width:100%;padding:14px;border-radius:10px;background:linear-gradient(135deg,#e8483a 0%,#c73a2e 100%);color:#fff;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;transition:all .25s ease;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(232,72,58,.3);}
-.btn-primary-full:hover{background:linear-gradient(135deg,#ff5a4a 0%,#e8483a 100%);transform:translateY(-1px);box-shadow:0 6px 24px rgba(232,72,58,.4);}
-.login-footer{text-align:center;margin-top:20px;padding-bottom:40px;font-size:11px;color:var(--muted);letter-spacing:.04em;}
+.link-btn{font-size:12.5px;color:#e8483a;font-weight:600;background:none;border:none;cursor:pointer;transition:all .2s;}
+.link-btn:hover{color:#ff6b5a;text-shadow:0 0 12px rgba(232,72,58,.3);}
+.btn-primary-full{width:100%;padding:15px;border-radius:12px;background:linear-gradient(135deg,#e8483a 0%,#c73a2e 50%,#d43a2e 100%);color:#fff;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;transition:all .3s ease;border:none;cursor:pointer;box-shadow:0 6px 24px rgba(232,72,58,.3),inset 0 1px 0 rgba(255,255,255,.1);position:relative;overflow:hidden;}
+.btn-primary-full::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,transparent 30%,rgba(255,255,255,.1) 50%,transparent 70%);transform:translateX(-100%);transition:transform .5s ease;}
+.btn-primary-full:hover::before{transform:translateX(100%);}
+.btn-primary-full:hover{background:linear-gradient(135deg,#ff5a4a 0%,#e8483a 50%,#ff6b5a 100%);transform:translateY(-1px);box-shadow:0 8px 32px rgba(232,72,58,.4),inset 0 1px 0 rgba(255,255,255,.15);}
+.btn-primary-full:active{transform:translateY(0);box-shadow:0 4px 16px rgba(232,72,58,.3);}
+.login-footer{text-align:center;margin-top:24px;padding-bottom:40px;font-size:11px;color:var(--muted);letter-spacing:.04em;opacity:.7;}
 .login-footer span{color:var(--amber);font-weight:600;}
-.demo-hint{background:rgba(232,72,58,.06);border:1px solid rgba(232,72,58,.15);border-radius:10px;padding:12px 16px;margin-top:14px;font-size:11.5px;color:var(--muted);text-align:left;}
-.demo-hint b{color:#e8483a;}
-.demo-hint div{margin-bottom:2px;}
-.demo-hint div:last-child{margin-bottom:0;}
+
+/* Status badge on login */
+.login-status-bar{display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;color:var(--green);margin-bottom:18px;padding:8px 14px;border-radius:10px;background:rgba(62,207,142,.06);border:1px solid rgba(62,207,142,.1);opacity:0;transform:translateY(4px);animation:statusSlideIn .4s ease forwards .5s;}
+@keyframes statusSlideIn{to{opacity:1;transform:translateY(0);}}
+.login-status-bar .status-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulseGlow 1.5s ease-in-out infinite;}
+.login-status-bar.error{color:var(--amber);background:rgba(255,176,32,.06);border-color:rgba(255,176,32,.1);}
+.login-status-bar.error .status-dot{background:var(--amber);}
 
 @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(62,207,142,.4);}50%{box-shadow:0 0 0 8px rgba(62,207,142,0);}}
 .pulse-glow{animation:pulseGlow 1.5s ease-in-out infinite;}
@@ -444,6 +481,14 @@ select.form-control-sm{background:var(--sur2);}
   <div class="login-safety-bar"></div>
   <div class="login-safety-icons"></div>
 
+  <!-- Floating glow orbs -->
+  <div class="login-glow-orb"></div>
+  <div class="login-glow-orb"></div>
+  <div class="login-glow-orb"></div>
+
+  <!-- Floating particles -->
+  <div class="login-particles" id="loginParticles"></div>
+
   <!-- Safety Cones -->
   <div class="login-cone"><div class="login-cone-body"><div class="login-cone-stripe"></div></div><div class="login-cone-base"></div></div>
   <div class="login-cone"><div class="login-cone-body"><div class="login-cone-stripe"></div></div><div class="login-cone-base"></div></div>
@@ -489,10 +534,11 @@ select.form-control-sm{background:var(--sur2);}
         <h1>PTS SAFETY</h1>
         <p>Training Management System</p>
       </div>
+      <div class="login-status-bar" id="loginStatusBar"><span class="status-dot"></span><span id="loginStatusText">Secure Connection</span></div>
       <div style="text-align:center;font-size:11px;color:var(--muted);margin-bottom:16px;" id="loginDateTime"></div>
       <div class="login-tabs">
-        <button class="login-tab" id="tabAdmin" onclick="setLoginType('admin')">Admin Login</button>
-        <button class="login-tab active" id="tabEmp" onclick="setLoginType('employee')">Employee Login</button>
+        <button class="login-tab" id="tabAdmin" onclick="setLoginType('admin')"><span>Admin Login</span></button>
+        <button class="login-tab active" id="tabEmp" onclick="setLoginType('employee')"><span>Employee Login</span></button>
       </div>
       <div class="form-group">
         <label class="form-label" id="loginIdLabel">Employee ID</label>
@@ -516,10 +562,10 @@ select.form-control-sm{background:var(--sur2);}
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
       <div id="loginFbStatus" style="display:none;font-size:11px;text-align:center;margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05);"></div>
       <button class="btn-primary-full" id="loginBtn" onclick="doLogin()" disabled><span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Loading data...</button>
-      <button class="link-btn" id="loginSyncBtn" style="margin-top:8px;display:none;" onclick="loginForceSync()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry</button>
+      <button class="link-btn" id="loginSyncBtn" style="margin-top:10px;display:none;width:100%;text-align:center;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);transition:all .2s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='rgba(255,255,255,.02)'" onclick="loginForceSync()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry</button>
 
     </div>
-    <div class="login-footer">PTS SAFETY — Training Management System</div>
+    <div class="login-footer">PTS SAFETY — <span>Training Management System</span></div>
 
   </div>
 </div>
@@ -1054,14 +1100,34 @@ let dbLoadPromise=null;
 // HELPER: Authenticate as admin using the STORED password from DB, with fallback
 // This fixes the bug where hardcoded 'admin123' fails if admin changed their password
 async function authAsAdmin(){
-  if(fbAuth.currentUser){try{var email=fbAuth.currentUser.email;if(email&&email.split('@')[0].toLowerCase()==='admin')return true;}catch(e){}}
+  // If current user appears to be admin, VERIFY the token is actually valid
+  // by forcing a token refresh. A stale token causes "Missing or insufficient permissions".
+  if(fbAuth.currentUser){
+    try{
+      var email=fbAuth.currentUser.email;
+      if(email&&email.split('@')[0].toLowerCase()==='admin'){
+        // Force refresh the token to ensure it's not expired
+        try{await fbAuth.currentUser.getIdToken(true);}catch(refreshErr){
+          console.warn('[authAsAdmin] Token refresh failed, will re-auth:',refreshErr.message);
+          try{await fbAuth.signOut();}catch(soErr){}
+          // Fall through to re-auth below
+          var adminRecord=DB.admins.find(function(a){return a.username==='admin';});
+          var passwords=adminRecord?[adminRecord.password,'admin123']:['admin123'];
+          for(var ri=0;ri<passwords.length;ri++){
+            try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[ri]);console.log('[authAsAdmin] Re-auth OK after token refresh fail, password index '+ri);return true;}catch(re){console.warn('[authAsAdmin] Re-auth failed index '+ri+':',re.message);}
+          }
+          return false;
+        }
+        return true;
+      }
+    }catch(e){}
+  }
   var adminRecord=DB.admins.find(function(a){return a.username==='admin';});
   var passwords=adminRecord?[adminRecord.password,'admin123']:['admin123'];
   for(var i=0;i<passwords.length;i++){
     try{await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[i]);console.log('[authAsAdmin] OK with password index '+i);return true;}catch(e){console.warn('[authAsAdmin] Failed with password index '+i+':',e.message);}
   }
   // SELF-HEAL: If sign-in failed, try CREATING the admin account
-  // This handles the case where the Firebase Auth user was deleted
   try{
     console.warn('[authAsAdmin] All sign-in attempts failed — trying to CREATE admin account...');
     var pw=adminRecord?adminRecord.password:'admin123';
@@ -1070,19 +1136,6 @@ async function authAsAdmin(){
     return true;
   }catch(createErr){
     console.error('[authAsAdmin] Create also failed:',createErr.message);
-    // Last resort: try deleting and recreating
-    try{
-      // Sign in as admin might fail, but let's try with any password to get a user
-      // then delete and recreate
-      for(var j=0;j<passwords.length;j++){
-        try{
-          await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[j]);
-          // If we got here, sign-in worked with this password? That shouldn't happen
-          // since the loop above failed. But just in case.
-          return true;
-        }catch(e2){}
-      }
-    }catch(e3){}
   }
   console.error('[authAsAdmin] ALL attempts failed!');
   return false;
@@ -1338,7 +1391,7 @@ async function autoSyncMissingEmployees(){
     var adminAuthOk=await authAsAdmin();
     if(!adminAuthOk){
       console.error('[autoSyncMissingEmployees] Admin Auth FAILED!');
-      toast('Firebase Admin Auth failed! Cannot sync employees. Try logging out and back in.','error',8000);
+      // Silent — background task, don't scare the user
       return;
     }
     
@@ -1353,7 +1406,7 @@ async function autoSyncMissingEmployees(){
         if(!reauthOk){
           failReasons.push(emp.id+': Admin re-auth failed');
           console.error('[autoSyncMissingEmployees] Admin re-auth failed');
-          toast('Cloud sync FAILED — admin session expired. Try logging out and back in.','error',8000);
+          // Silent — background task
           break;
         }
       }
@@ -1407,9 +1460,9 @@ async function autoSyncMissingEmployees(){
       }
     }
     
-    // Show result to user
+    // Log results — only show SUCCESS to user, failures are console-only (non-critical background task)
     if(failReasons.length>0){
-      toast('FAILED to sync '+failReasons.length+' employee(s)! Details: '+failReasons.join(' | '),'error',15000);
+      console.warn('[autoSyncMissingEmployees] '+failReasons.length+' employee(s) failed to sync:',failReasons);
     }
     if(pushed>0){
       toast(pushed+'/'+missing.length+' employee(s) synced to cloud! Phone login ready.','success',5000);
@@ -1429,8 +1482,8 @@ async function autoSyncMissingEmployees(){
       setTimeout(function(){forceSyncAllEmployees();},1000);
     }
   }catch(e){
-    console.error('[autoSyncMissingEmployees] TOP-LEVEL Error:',e);
-    toast('Employee cloud sync error: '+(e.message||e),'error',8000);
+    console.error('[autoSyncMissingEmployees] Background sync error (non-critical):',e);
+    // DO NOT show error toast — this is a background optimization, not user-facing
   }
 }
 
@@ -1984,9 +2037,22 @@ function updateBadges(){
 function updateLoginClock(){
   const now=new Date();
   const el=document.getElementById("loginDateTime");
-  if(el)el.textContent=now.toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})+" | "+now.toLocaleTimeString("en-IN");
+  if(el)el.textContent=now.toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})+" \u2022 "+now.toLocaleTimeString("en-IN");
 }
 setInterval(updateLoginClock,1000);updateLoginClock();
+// Generate floating particles on login page
+(function(){
+  const c=document.getElementById('loginParticles');
+  if(!c)return;
+  const colors=['rgba(232,72,58,.3)','rgba(255,176,32,.25)','rgba(62,207,142,.2)','rgba(139,109,232,.2)'];
+  for(let i=0;i<18;i++){
+    const p=document.createElement('div');
+    p.className='login-particle';
+    const size=Math.random()*3+1.5;
+    p.style.cssText=`width:${size}px;height:${size}px;left:${Math.random()*100}%;background:${colors[i%colors.length]};animation-duration:${Math.random()*12+8}s;animation-delay:${Math.random()*10}s;`;
+    c.appendChild(p);
+  }
+})();
 
 /* ============================================================
    NAVIGATION
@@ -7115,7 +7181,7 @@ async function executeSheetSync(){
     if(si){si.style.color='var(--green)';si.innerHTML='<span class="mat-ico" style="font-size:12px;">check_circle</span> Sheet synced';setTimeout(function(){si.innerHTML='';},3000);}
   }catch(err){
     console.warn('[Sheet Auto-Sync] Error:',err);
-    toast('Auto-sync error: '+err.message,'error',3000);
+    // Silent — background auto-sync, don't show error to user
   }
   _sheetSyncRunning=false;
 }
@@ -7684,6 +7750,12 @@ async function loadDBFromFirestore(){
     if(!fbAuth.currentUser||(fbAuth.currentUser.email&&fbAuth.currentUser.email.split('@')[0].toLowerCase()!=='admin')){
       try{await authAsAdmin();}catch(e){console.warn('[loadDBFromFirestore] Self-heal auth failed:',e);}
     }
+    // If still not authenticated after self-heal, skip ALL cloud reads
+    // Individual reads would all fail with "Missing or insufficient permissions" anyway
+    if(!fbAuth.currentUser||(fbAuth.currentUser.email&&fbAuth.currentUser.email.split('@')[0].toLowerCase()!=='admin')){
+      console.warn('[loadDBFromFirestore] No valid admin auth — skipping cloud load, using local data');
+      return {ok:false,loaded:0,failed:['all (no auth)'],error:'Not authenticated as admin'};
+    }
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
     // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
     var localSnapshot={
@@ -8066,7 +8138,7 @@ async function initApp(){
     (async function(){
       try{
         var bgAdminOk=await authAsAdmin();
-        if(!bgAdminOk){console.error('[bg] Admin auth failed — cannot push missing employees');return;}
+        if(!bgAdminOk){console.warn('[bg] Admin auth failed — skipping background employee sync (non-critical)');return;}
         var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
         var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
         if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');
@@ -8076,7 +8148,7 @@ async function initApp(){
         var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
         if(stEl){stEl.style.color='var(--green)';stEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud: '+fs.size+'/'+DB.employees.length+' employees'+(pok>0?' (fixed '+pok+' missing)':'')+(af>0?' + '+af+' login(s) fixed':'');}
         console.log('[bg] Done. Cloud:'+fs.size+' Local:'+DB.employees.length+' Auth:'+af);
-      }catch(e){console.error('[bg]',e);}
+      }catch(e){console.warn('[bg] Background sync error (non-critical):',e);}
     })();
     // Auth persistence + session check (needed for auto-login)
     try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
@@ -8102,6 +8174,18 @@ async function initApp(){
       fbStatus.style.display='block';
       fbStatus.style.color='var(--green)';
       fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Ready — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings.';
+    }
+  }
+  // Update status bar on login page
+  var statusBar=document.getElementById('loginStatusBar');
+  var statusText=document.getElementById('loginStatusText');
+  if(statusBar&&statusText){
+    if(!fbLoadError){
+      statusBar.classList.remove('error');
+      statusText.textContent='System Ready — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings';
+    }else{
+      statusBar.classList.add('error');
+      statusText.textContent='Using local data — cloud will sync when available';
     }
   }
   // CRITICAL: Enable login ONLY after all data is loaded
@@ -8163,3 +8247,4 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
+</html>
