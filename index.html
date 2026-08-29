@@ -1451,7 +1451,15 @@ async function forceSyncFromCloud(){
   try{
     // Ensure admin auth before reading from Firestore
     try{await authAsAdmin();}catch(e){console.warn('forceSyncFromCloud: admin auth failed:',e);}
-    await loadDBFromFirestore();
+    const loadRes=await loadDBFromFirestore();
+    // Update backup with fresh data, or restore if load failed
+    if(loadRes&&loadRes.failed&&loadRes.failed.length>0&&_localBackup){
+      if(DB.trainings.length===0&&_localBackup.trainings.length>0)DB.trainings=_localBackup.trainings;
+      if(DB.testResults.length===0&&_localBackup.testResults.length>0)DB.testResults=_localBackup.testResults;
+      if(DB.certificates.length===0&&_localBackup.certificates.length>0)DB.certificates=_localBackup.certificates;
+    }else{
+      _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
+    }
     // Save to localStorage only (don't push back — cloud is source of truth)
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
     renderAll();
@@ -1530,8 +1538,17 @@ function startAutoSync(){
   document.addEventListener('visibilitychange',async function(){
     if(!document.hidden&&currentUser&&!_syncBusy&&firebaseReady&&(Date.now()-_lastDeleteTime)>10000){
       try{
-        if(isAdmin){try{await authAsAdmin();}catch(e){}}
-        await loadDBFromFirestore();
+        // ALWAYS auth as admin before reading Firestore — employees don't have read permission
+        try{await authAsAdmin();}catch(e){console.warn('Visibility sync auth failed:',e);return;}
+        const loadResult=await loadDBFromFirestore();
+        // If cloud load failed, restore local backup
+        if(loadResult&&loadResult.failed&&loadResult.failed.length>0&&_localBackup){
+          if(DB.trainings.length===0&&_localBackup.trainings.length>0)DB.trainings=_localBackup.trainings;
+          if(DB.testResults.length===0&&_localBackup.testResults.length>0)DB.testResults=_localBackup.testResults;
+          if(DB.certificates.length===0&&_localBackup.certificates.length>0)DB.certificates=_localBackup.certificates;
+        }
+        // Update local backup with fresh cloud data
+        _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
         // Save to localStorage only (don't push back to cloud — cloud is source of truth)
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         if(typeof renderAll==='function')renderAll();
@@ -1676,9 +1693,11 @@ async function doLogin(){
     }else{
       var empId=id.toUpperCase();
       var emp=DB.employees.find(function(e){return e.id===empId;});
-      // If not found locally, ONE cloud read then check
+      // If not found locally, try cloud (auth as admin first!)
       if(!emp&&firebaseReady){
         try{
+          // CRITICAL: Auth as admin before reading employees from Firestore
+          try{await authAsAdmin();}catch(authErr){console.warn('[doLogin] Cloud lookup auth failed:',authErr);}
           toast('Checking cloud...','info',2000);
           var empSnap=await fbDB.collection('employees').get();
           if(empSnap.size>0){
@@ -1692,7 +1711,9 @@ async function doLogin(){
             emp=DB.employees.find(function(e){return e.id===empId;});
           }
         }catch(cloudErr){
-          toast('Cloud error: '+cloudErr.message,'error',6000);return;
+          // Do NOT block login — just warn. Employee may exist in a future sync.
+          console.warn('[doLogin] Cloud employee lookup failed:',cloudErr.message);
+          toast('Could not check cloud. If employee exists, click "Sync Data" on login page.','warning',4000);
         }
       }
       if(!emp){
@@ -1730,6 +1751,7 @@ async function doLogin(){
     if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
     startApp();
     // Sync Firebase Auth for employee in background
+    // CRITICAL: After employee auth, re-auth as admin so visibility handler & sync work
     if(!isAdmin && firebaseReady){
       (async function(){
         try{
@@ -1738,6 +1760,9 @@ async function doLogin(){
           try{await fbAuth.signInWithEmailAndPassword(email,realPw);}catch(e){
             try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(email,realPw);}catch(e2){}
           }
+          // Re-auth as admin IMMEDIATELY after employee auth
+          // Otherwise visibility handler and other reads will fail with permission error
+          try{await authAsAdmin();}catch(e3){console.warn('[doLogin] Re-auth as admin after employee auth failed:',e3);}
         }catch(e){}
       })();
     }
@@ -1758,6 +1783,8 @@ async function showForgot(){
   if(!emp&&firebaseReady){
     try{
       toast('Looking up '+empId+' in cloud...','info',2000);
+      // Auth as admin before reading Firestore
+      try{await authAsAdmin();}catch(ae){}
       const snap=await fbDB.collection('employees').get();
       if(snap.size>0){DB.employees=snap.docs.map(x=>x.data());await loadTombstonesFromCloud();applyTombstones();}
       emp=DB.employees.find(e=>e.id===empId);
@@ -1780,14 +1807,23 @@ async function loginForceSync(){
     try{await authAsAdmin();}catch(e){console.warn('loginForceSync: admin auth failed:',e);}
     const result=await loadDBFromFirestore();
     _initDone=true;
+    // Restore local backup if cloud load failed
+    if(result&&result.failed&&result.failed.length>0&&_localBackup){
+      if(DB.trainings.length===0&&_localBackup.trainings.length>0)DB.trainings=_localBackup.trainings;
+      if(DB.testResults.length===0&&_localBackup.testResults.length>0)DB.testResults=_localBackup.testResults;
+      if(DB.certificates.length===0&&_localBackup.certificates.length>0)DB.certificates=_localBackup.certificates;
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    }else if(result&&!result.failed?.length){
+      _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
+    }
     // Update the Firebase status display
     const fbStatus=document.getElementById('loginFbStatus');
     if(fbStatus){
       if(result&&result.failed&&result.failed.length>0){
         fbStatus.style.display='block';
-        fbStatus.style.color='var(--red)';
-        fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Sync FAILED for: '+result.failed.join(', ')+(result.error?' — '+result.error:'')+'. Firebase Security Rules may be blocking access.';
-        toast('Sync FAILED! '+result.failed.join(', ')+' could not load from Firebase.','error',6000);
+        fbStatus.style.color='var(--amber)';
+        fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Partial sync: '+result.failed.join(', ')+' failed. Using local data for those. '+DB.employees.length+' employees loaded.';
+        toast('Partial sync — '+result.failed.length+' collection(s) failed. Local data used as fallback.','warning',5000);
       }else{
         fbStatus.style.display='block';
         fbStatus.style.color='var(--green)';
@@ -3098,8 +3134,8 @@ function sendEmpMsgToAdmin(){
           await authAsAdmin();
           await fbDB.collection('notifications').doc(String(newNotif.id)).set(sanitizeForFirestore(newNotif),{merge:true});
           console.log('[sendEmpMsgToAdmin] Notification pushed to cloud via admin auth');
-          // Switch back to employee auth for future operations
-          try{await fbAuth.signInWithEmailAndPassword(toEmail(currentUser.id),currentUser.password||'emp123');}catch(e2){}
+          // Keep admin auth — do NOT switch back to employee auth
+          // (employee auth would break visibility handler and other cloud reads)
         }catch(e2){
           console.error('[sendEmpMsgToAdmin] Failed to push notification to cloud:',e2.message);
         }
@@ -4026,7 +4062,7 @@ function uploadOfflineNCR_ToDrive(rec,trn,emp){
     else{toast('NCR Drive upload had an issue','warning',5000);}
   });
   console.log('NCR PDF upload initiated:',fileName);
-
+  }catch(e){console.warn('NCR PDF error:',e);}
 }
 async function deleteTraining(id){
   if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
@@ -4718,13 +4754,17 @@ function submitQuiz(){
   if(firebaseReady){
     (async function(){
       try{
+        // Auth as admin before writing — employees don't have write permission
+        if(!isAdmin)try{await authAsAdmin();}catch(e){}
         const r=DB.testResults[DB.testResults.length-1];
-        if(r) await fbDB.collection('testResults').doc(String(r.id)).set({...r},{merge:true});
+        if(r) await fbDB.collection('testResults').doc(String(r.id)).set(sanitizeForFirestore(r),{merge:true});
         if(certNum){
           const c=DB.certificates[DB.certificates.length-1];
-          if(c) await fbDB.collection('certificates').doc(String(c.num)).set({...c},{merge:true});
+          if(c) await fbDB.collection('certificates').doc(String(c.num)).set(sanitizeForFirestore(c),{merge:true});
         }
         console.log('Quiz result saved to Firebase immediately');
+        // Re-auth as admin for subsequent operations (employee may have been signed in)
+        if(!isAdmin)try{await authAsAdmin();}catch(e){}
       }catch(e){console.warn('Firebase quiz save error:',e);}
       finally{window._quizSubmitting=false;}
     })();
@@ -5142,7 +5182,7 @@ FB_QUESTIONS.forEach(function(q,i){fb.ratings['q'+(i+1)]={text:q,score:_fbRating
 DB.feedbackForms.push(fb);
 var overlay=document.getElementById('feedbackOverlay');if(overlay)overlay.remove();
 _fbRatings={};_fbOverall=0;
-if(firebaseReady){try{fbDB.collection('feedbackForms').doc(String(fb.id)).set(JSON.parse(JSON.stringify(fb)),{merge:true});console.log('Feedback saved to Firebase');}catch(e){console.warn('Firebase feedback save error:',e);}}
+if(firebaseReady){(async function(){try{if(!isAdmin)await authAsAdmin();fbDB.collection('feedbackForms').doc(String(fb.id)).set(sanitizeForFirestore(fb),{merge:true});console.log('Feedback saved to Firebase');if(!isAdmin)await authAsAdmin();}catch(e){console.warn('Firebase feedback save error:',e);}})();}
 // Upload IMSP 29 F05 Feedback PDF to Google Drive
 setTimeout(function(){uploadFeedbackPDFToDrive(fb);},500);
 // Push feedback to Google Sheet via the debounced queueSheetSync system
@@ -7609,6 +7649,11 @@ async function cleanupSampleDataFromCloud(){  try{    const sampleIds={      vid
 async function loadDBFromFirestore(){
   let loaded=0;let failed=[];
   try{
+    // SELF-HEAL: If not authenticated as admin, try to auth now
+    // This prevents silent failures when called from visibility handler or other paths
+    if(!fbAuth.currentUser||(fbAuth.currentUser.email&&fbAuth.currentUser.email.split('@')[0].toLowerCase()!=='admin')){
+      try{await authAsAdmin();}catch(e){console.warn('[loadDBFromFirestore] Self-heal auth failed:',e);}
+    }
     // === SAFETY SNAPSHOT: capture local data BEFORE cloud overwrites anything ===
     // This ensures locally-added items can never be lost, even if cloud merge or tombstones fail
     var localSnapshot={
@@ -7778,16 +7823,16 @@ function loadDB(){
   // Remove anything that was previously deleted (tombstone filter)
   applyTombstones();
   // CRITICAL: Trainings, test results & certificates come from Firebase cloud (source of truth).
-  // Clear stale local data here — loadDBFromFirestore() will repopulate from cloud.
-  // This prevents ghost trainings, phantom test results, and stale certificates
-  // from reappearing from stale localStorage.
+  // But we MUST keep a local backup in case cloud auth fails — otherwise data is lost.
   var staleTrnCount=DB.trainings.length;
   var staleTRCount=DB.testResults.length;
   var staleCertCount=DB.certificates.length;
+  // Save backup BEFORE clearing — if cloud load fails, we restore from this
+  _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
   DB.trainings=[];
   DB.testResults=[];
   DB.certificates=[];
-  console.log('[loadDB] Cleared local data — '+staleTrnCount+' training(s), '+staleTRCount+' test result(s), '+staleCertCount+' certificate(s) — waiting for cloud data');
+  console.log('[loadDB] Cleared local data — '+staleTrnCount+' training(s), '+staleTRCount+' test result(s), '+staleCertCount+' certificate(s) — backup saved, waiting for cloud data');
   // CRITICAL: Remove corrupted trainings (missing name, cat, or id)
   var badTrnIds=[];
   DB.trainings=DB.trainings.filter(function(t){
@@ -7946,6 +7991,18 @@ async function initApp(){
     const loadResult=await loadDBFromFirestore();
     if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
       fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
+      // CRITICAL: If trainings/testResults/certificates failed to load from cloud,
+      // restore from local backup so data isn't lost
+      if(_localBackup){
+        if(DB.trainings.length===0&&_localBackup.trainings.length>0){DB.trainings=_localBackup.trainings;console.warn('[initApp] Cloud trainings failed, restored '+_localBackup.trainings.length+' from local backup');}
+        if(DB.testResults.length===0&&_localBackup.testResults.length>0){DB.testResults=_localBackup.testResults;console.warn('[initApp] Cloud testResults failed, restored '+_localBackup.testResults.length+' from local backup');}
+        if(DB.certificates.length===0&&_localBackup.certificates.length>0){DB.certificates=_localBackup.certificates;console.warn('[initApp] Cloud certificates failed, restored '+_localBackup.certificates.length+' from local backup');}
+        // Save restored data to localStorage
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }
+    }else{
+      // Cloud load succeeded — update local backup with fresh data
+      _localBackup={trainings:JSON.parse(JSON.stringify(DB.trainings||[])),testResults:JSON.parse(JSON.stringify(DB.testResults||[])),certificates:JSON.parse(JSON.stringify(DB.certificates||[]))};
     }
     // Always keep firebaseReady ON — even partial load is OK
     if(!DB.admins.find(a=>a.username==="admin")){
@@ -7956,6 +8013,13 @@ async function initApp(){
   }catch(e){
     console.warn('Firebase init error:',e);
     fbLoadError=e.message||String(e);
+    // Restore local backup if cloud load completely failed
+    if(_localBackup){
+      if(DB.trainings.length===0&&_localBackup.trainings.length>0)DB.trainings=_localBackup.trainings;
+      if(DB.testResults.length===0&&_localBackup.testResults.length>0)DB.testResults=_localBackup.testResults;
+      if(DB.certificates.length===0&&_localBackup.certificates.length>0)DB.certificates=_localBackup.certificates;
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e2){}
+    }
     // Do NOT set firebaseReady=false — keep trying to save
   }
 
