@@ -1237,7 +1237,7 @@ function showCloudPasswordDialog(errCode,errMsg){
   var errorHint='';
   if(isRateLimited)errorHint='<div style="margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(232,72,58,.1);border:1px solid rgba(232,72,58,.3);font-size:11.5px;color:var(--red,#e8483a);line-height:1.5;"><b>Rate limited by Firebase.</b> Too many sign-in attempts.<br>Wait <b>5 minutes</b> and try again, or enter the correct password below.</div>';
   else if(isInvalidCred)errorHint='<div style="margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.3);font-size:11.5px;color:var(--amber,#ffb020);line-height:1.5;">Saved passwords don\'t match Firebase.<br>The password may have been changed in Firebase Console.</div>';
-  else if(errCode)errorHint='<div style="margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid var(--bdr,#2d333b);font-size:11px;color:var(--muted,#8d919b);">Last error: <b>'+(errCode||'unknown')+'</b>'+(errMsg?' — '+errMsg:'')+'</div>';
+  else if(errCode)errorHint='<div style="margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid var(--bdr,#2d333b);font-size:11px;color:var(--muted,#8d919b);">Firestore error: <b>'+(errCode||'unknown')+'</b>'+(errMsg?'<br>'+errMsg:'')+'</div>';
   var overlay=document.createElement('div');
   overlay.id='cloudPwOverlay';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
@@ -2096,7 +2096,7 @@ async function loginForceSync(){
     await new Promise(function(r){setTimeout(r,500);});
     // Use forceFresh=true — user explicitly clicked Sync, skip cached token
     var authOk=await authAsAdmin(true);
-    console.log('[loginForceSync] Auth result: '+(authOk?'SUCCESS':'FAILED')+' ('+_authState.lastCode+')');
+    console.log('[loginForceSync] Auth result: '+(authOk?'SUCCESS':'FAILED')+' ('+_authState.lastCode+') user='+(fbAuth.currentUser?fbAuth.currentUser.email:'null'));
     if(!authOk){
       // Auth failed — show password dialog instead of scary toast
       _initDone=true;
@@ -2120,6 +2120,17 @@ async function loginForceSync(){
         result=await loadDBFromFirestore();
         console.log('[loginForceSync] Retry load: loaded='+(result?result.loaded:0)+' failed='+(result?.failed?.length||0));
       }
+    }
+    // If ALL collections failed, auth is broken — show password dialog
+    if(result&&result.failed&&result.failed.length>=10){
+      console.error('[loginForceSync] ALL collections failed ('+result.failed.length+'/13). Firestore error: '+(result.firstErrCode||'none')+' — showing password dialog');
+      _authState.lastCode=result.firstErrCode||'permission-denied';
+      _authState.lastError=result.firstErrMsg||'All Firestore reads failed after auth';
+      if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry';}
+      if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
+      _authAskShown=false;
+      showCloudPasswordDialog(_authState.lastCode,_authState.lastError);
+      return;
     }
     // Restore local backup if cloud load failed
     if(result&&result.failed&&result.failed.length>0&&_localBackup){
@@ -8119,9 +8130,11 @@ async function loadDBFromFirestore(){
       ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
       ['correctiveActions','id',d=>{if(d.size>0)DB.correctiveActions=d.docs.map(x=>x.data());}]
     ];
-    const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);console.warn('Firestore load failed for '+name+':',e);}}));
+    var firstErrCode='';
+    var firstErrMsg='';
+    const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);var ec=e.code||'';var em=e.message||'';console.warn('Firestore load failed for '+name+':',ec,em);if(!firstErrCode){firstErrCode=ec;firstErrMsg=em;}}}));
     // Load settings separately (it's a single doc, not a collection)
-    try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');}
+    try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');if(!firstErrCode){firstErrCode=e.code||'';firstErrMsg=e.message||'';}}
     // Load tombstones from cloud
     await loadTombstonesFromCloud();
     // Rebuild completed arrays from testResults (source of truth)
@@ -8225,10 +8238,10 @@ async function loadDBFromFirestore(){
     // Save merged data to localStorage
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
     console.log('Firestore loaded: '+loaded+'/'+(cols.length+1)+' collections OK'+(failed.length?' (failed: '+failed.join(', ')+')':'')+' — Trainings: '+DB.trainings.length+', Employees: '+DB.employees.length);
-    return {ok:true,loaded,failed};
+    return {ok:true,loaded,failed,firstErrCode,firstErrMsg};
   }catch(e){
     console.warn('Firestore load error:',e);
-    return {ok:false,loaded:0,failed:['all'],error:e.message||String(e)};
+    return {ok:false,loaded:0,failed:['all'],error:e.message||String(e),firstErrCode:e.code||'',firstErrMsg:e.message||''};
   }
 }
 
@@ -8423,6 +8436,13 @@ async function initApp(){
     }
     if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
       fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
+      // If ALL collections failed, the password is likely wrong — show dialog
+      if(loadResult.failed.length>=10){
+        console.error('[initApp] ALL collections failed. Firestore error: '+(loadResult.firstErrCode||'none'));
+        _authState.lastCode=loadResult.firstErrCode||'permission-denied';
+        _authState.lastError=loadResult.firstErrMsg||'All Firestore reads failed';
+        // Don't block login — but make the Sync button prominent
+      }
       // CRITICAL: If trainings/testResults/certificates failed to load from cloud,
       // restore from local backup so data isn't lost
       if(_localBackup){
