@@ -1097,8 +1097,9 @@ const fbDB=firebase.firestore();
 let firebaseReady=false;
 let dbLoadPromise=null;
 
-// HELPER: Authenticate as admin — NUCLEAR RECOVERY version
-// Handles: stale tokens, wrong cached user, password changes, corrupted IndexedDB
+// HELPER: Authenticate as admin — SIMPLE RELIABLE version
+// Trust getIdToken() — do NOT do verification reads (they cause false failures in Chrome)
+// Do NOT manipulate persistence (it corrupts Chrome's auth state)
 // Global: track auth state to avoid rate-limiting and redundant retries
 var _authState={rateLimited:false, lastError:'', lastCode:'', attemptsThisSession:0, cachedPw:null};
 
@@ -1111,7 +1112,7 @@ async function authAsAdmin(){
   var adminEmail=toEmail('admin');
   var adminRecord=DB.admins.find(function(a){return a.username==='admin';});
 
-  // STEP 0: If we cached a working password, just use it
+  // STEP 0: If we cached a working password, try it first (fast path)
   if(_authState.cachedPw){
     try{
       await fbAuth.signInWithEmailAndPassword(adminEmail,_authState.cachedPw);
@@ -1123,42 +1124,37 @@ async function authAsAdmin(){
     }
   }
 
-  // SHORT password list (2 most likely) to avoid rate-limiting
+  // Password list — short to avoid rate-limiting
   var passwords=[];
   if(adminRecord&&adminRecord.password)passwords.push(adminRecord.password);
   if(passwords.indexOf('admin123')===-1)passwords.push('admin123');
-  // Full list only for nuclear round
-  var allPw=Array.from(new Set(passwords.concat(['Admin@123','password','admin'])));
 
-  // === ROUND 1: Token refresh if already signed in ===
-  // In Chrome, a stale session can have a valid-looking token that Firestore rejects.
-  // So we VERIFY the token actually works by reading 'employees' (not 'admins' — different rules).
+  // === ROUND 1: If already signed in as admin, just refresh the token ===
+  // TRUST the token — do NOT verify with a Firestore read.
+  // The verification read was the #1 cause of false auth failures in Chrome.
   if(fbAuth.currentUser){
     try{
       var cEmail=fbAuth.currentUser.email;
       if(cEmail&&cEmail.toLowerCase()===adminEmail){
-        try{
-          await fbAuth.currentUser.getIdToken(true);
-          // VERIFY: token refresh succeeded, but does Firestore accept it?
-          try{
-            await fbDB.collection('employees').limit(1).get();
-            console.log('[authAsAdmin] R1: Token refresh + Firestore verify OK');
-            return true;
-          }catch(verifyErr){
-            console.warn('[authAsAdmin] R1: Token refresh OK but Firestore rejects it:',verifyErr.code||verifyErr.message);
-            _authState.lastCode=verifyErr.code||'';
-            // Don't return true — fall through to R2 for a fresh sign-in
-          }
-        }catch(refreshErr){
-          _authState.lastCode=refreshErr.code||'';
-          _authState.lastError=refreshErr.message||'';
-          console.warn('[authAsAdmin] R1 failed:',_authState.lastCode);
-        }
-      }else{console.warn('[authAsAdmin] R1: currentUser is not admin ('+cEmail+')');}
-    }catch(e){console.warn('[authAsAdmin] R1 error:',e.message);}
+        await fbAuth.currentUser.getIdToken(true);
+        console.log('[authAsAdmin] R1: Already signed in, token refreshed OK');
+        _authState.cachedPw=adminRecord?adminRecord.password:null;
+        return true;
+      }else{
+        // Signed in as wrong user — sign out and try passwords
+        console.warn('[authAsAdmin] R1: currentUser is '+cEmail+', not admin. Signing out...');
+        try{await fbAuth.signOut();}catch(e){}
+        await new Promise(function(r){setTimeout(r,300);});
+      }
+    }catch(e){
+      console.warn('[authAsAdmin] R1 token refresh failed:',e.code||e.message);
+      _authState.lastCode=e.code||'';
+      _authState.lastError=e.message||'';
+      // Fall through to R2
+    }
   }
 
-  // === ROUND 2: signOut + 2 passwords ===
+  // === ROUND 2: signOut + try passwords ===
   try{await fbAuth.signOut();}catch(e){}
   await new Promise(function(r){setTimeout(r,200);});
   for(var i=0;i<passwords.length;i++){
@@ -1169,73 +1165,41 @@ async function authAsAdmin(){
       _authState.cachedPw=passwords[i];
       return true;
     }catch(e){
-      _authState.lastCode=e.code||'';_authState.lastError=e.message||'';
+      _authState.lastCode=e.code||'';
+      _authState.lastError=e.message||'';
       console.warn('[authAsAdmin] R2 pw['+i+'] failed:',_authState.lastCode);
-      if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){_authState.rateLimited=true;return false;}
+      if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){
+        _authState.rateLimited=true;
+        return false;
+      }
     }
   }
 
-  // === ROUND 3: setPersistence(NONE) + 2 passwords ===
-  console.warn('[authAsAdmin] R3: setPersistence(NONE)...');
+  // === ROUND 3: Create admin account if it doesn't exist ===
+  console.warn('[authAsAdmin] R3: Trying createUser...');
   try{
-    await fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE);
-    await fbAuth.signOut();
-    await new Promise(function(r){setTimeout(r,300);});
-    for(var j=0;j<passwords.length;j++){
-      _authState.attemptsThisSession++;
-      try{
-        await fbAuth.signInWithEmailAndPassword(adminEmail,passwords[j]);
-        console.log('[authAsAdmin] R3 OK (persistence=NONE)');
-        try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);}catch(re){}
-        _authState.cachedPw=passwords[j];
-        return true;
-      }catch(e){
-        _authState.lastCode=e.code||'';_authState.lastError=e.message||'';
-        console.warn('[authAsAdmin] R3 pw['+j+'] failed:',_authState.lastCode);
-        if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){_authState.rateLimited=true;return false;}
-      }
+    await fbAuth.createUserWithEmailAndPassword(adminEmail,passwords[0]||'admin123');
+    console.log('[authAsAdmin] R3: Created admin account OK');
+    _authState.cachedPw=passwords[0]||'admin123';
+    return true;
+  }catch(createErr){
+    // auth/email-already-in-use means account exists but password is wrong
+    console.warn('[authAsAdmin] R3 createUser failed:',createErr.code||createErr.message);
+    if(createErr.code!=='auth/email-already-in-use'){
+      _authState.lastCode=createErr.code||'';
+      _authState.lastError=createErr.message||'';
     }
-  }catch(pErr){console.error('[authAsAdmin] R3 error:',pErr.message);}
-
-  // === ROUND 4: Nuclear — clear all state + ALL passwords ===
-  console.warn('[authAsAdmin] R4: Nuclear — clearing all Firebase state...');
-  try{
-    if(window.indexedDB){
-      var dbs=await indexedDB.databases();
-      var fdb=dbs.filter(function(db){return db.name.indexOf('firebase')>-1;});
-      for(var di=0;di<fdb.length;di++){try{await new Promise(function(res){var rq=indexedDB.deleteDatabase(fdb[di].name);rq.onsuccess=res;rq.onerror=res;rq.onblocked=res;setTimeout(res,800);});}catch(e){}}
-    }
-    var fls=[];for(var li=0;li<localStorage.length;li++){var lk=localStorage.key(li);if(lk&&lk.indexOf('firebase')>-1)fls.push(lk);}
-    fls.forEach(function(k){try{localStorage.removeItem(k);}catch(e){}});
-    await fbAuth.signOut();
-    try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE);}catch(pe){}
-    await new Promise(function(r){setTimeout(r,400);});
-    for(var k=0;k<allPw.length;k++){
-      _authState.attemptsThisSession++;
-      try{
-        await fbAuth.signInWithEmailAndPassword(adminEmail,allPw[k]);
-        console.log('[authAsAdmin] R4 Nuclear OK!');
-        try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);}catch(re2){}
-        _authState.cachedPw=allPw[k];
-        return true;
-      }catch(e){
-        _authState.lastCode=e.code||'';_authState.lastError=e.message||'';
-        console.warn('[authAsAdmin] R4 pw['+k+'] failed:',_authState.lastCode);
-        if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){_authState.rateLimited=true;return false;}
-      }
-    }
-  }catch(nucErr){console.error('[authAsAdmin] R4 error:',nucErr.message);}
+  }
 
   console.error('[authAsAdmin] ALL FAILED ('+_authState.attemptsThisSession+' attempts, last: '+_authState.lastCode+')');
 
-  // === ROUND 5: User-provided password ===
+  // === ROUND 4: User-provided password (from dialog) ===
   if(typeof window._authAsAdmin_userPw==='string'&&window._authAsAdmin_userPw){
     try{
       await fbAuth.signOut();
-      try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE);}catch(pe){}
+      await new Promise(function(r){setTimeout(r,200);});
       await fbAuth.signInWithEmailAndPassword(adminEmail,window._authAsAdmin_userPw);
-      console.log('[authAsAdmin] R5: User password worked!');
-      try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);}catch(re3){}
+      console.log('[authAsAdmin] R4: User password worked!');
       var ar2=DB.admins.find(function(a){return a.username==='admin';});
       if(ar2){ar2.password=window._authAsAdmin_userPw;}
       try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
@@ -1243,8 +1207,9 @@ async function authAsAdmin(){
       window._authAsAdmin_userPw=null;
       return true;
     }catch(e5){
-      console.warn('[authAsAdmin] R5 failed:',e5.code||e5.message);
-      _authState.lastCode=e5.code||'';_authState.lastError=e5.message||'';
+      console.warn('[authAsAdmin] R4 failed:',e5.code||e5.message);
+      _authState.lastCode=e5.code||'';
+      _authState.lastError=e5.message||'';
       window._authAsAdmin_userPw=null;
     }
   }
@@ -1304,13 +1269,10 @@ async function submitCloudPassword(){
     var adminEmail=toEmail('admin');
     // Reset rate-limit flag — user is manually entering password
     _authState.rateLimited=false;
+    _authState.cachedPw=null;
     await fbAuth.signOut();
-    // Use setPersistence(NONE) to bypass any cached stale auth state in Chrome
-    try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE);}catch(pe){}
     await new Promise(function(r){setTimeout(r,300);});
     await fbAuth.signInWithEmailAndPassword(adminEmail,pwVal);
-    // Restore LOCAL persistence so session survives reloads
-    try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);}catch(restorePe){}
     // SUCCESS! Save the password
     var ar=DB.admins.find(function(a){return a.username==='admin';});
     if(ar){ar.password=pwVal;}
@@ -2116,17 +2078,14 @@ async function loginForceSync(){
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
   try{
     _initDone=false;
-    // FULL AUTH RESET: Reset rate-limit and clear state
-    console.log('[loginForceSync] Starting full auth reset + cloud sync...');
+    // FULL AUTH RESET: Reset rate-limit and clear cached state
+    console.log('[loginForceSync] Starting auth reset + cloud sync...');
     _authState.rateLimited=false;
+    _authState.cachedPw=null;
     _authAskShown=false;
     try{await fbAuth.signOut();}catch(e){}
-    // Bypass Chrome's cached stale auth state
-    try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE);}catch(pe){console.warn('[loginForceSync] setPersistence error:',pe.message);}
     await new Promise(function(r){setTimeout(r,500);});
     var authOk=await authAsAdmin();
-    // Restore persistence after auth succeeds
-    if(authOk){try{await fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);}catch(restorePe){}}
     console.log('[loginForceSync] Auth result: '+(authOk?'SUCCESS':'FAILED'));
     if(!authOk){
       // Auth failed — show password dialog instead of scary toast
