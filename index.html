@@ -1103,133 +1103,36 @@ const fbDB=firebase.firestore();
 let firebaseReady=false;
 let dbLoadPromise=null;
 
-// HELPER: Authenticate as admin — CLEAN RELIABLE version
-// R1: Refresh token + VERIFY with a Firestore read (detects stale Chrome tokens)
-// R2: signOut + password retry (no persistence manipulation)
-// R3: createUser fallback
-// R4: User password dialog
-// Rules: NO setPersistence, NO IndexedDB deletion, NO nuclear cleanup
-var _authState={rateLimited:false, lastError:'', lastCode:'', attemptsThisSession:0, cachedPw:null};
+// HELPER: Authenticate as admin using the STORED password from DB, with fallback
+// Simple version — matches the reference file that works correctly
+var _authState={cachedPw:null,lastCode:'',lastError:''};
 
 async function authAsAdmin(forceFresh){
-  if(_authState.rateLimited){
-    console.warn('[authAsAdmin] Rate-limited. Enter password manually or wait 5 min.');
-    return false;
-  }
-  var adminEmail=toEmail('admin');
-  var adminRecord=DB.admins.find(function(a){return a.username==='admin';});
-
-  // STEP 0: Cached working password (fast path) — skip if forceFresh
-  if(!forceFresh && _authState.cachedPw){
-    try{
-      await fbAuth.signInWithEmailAndPassword(adminEmail,_authState.cachedPw);
-      console.log('[authAsAdmin] Cached password worked!');
-      return true;
-    }catch(e){
-      console.warn('[authAsAdmin] Cached password failed:',e.code||e.message);
-      _authState.cachedPw=null;
-    }
-  }
-
-  // Password list
-  var passwords=[];
-  if(adminRecord&&adminRecord.password)passwords.push(adminRecord.password);
-  if(passwords.indexOf('admin123')===-1)passwords.push('admin123');
-
-  // === ROUND 1: If already signed in as admin, refresh token and VERIFY ===
+  // Fast path: if already signed in as admin, just return true
   if(!forceFresh && fbAuth.currentUser){
     try{
-      var cEmail=fbAuth.currentUser.email;
-      if(cEmail&&cEmail.toLowerCase()===adminEmail){
-        await fbAuth.currentUser.getIdToken(true);
-        // VERIFY: make sure Firestore actually accepts this token
-        try{
-          await fbDB.collection('employees').limit(1).get();
-          console.log('[authAsAdmin] R1: Token refresh + Firestore verify OK');
-          _authState.cachedPw=adminRecord?adminRecord.password:null;
-          return true;
-        }catch(verifyErr){
-          var vCode=verifyErr.code||'';
-          console.warn('[authAsAdmin] R1: Token refresh OK but Firestore rejects: '+vCode);
-          _authState.lastCode=vCode;
-          _authState.lastError=verifyErr.message||'';
-          // Token is stale — sign out cleanly and fall through to R2
-          try{await fbAuth.signOut();}catch(e){}
-          await new Promise(function(r){setTimeout(r,300);});
-          // DON'T return — fall through to R2 for a fresh sign-in with password
-        }
-      }else{
-        console.warn('[authAsAdmin] R1: currentUser is '+cEmail+', not admin. Signing out...');
-        try{await fbAuth.signOut();}catch(e){}
-        await new Promise(function(r){setTimeout(r,300);});
-      }
-    }catch(e){
-      console.warn('[authAsAdmin] R1 token refresh failed:',e.code||e.message);
-      _authState.lastCode=e.code||'';
-      _authState.lastError=e.message||'';
-    }
+      var email=fbAuth.currentUser.email;
+      if(email && email.split('@')[0].toLowerCase()==='admin')return true;
+    }catch(e){}
   }
-
-  // === ROUND 2: signOut + try passwords ===
-  try{await fbAuth.signOut();}catch(e){}
-  await new Promise(function(r){setTimeout(r,200);});
+  var adminRecord=DB.admins.find(function(a){return a.username==='admin';});
+  var passwords=adminRecord?[adminRecord.password,'admin123']:['admin123'];
   for(var i=0;i<passwords.length;i++){
-    _authState.attemptsThisSession++;
     try{
-      await fbAuth.signInWithEmailAndPassword(adminEmail,passwords[i]);
-      console.log('[authAsAdmin] R2 OK with pw['+i+']');
+      await fbAuth.signInWithEmailAndPassword(toEmail('admin'),passwords[i]);
+      console.log('[authAsAdmin] OK with password index '+i);
       _authState.cachedPw=passwords[i];
       return true;
     }catch(e){
-      _authState.lastCode=e.code||'';
-      _authState.lastError=e.message||'';
-      console.warn('[authAsAdmin] R2 pw['+i+'] failed:',_authState.lastCode);
-      if(_authState.lastCode.indexOf('too-many')>-1||_authState.lastCode.indexOf('quota-exceeded')>-1){
-        _authState.rateLimited=true;
-        return false;
-      }
+      console.warn('[authAsAdmin] Failed with password index '+i+':',e.message);
     }
   }
-
-  // === ROUND 3: Create admin account if it doesn't exist ===
-  console.warn('[authAsAdmin] R3: Trying createUser...');
-  try{
-    await fbAuth.createUserWithEmailAndPassword(adminEmail,passwords[0]||'admin123');
-    console.log('[authAsAdmin] R3: Created admin account OK');
-    _authState.cachedPw=passwords[0]||'admin123';
-    return true;
-  }catch(createErr){
-    console.warn('[authAsAdmin] R3 createUser failed:',createErr.code||createErr.message);
-    if(createErr.code!=='auth/email-already-in-use'){
-      _authState.lastCode=createErr.code||'';
-      _authState.lastError=createErr.message||'';
-    }
+  console.error('[authAsAdmin] ALL passwords failed!');
+  // If all auto-attempts failed, show password dialog for manual entry
+  if(!window._authAskShown && !forceFresh){
+    window._authAskShown=true;
+    showCloudPasswordDialog(_authState.lastCode||'auth/invalid-credential',_authState.lastError||'All passwords failed');
   }
-
-  console.error('[authAsAdmin] ALL FAILED ('+_authState.attemptsThisSession+' attempts, last: '+_authState.lastCode+')');
-
-  // === ROUND 4: User-provided password (from dialog) ===
-  if(typeof window._authAsAdmin_userPw==='string'&&window._authAsAdmin_userPw){
-    try{
-      await fbAuth.signOut();
-      await new Promise(function(r){setTimeout(r,200);});
-      await fbAuth.signInWithEmailAndPassword(adminEmail,window._authAsAdmin_userPw);
-      console.log('[authAsAdmin] R4: User password worked!');
-      var ar2=DB.admins.find(function(a){return a.username==='admin';});
-      if(ar2){ar2.password=window._authAsAdmin_userPw;}
-      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-      _authState.cachedPw=window._authAsAdmin_userPw;
-      window._authAsAdmin_userPw=null;
-      return true;
-    }catch(e5){
-      console.warn('[authAsAdmin] R4 failed:',e5.code||e5.message);
-      _authState.lastCode=e5.code||'';
-      _authState.lastError=e5.message||'';
-      window._authAsAdmin_userPw=null;
-    }
-  }
-  // Show password dialog
-  if(!window._authAskShown){window._authAskShown=true;showCloudPasswordDialog(_authState.lastCode,_authState.lastError);}
   return false;
 }
 
@@ -1282,11 +1185,7 @@ async function submitCloudPassword(){
   if(errEl)errEl.style.display='none';
   try{
     var adminEmail=toEmail('admin');
-    // Reset rate-limit flag — user is manually entering password
-    _authState.rateLimited=false;
     _authState.cachedPw=null;
-    await fbAuth.signOut();
-    await new Promise(function(r){setTimeout(r,300);});
     await fbAuth.signInWithEmailAndPassword(adminEmail,pwVal);
     // SUCCESS! Save the password
     var ar=DB.admins.find(function(a){return a.username==='admin';});
@@ -1361,8 +1260,6 @@ function sanitizeForFirestore(obj){
 
 async function fbSaveCollection(collName,items,keyField){
   if(!firebaseReady)return {ok:false,error:'Firebase not ready'};
-  // ENSURE auth before ANY Firestore write — stale tokens cause silent failures
-  try{var authOk=await authAsAdmin();if(!authOk)return {ok:false,error:'Admin auth failed'};}catch(e){return {ok:false,error:'Auth error: '+e.message};}
   try{
     const batch=fbDB.batch();
     const chunkSize=400;
@@ -1383,25 +1280,7 @@ async function fbSaveCollection(collName,items,keyField){
     return {ok:true,count:saved};
   }catch(e){
     console.error('fbSaveCollection ERROR ('+collName+'):',e);
-    // If write fails, try ONE auth retry
-    try{
-      console.warn('[fbSaveCollection] Retrying '+collName+' after auth refresh...');
-      await authAsAdmin();
-      const batch2=fbDB.batch();
-      let saved2=0;
-      for(let i=0;i<items.length;i+=400){
-        const chunk=items.slice(i,i+400);
-        for(const item of chunk){
-          const docId=item[keyField]||item.id||item.username||item.num;
-          if(!docId)continue;
-          batch2.set(fbDB.collection(collName).doc(String(docId)),sanitizeForFirestore(item),{merge:true});
-          saved2++;
-        }
-        await batch2.commit();
-      }
-      console.log('[fbSaveCollection] Retry OK: '+collName+' ('+saved2+' docs)');
-      return {ok:true,count:saved2};
-    }catch(e2){console.error('[fbSaveCollection] Retry also failed for '+collName+':',e2);}
+    // Do NOT show toast for individual collection errors — saveDB handles the summary
     return {ok:false,error:e.message||String(e)};
   }
 }
@@ -2104,45 +1983,27 @@ async function loginForceSync(){
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Syncing...';}
   try{
     _initDone=false;
-    // FULL AUTH RESET: Reset rate-limit and clear cached state
-    console.log('[loginForceSync] Starting auth reset + cloud sync...');
-    _authState.rateLimited=false;
+    console.log('[loginForceSync] Starting cloud sync...');
     _authState.cachedPw=null;
     _authAskShown=false;
-    try{await fbAuth.signOut();}catch(e){}
-    await new Promise(function(r){setTimeout(r,500);});
-    // Use forceFresh=true — user explicitly clicked Sync, skip cached token
+    // Simple auth — just sign in with password
     var authOk=await authAsAdmin(true);
-    console.log('[loginForceSync] Auth result: '+(authOk?'SUCCESS':'FAILED')+' ('+_authState.lastCode+') user='+(fbAuth.currentUser?fbAuth.currentUser.email:'null'));
+    console.log('[loginForceSync] Auth: '+(authOk?'SUCCESS':'FAILED'));
     if(!authOk){
-      // Auth failed — show password dialog instead of scary toast
       _initDone=true;
       if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry';}
       if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
-      showCloudPasswordDialog(_authState.lastCode,_authState.lastError);
+      _authAskShown=false;
+      showCloudPasswordDialog('auth/invalid-credential','Could not sign in. Enter your password.');
       return;
     }
     let result=await loadDBFromFirestore();
     _initDone=true;
-    console.log('[loginForceSync] Load result: ok='+(result?result.ok:'?')+' loaded='+(result?result.loaded:0)+' failed='+(result?.failed?.length||0));
-    // If ALL collections failed, auth might have been stale — retry once with forceFresh
-    if(result&&result.failed&&result.failed.length>=8){
-      console.warn('[loginForceSync] Too many failures ('+result.failed.length+'), retrying with fresh auth...');
-      try{await fbAuth.signOut();}catch(e){}
-      await new Promise(function(r){setTimeout(r,500);});
-      _authState.cachedPw=null;
-      var retryOk=await authAsAdmin(true);
-      if(retryOk){
-        console.log('[loginForceSync] Retry auth SUCCESS, reloading...');
-        result=await loadDBFromFirestore();
-        console.log('[loginForceSync] Retry load: loaded='+(result?result.loaded:0)+' failed='+(result?.failed?.length||0));
-      }
-    }
-    // If ALL collections failed, auth is broken — show password dialog
+    console.log('[loginForceSync] Load: loaded='+(result?result.loaded:0)+' failed='+(result?.failed?.length||0));
+    // If ALL collections failed, show password dialog
     if(result&&result.failed&&result.failed.length>=10){
-      console.error('[loginForceSync] ALL collections failed ('+result.failed.length+'/13). Firestore error: '+(result.firstErrCode||'none')+' — showing password dialog');
       _authState.lastCode=result.firstErrCode||'permission-denied';
-      _authState.lastError=result.firstErrMsg||'All Firestore reads failed after auth';
+      _authState.lastError=result.firstErrMsg||'All Firestore reads failed';
       if(syncBtn){syncBtn.disabled=false;syncBtn.innerHTML='<span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry';}
       if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
       _authAskShown=false;
@@ -2918,84 +2779,51 @@ async function saveEmployee(){
   toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
   // Auto-sync to Google Sheet (Employees sheet)
   queueSheetSync(["Employees"]);
-  // CRITICAL FIX: Write directly to Firestore FIRST, then saveDB separately
-  // Do NOT let _syncBusy block the direct employee write
+  // Cloud sync in BACKGROUND (non-blocking) — matches reference file approach
   if(firebaseReady){
     (async function(){
+      _syncBusy=true;
       try{
-        // FIX: Use authAsAdmin() instead of hardcoded 'admin123'
         var adminOk=await authAsAdmin();
         if(!adminOk){
-          console.error('[saveEmployee] Cloud auth failed — employee saved locally only, will sync when auth is restored');
-          // Do NOT show scary toast — employee IS saved locally, cloud will sync later
+          toast('Cloud sync failed: Admin auth error. Employee saved locally only.','error',8000);
+          _syncBusy=false;
           return;
         }
-        // Directly write THIS employee to Firebase Firestore immediately
+        // 1. Write employee to Firestore
         var newEmp=DB.employees.find(function(e){return e.id===id;});
         if(newEmp){
-          var safeNewEmp=sanitizeForFirestore(newEmp);
-          console.log('[saveEmployee] Direct Firestore write for '+id+' — keys: '+Object.keys(safeNewEmp).join(', '));
-          var writeOk=false;
-          try{
-            await fbDB.collection('employees').doc(String(id)).set(safeNewEmp,{merge:true});
-            console.log('[saveEmployee] Employee '+id+' saved directly to Firebase Firestore');
-            writeOk=true;
-          }catch(writeErr){
-            // If full object fails, try minimal
-            console.warn('[saveEmployee] Full write failed for '+id+':',writeErr.message,'— trying minimal...');
-            var minimalNew={id:id,name:name,password:empPw,mobile:mobile,status:'active'};
-            try{
-              await fbDB.collection('employees').doc(String(id)).set(minimalNew,{merge:true});
-              console.log('[saveEmployee] Minimal write OK for '+id);
-              writeOk=true;
-            }catch(minErr){
-              console.error('[saveEmployee] Minimal write ALSO failed for '+id+':',minErr);
-            }
+          var safeEmp=sanitizeForFirestore(newEmp);
+          try{await fbDB.collection('employees').doc(String(id)).set(safeEmp,{merge:true});}catch(e){
+            console.warn('[saveEmployee] Firestore write error:',e.message);
+            try{await fbDB.collection('employees').doc(String(id)).set({id:id,name:name,password:empPw,mobile:mobile,status:'active'},{merge:true});}catch(e2){}
           }
-          // VERIFY: Confirm employee is actually in cloud after write
-          if(writeOk){
-            try{
-              var verifyDoc=await fbDB.collection('employees').doc(String(id)).get();
-              if(!verifyDoc.exists){
-                console.error('[saveEmployee] VERIFICATION FAILED: '+id+' NOT found in cloud after write!');
-                writeOk=false;
-              }else{
-                console.log('[saveEmployee] VERIFIED: '+id+' exists in cloud with name='+verifyDoc.data().name);
-              }
-            }catch(verifyErr){
-              console.warn('[saveEmployee] Verification check error:',verifyErr.message);
-            }
-          }
-          if(!writeOk) return; // Don't create auth if Firestore write failed
         }
-        // Also create Firebase Auth account so employee can login from any device
-        var authEmail=toEmail(id);
+        // 2. Create Firebase Auth account (this signs in the new user briefly)
         try{
-          // Re-auth as admin before creating user
-          await authAsAdmin();
-          await fbAuth.createUserWithEmailAndPassword(authEmail,empPw);
-          console.log('Firebase Auth account created for '+id);
+          await fbAuth.createUserWithEmailAndPassword(toEmail(id),empPw);
+          console.log('[saveEmployee] Auth account created for '+id);
         }catch(authErr){
-          if(authErr.code==='auth/email-already-in-use'){
-            console.log('Firebase Auth account already exists for '+id);
-          }else{
-            console.warn('Firebase Auth create error for '+id+':',authErr.message);
-          }
+          if(authErr.code!=='auth/email-already-in-use')console.warn('[saveEmployee] Auth error:',authErr.message);
         }
-        // Sign back in as admin to restore admin context
-        await authAsAdmin();
-        // Also run full saveDB to sync everything else
-        // This may be queued if _syncBusy, but the employee was already written directly above
+        // 3. ALWAYS restore admin auth
+        try{await authAsAdmin();}catch(e){}
+        // 4. Full sync (clear _syncBusy first so saveDB can proceed)
+        _syncBusy=false;
         await saveDB();
         toast('Employee '+name+' synced to cloud! Phone login ready.','success');
       }catch(fbErr){
-        console.error('Firebase sync error for employee '+id+':',fbErr);
-        toast('Employee saved locally but NOT synced to cloud! Error: '+(fbErr.message||fbErr),'error',6000);
+        console.error('[saveEmployee] Cloud sync error:',fbErr);
+        toast('Employee saved locally. Cloud sync error: '+(fbErr.message||fbErr),'error',5000);
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+      }finally{
+        _syncBusy=false;
+        // Extra safety: ensure admin auth is restored
+        try{await authAsAdmin();}catch(e){}
       }
     })();
   }else{
-    toast('Employee saved locally only (no cloud connection). Employee cannot login from phone until cloud sync is fixed.','warning',6000);
+    toast('Employee saved locally only (no cloud connection).','warning',6000);
   }
   }catch(e){
     console.error('saveEmployee CRASH:',e);
@@ -8434,36 +8262,19 @@ async function initApp(){
   let fbLoadError=null;
   try{
     firebaseReady=true;
-    // CRITICAL: Authenticate as admin FIRST — Firebase Security Rules block reads without auth
+    // Authenticate as admin before loading — simple approach
     var firstAuthOk=false;
     try{firstAuthOk=await authAsAdmin();}catch(e){console.warn('Pre-load admin auth failed:',e);}
-    console.log('[initApp] Auth: '+(firstAuthOk?'SUCCESS':'FAILED')+' ('+_authState.attemptsThisSession+' attempts, err: '+_authState.lastCode+')');
+    console.log('[initApp] Auth: '+(firstAuthOk?'SUCCESS':'FAILED'));
     // Run sample data cleanup in background (don't block login)
     cleanupSampleDataFromCloud();
+    // Load from Firestore (auth is already done above)
     let loadResult=await loadDBFromFirestore();
-    // If auth succeeded but most collections failed, the token was likely stale.
-    // Retry ONCE with forceFresh (skip cached token, go straight to password sign-in).
-    if(firstAuthOk&&loadResult&&(loadResult.failed?.length>=8)){
-      console.warn('[initApp] Auth OK but '+loadResult.failed.length+' collections failed — retrying with fresh auth...');
-      try{await fbAuth.signOut();}catch(e){}
-      await new Promise(function(r){setTimeout(r,500);});
-      _authState.cachedPw=null;
-      var retryAuthOk=await authAsAdmin(true);
-      if(retryAuthOk){
-        console.log('[initApp] Retry auth SUCCESS, reloading from cloud...');
-        loadResult=await loadDBFromFirestore();
-      }else{
-        console.warn('[initApp] Retry auth also failed: '+_authState.lastCode);
-      }
-    }
     if(loadResult&&loadResult.failed&&loadResult.failed.length>0){
       fbLoadError='Failed to load: '+loadResult.failed.join(', ')+(loadResult.error?' ('+loadResult.error+')':'');
-      // If ALL collections failed, the password is likely wrong — show dialog
+      // If ALL collections failed, auth might be wrong — show Connect button
       if(loadResult.failed.length>=10){
         console.error('[initApp] ALL collections failed. Firestore error: '+(loadResult.firstErrCode||'none'));
-        _authState.lastCode=loadResult.firstErrCode||'permission-denied';
-        _authState.lastError=loadResult.firstErrMsg||'All Firestore reads failed';
-        // Don't block login — but make the Sync button prominent
       }
       // CRITICAL: If trainings/testResults/certificates failed to load from cloud,
       // restore from local backup so data isn't lost
