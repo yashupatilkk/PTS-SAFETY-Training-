@@ -561,6 +561,12 @@ select.form-control-sm{background:var(--sur2);}
       </div>
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
       <div id="loginFbStatus" style="display:none;font-size:11px;text-align:center;margin-bottom:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.05);"></div>
+      <div id="loginCloudBtns" style="display:none;margin-bottom:12px;">
+        <div style="display:flex;gap:8px;">
+          <button onclick="loginForceSync()" id="loginConnectBtn" style="flex:1;padding:9px;border-radius:10px;border:1px solid rgba(62,207,142,.3);background:rgba(62,207,142,.08);color:var(--green);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='rgba(62,207,142,.15)'" onmouseout="this.style.background='rgba(62,207,142,.08)'"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">cloud</span> Connect to Cloud</button>
+          <button onclick="dismissCloudStatus()" id="loginCloseBtn" style="flex:1;padding:9px;border-radius:10px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='rgba(255,255,255,.02)'"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">close</span> Use Local Data</button>
+        </div>
+      </div>
       <button class="btn-primary-full" id="loginBtn" onclick="doLogin()" disabled><span class="mat-ico" style="animation:spin 1s linear infinite">sync</span> Loading data...</button>
       <button class="link-btn" id="loginSyncBtn" style="margin-top:10px;display:none;width:100%;text-align:center;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);transition:all .2s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='rgba(255,255,255,.02)'" onclick="loginForceSync()"><span class="mat-ico" style="font-size:14px;vertical-align:middle;">refresh</span> Sync Data from Cloud & Retry</button>
 
@@ -2057,6 +2063,17 @@ async function doLogin(){
     var btn=document.getElementById("loginBtn");
     if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
   }
+}
+function dismissCloudStatus(){
+  var fb=document.getElementById('loginFbStatus');
+  if(fb)fb.style.display='none';
+  var cb=document.getElementById('loginCloudBtns');
+  if(cb)cb.style.display='none';
+  var sb=document.getElementById('loginSyncBtn');
+  if(sb)sb.style.display='none';
+  var statusBar=document.getElementById('loginStatusBar');
+  var statusText=document.getElementById('loginStatusText');
+  if(statusBar&&statusText){statusBar.classList.remove('error');statusText.textContent='Using local data — '+DB.employees.length+' employees loaded';}
 }
 async function showForgot(){
   // On employee mobile, offer to sync from cloud first
@@ -8514,13 +8531,15 @@ async function initApp(){
 
   // Show Firebase load status on login page — NEVER scare users with red errors
   const fbStatus=document.getElementById('loginFbStatus');
+  const cloudBtns=document.getElementById('loginCloudBtns');
   if(fbStatus){
     if(fbLoadError){
-      // If we have local employees, cloud error is non-critical — show amber, not red
       var hasLocalData=DB.employees.length>0||DB.trainings.length>0;
       fbStatus.style.display='block';
       fbStatus.style.color=hasLocalData?'var(--amber)':'var(--red)';
-      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">'+(hasLocalData?'cloud_queue':'cloud_off')+'</span> '+(hasLocalData?'Using local data ('+DB.employees.length+' employees). Cloud: '+(_authState.lastCode||'auth failed')+'. <b style="color:var(--amber)">Click Sync Data below to enter your cloud password.</b>':'Cloud not available ('+(_authState.lastCode||'error')+'). Enter cloud password to connect.');
+      fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">'+(hasLocalData?'cloud_queue':'cloud_off')+'</span> '+(hasLocalData?'Local data loaded ('+DB.employees.length+' employees). Cloud unavailable.':'Cloud not available ('+(_authState.lastCode||'error')+').');
+      // Show Connect / Close buttons when cloud failed
+      if(cloudBtns)cloudBtns.style.display='block';
     }else if(DB.employees.length===0){
       fbStatus.style.display='block';
       fbStatus.style.color='var(--amber)';
@@ -8529,6 +8548,8 @@ async function initApp(){
       fbStatus.style.display='block';
       fbStatus.style.color='var(--green)';
       fbStatus.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Ready — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings.';
+      // Hide buttons when cloud is connected
+      if(cloudBtns)cloudBtns.style.display='none';
     }
   }
   // Update status bar on login page
@@ -8547,7 +8568,7 @@ async function initApp(){
   _initDone=true;
   if(loginBtn){loginBtn.disabled=false;loginBtn.textContent='PTS SAFETY SIGN IN';}
   const syncBtn=document.getElementById('loginSyncBtn');
-  if(syncBtn)syncBtn.style.display='inline-block';
+  if(syncBtn)syncBtn.style.display=fbLoadError?'inline-block':'none';
 
   // Double-check: guarantee default admin always present
   if(!DB.admins.find(a=>a.username==="admin")){
@@ -8602,4 +8623,3 @@ document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
 </body>
-</html>
