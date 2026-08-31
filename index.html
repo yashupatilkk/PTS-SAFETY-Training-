@@ -1305,7 +1305,7 @@ function updateLoginFbStatus(extraMsg){
 async function forceSyncToCloud(){
   if(!firebaseReady){toast('Firebase not available','error');return;}
   // Test write permission first
-  try{await authAsAdmin();await fbDB.collection('config').doc('_syncTest').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_syncTest').delete();}catch(e){}}catch(we){
+  try{await authAsAdmin();if(fbAuth.currentUser)await fbAuth.currentUser.getIdToken(true);await fbDB.collection('config').doc('_syncTest').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_syncTest').delete();}catch(e){}}catch(we){
     toast('Firestore WRITE blocked! Fix: Firebase Console > Firestore Database > Rules > set: allow read, write: if request.auth != null;','error',15000);
     updateSyncUI('error');return;
   }
@@ -1361,7 +1361,7 @@ async function forceSyncAllEmployees(){
   if(!fsaOk){toast('Force sync FAILED: Admin Firebase auth failed!','error',8000);return {synced:0,failed:allEmps.length,authCreated:0,authExisted:0,authFailed:0,cloudCount:0,failedList:['Admin auth failed']};}
 
   // Step 0b: Test write permission
-  try{await fbDB.collection('config').doc('_permTest2').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_permTest2').delete();}catch(e){}}catch(we){
+  try{if(fbAuth.currentUser)await fbAuth.currentUser.getIdToken(true);await fbDB.collection('config').doc('_permTest2').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_permTest2').delete();}catch(e){}}catch(we){
     toast('Firestore WRITE blocked! Fix: Firebase Console > Firestore Database > Rules > set: allow read, write: if request.auth != null;','error',15000);
     return {synced:0,failed:allEmps.length,authCreated:0,authExisted:0,authFailed:0,cloudCount:0,failedList:['Write permission denied']};
   }
@@ -1656,7 +1656,7 @@ async function forceSyncFromCloud(){
     }
     // Save to localStorage only (don't push back — cloud is source of truth)
     try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-    renderAll();
+    updateBadges();if(typeof currentView!=='undefined'&&currentView)gotoView(currentView);
     _lastSyncTime=Date.now();
     updateSyncUI('idle');
     toast('Cloud data pulled! Page refreshed.','success',3000);
@@ -8275,7 +8275,7 @@ async function freshStartSite(){
   }else{
     toast('Fresh Start done! (local only)','success');
   }
-  renderAll();
+  updateBadges();if(typeof currentView!=='undefined'&&currentView)gotoView(currentView);
   toast(keepTrn?'Fresh Start! Kept training: "'+keepTrn.name+'". Everything else cleared.':'Fresh Start! All data cleared. Add new trainings now.','success',6000);
 }
 
@@ -8371,6 +8371,8 @@ async function initApp(){
         try{
           var bgAdminOk=await authAsAdmin();
           if(!bgAdminOk){console.warn('[bg] Admin auth failed — skipping background employee sync (non-critical)');return;}
+          // Force fresh auth token before testing writes
+          try{if(fbAuth.currentUser)await fbAuth.currentUser.getIdToken(true);}catch(te){console.warn('[bg] Token refresh error:',te.message);}
           // TEST WRITE PERMISSION FIRST — if blocked, tell user clearly
           var writeAllowed=false;
           try{await fbDB.collection('config').doc('_writeTest').set({t:Date.now()},{merge:true});writeAllowed=true;try{await fbDB.collection('config').doc('_writeTest').delete();}catch(e){}}catch(we){
