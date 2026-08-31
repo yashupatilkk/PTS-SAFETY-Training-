@@ -7390,13 +7390,31 @@ function buildSopPayload(){
 }
 function buildFeedbackPayload(){
   var company=DB.settings.companyName||"PTS SAFETY";
+  // IMSP 29 F05 format — each feedback = 1 row, columns match the form layout
   return (DB.feedbackForms||[]).map(function(fb){
     var qScores=[];for(var k in (fb.ratings||{})){var r=fb.ratings[k];if(r&&r.score)qScores.push(r.score);}
     var avgScore=qScores.length?Math.round(qScores.reduce(function(a,b){return a+b;},0)/qScores.length*10)/10:'—';
-    var row={Company:company,Date:fb.date||"",EmployeeID:fb.empId||"",EmployeeName:fb.empName||"",Department:fb.dept||"",Designation:fb.desig||"",Manager:fb.manager||"",Training:fb.training||"",Trainer:fb.trainer||"",Category:fb.category||""};
-    for(var i=0;i<FB_QUESTIONS.length;i++){var rk='q'+(i+1);var rd=(fb.ratings||{})[rk];row['Q'+(i+1)+' ('+FB_QUESTIONS[i].substring(0,30)+')']=rd?(rd.label+' ('+rd.score+'/5)'):'—';}
-    row['Overall Rating']=fb.overallLabel?(fb.overallLabel+' ('+fb.overallRating+'/5)'):'—';
-    row['Average Score']=avgScore+'/5';
+    var row={
+      'Company':company,
+      'Name':fb.empName||'',
+      'Employee ID':fb.empId||'',
+      'Department':fb.dept||'',
+      'Job Title':fb.desig||'',
+      'Date':fb.date||'',
+      'Manager':fb.manager||'',
+      'Training Course':fb.training||'',
+      'Trainer':fb.trainer||'',
+      'Category':fb.category||''
+    };
+    // Q1-Q10 with short column names matching IMSP 29 F05
+    for(var i=0;i<FB_QUESTIONS.length;i++){
+      var rk='q'+(i+1);var rd=(fb.ratings||{})[rk];
+      row['Q'+(i+1)]=rd?rd.label:'';
+      row['Q'+(i+1)+' Score']=rd?rd.score:'';
+    }
+    row['Overall Rating']=fb.overallLabel||'';
+    row['Overall Score']=fb.overallRating||'';
+    row['Average Score']=avgScore;
     row['What did you enjoy most?']=fb.enjoy||'';
     row['Suggestions']=fb.suggestions||'';
     return row;
