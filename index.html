@@ -1633,22 +1633,33 @@ async function testFirebaseConnection(){
   }catch(e){
     results.push('<span style="color:var(--red);">WRITE test doc: FAILED — '+e.message+'</span>');
   }
-  // Test 3: Direct REST API test (bypasses SDK)
+  // Test 3: Direct REST API test (bypasses SDK) — READ first
   try{
     var restToken=fbAuth.currentUser?await fbAuth.currentUser.getIdToken(true):null;
-    var restUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config/_restTest';
-    var restResp=await fetch(restUrl,{
+    // REST READ test
+    var readUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/employees';
+    var readResp=await fetch(readUrl,{headers:{'Authorization':'Bearer '+restToken}});
+    if(readResp.ok){
+      var readData=await readResp.json();
+      results.push('<span style="color:var(--green);">REST API READ: OK ('+readData.length+' docs)</span>');
+    }else{
+      var readErr=await readResp.text();
+      results.push('<span style="color:var(--red);">REST API READ: FAILED (status '+readResp.status+'): '+readErr.substring(0,200)+'</span>');
+    }
+    // REST WRITE test (auto-generated doc ID)
+    var writeUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config?documentId=_restTest';
+    var writeResp=await fetch(writeUrl,{
       method:'POST',
       headers:{'Authorization':'Bearer '+restToken,'Content-Type':'application/json'},
       body:JSON.stringify({fields:{t:{stringValue:'rest test '+Date.now()}}})
     });
-    if(restResp.ok){
-      results.push('<span style="color:var(--green);">REST API WRITE: OK (status '+restResp.status+')</span>');
+    if(writeResp.ok){
+      results.push('<span style="color:var(--green);">REST API WRITE: OK (status '+writeResp.status+')</span>');
       // Clean up
-      try{await fetch(restUrl.replace('_restTest','_restTest'),{method:'DELETE',headers:{'Authorization':'Bearer '+restToken}});}catch(e){}
+      try{await fetch('https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config/_restTest',{method:'DELETE',headers:{'Authorization':'Bearer '+restToken}});}catch(e){}
     }else{
-      var restErr=await restResp.text();
-      results.push('<span style="color:var(--red);">REST API WRITE: FAILED (status '+restResp.status+'): '+restErr.substring(0,200)+'</span>');
+      var writeErr=await writeResp.text();
+      results.push('<span style="color:var(--red);">REST API WRITE: FAILED (status '+writeResp.status+'): '+writeErr.substring(0,200)+'</span>');
     }
   }catch(e){
     results.push('<span style="color:var(--red);">REST API test error: '+e.message+'</span>');
