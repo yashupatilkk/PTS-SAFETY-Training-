@@ -1603,20 +1603,76 @@ async function testFirebaseConnection(){
   const el=document.getElementById('fbTestResult');
   if(!el){toast('Test element not found','error');return;}
   el.style.display='block';
-  el.innerHTML='<span style="color:var(--amber);">Testing Firebase connection...</span>';
+  el.innerHTML='<span style="color:var(--amber);">Testing Firebase connection (deep diagnostic)...</span>';
   const results=[];
+  var restToken=null;
+
   // Test 0: Auth status and token check
   try{
     if(fbAuth.currentUser){
-      var token=await fbAuth.currentUser.getIdToken(true);
+      restToken=await fbAuth.currentUser.getIdToken(true);
       results.push('<span style="color:var(--green);">Auth: Signed in as '+fbAuth.currentUser.email+'</span>');
-      results.push('<span style="color:var(--muted);">Token (first 30 chars): '+token.substring(0,30)+'...</span>');
+      results.push('<span style="color:var(--muted);">Token (first 30 chars): '+restToken.substring(0,30)+'...</span>');
+      // Decode JWT to check project claim and issued-at
+      try{
+        var parts=restToken.split('.');
+        var payload=JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+        results.push('<span style="color:var(--muted);">Token aud (project): '+payload.aud+'</span>');
+        results.push('<span style="color:var(--muted);">Token iat: '+new Date(payload.iat*1000).toLocaleString()+'</span>');
+        results.push('<span style="color:var(--muted);">Token exp: '+new Date(payload.exp*1000).toLocaleString()+'</span>');
+        results.push('<span style="color:var(--muted);">Token sub: '+payload.sub+'</span>');
+        results.push('<span style="color:var(--muted);">Token uid: '+(payload.user_id||'N/A')+'</span>');
+        if(payload.aud && payload.aud!=='pts-safety-training'){
+          results.push('<span style="color:var(--red);">⚠ TOKEN AUD MISMATCH! Token is for project "'+payload.aud+'" but your app uses "pts-safety-training"</span>');
+        }
+      }catch(decodeErr){
+        results.push('<span style="color:var(--red);">Token decode error: '+decodeErr.message+'</span>');
+      }
     }else{
       results.push('<span style="color:var(--red);">Auth: NOT signed in!</span>');
     }
   }catch(e){
     results.push('<span style="color:var(--red);">Auth error: '+e.message+'</span>');
   }
+
+  // Test 0b: Check if Firestore API is even enabled (unauthenticated — should return 401 or specific error, NOT 403)
+  try{
+    var apiCheckUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases';
+    var apiCheckResp=await fetch(apiCheckUrl);
+    var apiCheckText=await apiCheckResp.text();
+    if(apiCheckResp.status===401 || apiCheckResp.status===403){
+      // 401 = API exists but needs auth (GOOD — means API is enabled)
+      // 403 with different message might mean API is disabled
+      if(apiCheckText.indexOf('API has not been enabled')>-1 || apiCheckText.indexOf('accessNotConfigured')>-1){
+        results.push('<span style="color:var(--red);">⚠ FIRESTORE API DISABLED! Google Cloud Console → APIs & Services → Enable "Cloud Firestore API"</span>');
+      }else if(apiCheckResp.status===401){
+        results.push('<span style="color:var(--green);">Firestore API: Enabled (401 = needs auth, which is normal)</span>');
+      }else{
+        results.push('<span style="color:var(--amber);">Firestore API check (status '+apiCheckResp.status+'): '+apiCheckText.substring(0,120)+'</span>');
+      }
+    }else{
+      results.push('<span style="color:var(--green);">Firestore API: Responding (status '+apiCheckResp.status+')</span>');
+    }
+  }catch(e){
+    results.push('<span style="color:var(--red);">API check error: '+e.message+'</span>');
+  }
+
+  // Test 0c: REST call WITHOUT auth token — if this also returns 403 (not 401), rules are blocking unauth
+  try{
+    var noAuthUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config/_apiTest';
+    var noAuthResp=await fetch(noAuthUrl);
+    var noAuthText=await noAuthResp.text();
+    if(noAuthResp.status===401){
+      results.push('<span style="color:var(--green);">No-auth test: Returns 401 (API alive, needs auth) ✓</span>');
+    }else if(noAuthResp.status===403){
+      results.push('<span style="color:var(--amber);">No-auth test: Returns 403 — '+noAuthText.substring(0,100)+'</span>');
+    }else{
+      results.push('<span style="color:var(--amber);">No-auth test: Status '+noAuthResp.status+' — '+noAuthText.substring(0,100)+'</span>');
+    }
+  }catch(e){
+    results.push('<span style="color:var(--red);">No-auth test error: '+e.message+'</span>');
+  }
+
   // Test 1: Read from employees
   try{
     const snap=await fbDB.collection('employees').get();
@@ -1633,15 +1689,15 @@ async function testFirebaseConnection(){
   }catch(e){
     results.push('<span style="color:var(--red);">WRITE test doc: FAILED — '+e.message+'</span>');
   }
-  // Test 3: Direct REST API test (bypasses SDK) — READ first
+  // Test 3: Direct REST API test (bypasses SDK) — READ
   try{
-    var restToken=fbAuth.currentUser?await fbAuth.currentUser.getIdToken(true):null;
+    if(!restToken && fbAuth.currentUser) restToken=await fbAuth.currentUser.getIdToken(true);
     // REST READ test
     var readUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/employees';
     var readResp=await fetch(readUrl,{headers:{'Authorization':'Bearer '+restToken}});
     if(readResp.ok){
       var readData=await readResp.json();
-      results.push('<span style="color:var(--green);">REST API READ: OK ('+readData.length+' docs)</span>');
+      results.push('<span style="color:var(--green);">REST API READ: OK ('+(readData.documents?readData.documents.length:0)+' docs)</span>');
     }else{
       var readErr=await readResp.text();
       results.push('<span style="color:var(--red);">REST API READ: FAILED (status '+readResp.status+'): '+readErr.substring(0,200)+'</span>');
@@ -1664,7 +1720,7 @@ async function testFirebaseConnection(){
   }catch(e){
     results.push('<span style="color:var(--red);">REST API test error: '+e.message+'</span>');
   }
-  // Test 4: Write to employees collection (this is what fails most often)
+  // Test 4: Write to employees collection
   try{
     const batch=fbDB.batch();
     const ref=fbDB.collection('employees').doc('__test__'+Date.now());
@@ -1676,9 +1732,31 @@ async function testFirebaseConnection(){
   }catch(e){
     results.push('<span style="color:var(--red);">WRITE employees: FAILED — '+e.message+'</span>');
   }
-  // Test 5: Auth status
-  results.push('Auth user: '+(fbAuth.currentUser?fbAuth.currentUser.email:'NOT signed in'));
-  el.innerHTML=results.map(r=>'<div style="margin:2px 0;font-size:11px;">'+r+'</div>').join('');
+  // Summary + actionable advice
+  results.push('<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.2);font-size:11px;"><b style="color:var(--amber);">DIAGNOSIS:</b>');
+  var hasFail=results.some(function(r){return r.indexOf('FAILED')>-1;});
+  var hasApiDisabled=results.some(function(r){return r.indexOf('API DISABLED')>-1;});
+  var hasTokenMismatch=results.some(function(r){return r.indexOf('AUD MISMATCH')>-1;});
+  if(hasApiDisabled){
+    results.push('<span style="color:var(--red);">→ The Cloud Firestore API is DISABLED for your project.</span>');
+    results.push('<span style="color:var(--txt2);">→ Fix: Go to <b>console.cloud.google.com</b> → APIs & Services → Library → search "Cloud Firestore API" → <b>ENABLE</b></span>');
+  }else if(hasTokenMismatch){
+    results.push('<span style="color:var(--red);">→ Your auth token is for a DIFFERENT project!</span>');
+    results.push('<span style="color:var(--txt2);">→ The API key or auth config may be pointing to the wrong project.</span>');
+  }else if(hasFail){
+    results.push('<span style="color:var(--red);">→ Firestore returns 403 even though auth works and rules are open.</span>');
+    results.push('<span style="color:var(--txt2);">→ This is a PROJECT-LEVEL issue, NOT a rules issue.</span>');
+    results.push('<span style="color:var(--txt2);">→ Check these in order:</span>');
+    results.push('<span style="color:var(--txt2);">&nbsp;&nbsp;1. <b>console.cloud.google.com</b> → APIs & Services → Library → "Cloud Firestore API" = ENABLED?</span>');
+    results.push('<span style="color:var(--txt2);">&nbsp;&nbsp;2. <b>console.firebase.google.com</b> → Firestore Database → Is the database showing as ACTIVE?</span>');
+    results.push('<span style="color:var(--txt2);">&nbsp;&nbsp;3. <b>console.cloud.google.com</b> → IAM & Admin → App Engine → check if any Organization Policy blocks Firestore</span>');
+    results.push('<span style="color:var(--txt2);">&nbsp;&nbsp;4. <b>console.firebase.google.com</b> → App Check → Is it ENFORCED for Firestore? If yes, DISABLE it or register your app</span>');
+    results.push('<span style="color:var(--txt2);">&nbsp;&nbsp;5. Try: Firestore Database → delete database → recreate it → re-publish rules</span>');
+  }else{
+    results.push('<span style="color:var(--green);">→ All tests PASSED! Firestore is working correctly.</span>');
+  }
+  results.push('</div>');
+  el.innerHTML=results.map(function(r){return '<div style="margin:2px 0;font-size:11px;">'+r+'</div>';}).join('');
 }
 
 async function forceSyncFromCloud(){
