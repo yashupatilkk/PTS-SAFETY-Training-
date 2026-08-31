@@ -1290,8 +1290,25 @@ async function fbSaveSettings(){
   try{await fbDB.collection('config').doc('settings').set(DB.settings,{merge:true});}catch(e){console.warn('fbSaveSettings error:',e);}
 }
 
+// Update the login page Firebase status bar with current local data counts
+// Call this after any data change (add/delete employee, training, etc.)
+function updateLoginFbStatus(extraMsg){
+  var stEl=document.getElementById('loginFbStatus');
+  if(!stEl||stEl.style.display==='none')return;
+  var base='<span class="mat-ico" style="font-size:13px;">cloud_done</span> ';
+  var txt='Local: '+DB.employees.length+' employees, '+DB.trainings.length+' trainings';
+  if(extraMsg)txt+=' — '+extraMsg;
+  stEl.innerHTML=base+txt;
+  stEl.style.color='var(--amber)';
+}
+
 async function forceSyncToCloud(){
   if(!firebaseReady){toast('Firebase not available','error');return;}
+  // Test write permission first
+  try{await authAsAdmin();await fbDB.collection('config').doc('_syncTest').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_syncTest').delete();}catch(e){}}catch(we){
+    toast('Firestore WRITE blocked! Fix: Firebase Console > Firestore Database > Rules > set: allow read, write: if request.auth != null;','error',15000);
+    updateSyncUI('error');return;
+  }
   toast('Syncing all data to cloud...','info',2000);
   updateSyncUI('syncing');
   try{
@@ -1316,6 +1333,8 @@ async function forceSyncToCloud(){
       _lastSyncTime=Date.now();
       updateSyncUI('idle');
       toast('All data synced to cloud! ('+DB.employees.length+' employees)','success',3000);
+      // Update status with verified cloud count
+      try{var vSnap=await fbDB.collection('employees').get();updateLoginFbStatus('cloud: '+vSnap.size+' synced');}catch(e){}
     }
   }catch(e){
     updateSyncUI('error');
@@ -1340,6 +1359,12 @@ async function forceSyncAllEmployees(){
   // Step 0: Authenticate as admin first
   var fsaOk=await authAsAdmin();
   if(!fsaOk){toast('Force sync FAILED: Admin Firebase auth failed!','error',8000);return {synced:0,failed:allEmps.length,authCreated:0,authExisted:0,authFailed:0,cloudCount:0,failedList:['Admin auth failed']};}
+
+  // Step 0b: Test write permission
+  try{await fbDB.collection('config').doc('_permTest2').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_permTest2').delete();}catch(e){}}catch(we){
+    toast('Firestore WRITE blocked! Fix: Firebase Console > Firestore Database > Rules > set: allow read, write: if request.auth != null;','error',15000);
+    return {synced:0,failed:allEmps.length,authCreated:0,authExisted:0,authFailed:0,cloudCount:0,failedList:['Write permission denied']};
+  }
   
   // Step 1: Write each employee to Firestore individually
   for(var i=0;i<allEmps.length;i++){
@@ -2777,6 +2802,8 @@ async function saveEmployee(){
   try{renderEmployees();updateBadges();}catch(e){console.warn('renderEmployees error:',e);}
   saved=true;
   toast('Employee '+name+' saved! ('+DB.employees.length+' total employees)','success');
+  // Update login status bar immediately so count is correct
+  updateLoginFbStatus('saved locally');
   // Auto-sync to Google Sheet (Employees sheet)
   queueSheetSync(["Employees"]);
   // Cloud sync in BACKGROUND (non-blocking) — matches reference file approach
@@ -2787,6 +2814,7 @@ async function saveEmployee(){
         var adminOk=await authAsAdmin();
         if(!adminOk){
           toast('Cloud sync failed: Admin auth error. Employee saved locally only.','error',8000);
+          updateLoginFbStatus('auth failed — saved locally only');
           _syncBusy=false;
           return;
         }
@@ -2794,9 +2822,16 @@ async function saveEmployee(){
         var newEmp=DB.employees.find(function(e){return e.id===id;});
         if(newEmp){
           var safeEmp=sanitizeForFirestore(newEmp);
-          try{await fbDB.collection('employees').doc(String(id)).set(safeEmp,{merge:true});}catch(e){
+          var writeOk=false;
+          try{await fbDB.collection('employees').doc(String(id)).set(safeEmp,{merge:true});writeOk=true;}catch(e){
             console.warn('[saveEmployee] Firestore write error:',e.message);
-            try{await fbDB.collection('employees').doc(String(id)).set({id:id,name:name,password:empPw,mobile:mobile,status:'active'},{merge:true});}catch(e2){}
+            // Try minimal write as fallback
+            try{await fbDB.collection('employees').doc(String(id)).set({id:id,name:name,password:empPw,mobile:mobile,status:'active'},{merge:true});writeOk=true;}catch(e2){}
+          }
+          if(!writeOk){
+            // WRITE PERMISSION DENIED — show clear message
+            toast('Firestore WRITE blocked! Go to Firebase Console > Firestore > Rules and set: allow read, write: if request.auth != null;','error',12000);
+            updateLoginFbStatus('cloud WRITE blocked — check Firestore Rules');
           }
         }
         // 2. Create Firebase Auth account (this signs in the new user briefly)
@@ -2811,10 +2846,16 @@ async function saveEmployee(){
         // 4. Full sync (clear _syncBusy first so saveDB can proceed)
         _syncBusy=false;
         await saveDB();
+        // Verify cloud count and update status
+        try{
+          var vSnap=await fbDB.collection('employees').get();
+          updateLoginFbStatus('cloud: '+vSnap.size+' / local: '+DB.employees.length+' employees');
+        }catch(e){}
         toast('Employee '+name+' synced to cloud! Phone login ready.','success');
       }catch(fbErr){
         console.error('[saveEmployee] Cloud sync error:',fbErr);
-        toast('Employee saved locally. Cloud sync error: '+(fbErr.message||fbErr),'error',5000);
+        toast('Employee saved locally. Cloud error: '+(fbErr.message||fbErr),'error',5000);
+        updateLoginFbStatus('cloud error — saved locally only');
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
       }finally{
         _syncBusy=false;
@@ -3635,6 +3676,8 @@ async function deleteEmp(id){
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
   // Re-render immediately so UI reflects the deletion
   renderEmployees();renderTrainings();renderCertificates();renderQuizMenu();updateBadges();
+  // Update login status bar
+  updateLoginFbStatus('employee deleted');
 
   // === STEP 3: Add tombstones (local + cloud) for cross-device sync ===
   const tombPromises=[addToTombstone('employees',id)];
@@ -8309,7 +8352,7 @@ async function initApp(){
   }
 
   // === ENABLE LOGIN — handle auth-success vs auth-failure ===
-  if(firebaseReady && DB.employees.length>0){
+  if(firebaseReady){
     // ENABLE LOGIN FIRST — don't make users wait
     if(loadMsg)loadMsg.style.display='none';
     var fbSt=document.getElementById('loginFbStatus');
@@ -8323,15 +8366,25 @@ async function initApp(){
       if(fbSt){fbSt.style.display='block';fbSt.style.color='var(--green)';fbSt.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_done</span> Cloud connected — '+DB.employees.length+' employees, '+DB.trainings.length+' trainings.';}
       if(cloudBtnsEarly)cloudBtnsEarly.style.display='none';
       if(syncBtnBg)syncBtnBg.style.display='none';
-      // Background sync: push missing employees
+      // Background sync: test write permission + push missing employees
       (async function(){
         try{
           var bgAdminOk=await authAsAdmin();
           if(!bgAdminOk){console.warn('[bg] Admin auth failed — skipping background employee sync (non-critical)');return;}
+          // TEST WRITE PERMISSION FIRST — if blocked, tell user clearly
+          var writeAllowed=false;
+          try{await fbDB.collection('config').doc('_writeTest').set({t:Date.now()},{merge:true});writeAllowed=true;try{await fbDB.collection('config').doc('_writeTest').delete();}catch(e){}}catch(we){
+            console.error('[bg] WRITE TEST FAILED:',we.message);
+            toast('Firestore WRITE blocked! Your data saves locally but NOT to cloud. Fix: Firebase Console > Firestore Database > Rules > set: allow read, write: if request.auth != null;','error',15000);
+            var wtEl=document.getElementById('loginFbStatus');
+            if(wtEl){wtEl.style.color='var(--red)';wtEl.innerHTML='<span class="mat-ico" style="font-size:13px;">cloud_off</span> Cloud READ-ONLY — write permission denied. Data saved locally. <b>Fix Firestore Rules</b> to enable cloud save.';}
+            return;
+          }
+          // Write allowed — proceed with pushing missing employees
           var cs=await fbDB.collection('employees').get();var cids=new Set();cs.docs.forEach(function(d){cids.add(d.data().id);});
           var miss=DB.employees.filter(function(e){return e&&e.id&&!cids.has(e.id);});
           if(miss.length>0){console.warn('[bg] Pushing '+miss.length+' missing emp(s)...');
-          var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we){await authAsAdmin();}}}
+          var pok=0;for(var mi=0;mi<miss.length;mi++){var me=miss[mi];try{await fbDB.collection('employees').doc(String(me.id)).set(me,{merge:true});try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(me.id),me.password||'emp123');}catch(ae){}pok++;}catch(we2){await authAsAdmin();}}}
           var af=0;for(var ai=0;ai<DB.employees.length;ai++){var ae=DB.employees[ai];if(!ae||!ae.id)continue;try{await authAsAdmin();await fbAuth.createUserWithEmailAndPassword(toEmail(ae.id),ae.password||'emp123');af++;}catch(ae2){}}
           await authAsAdmin();
           var fs=await fbDB.collection('employees').get();var stEl=document.getElementById('loginFbStatus');
