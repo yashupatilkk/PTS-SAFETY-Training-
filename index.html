@@ -467,6 +467,43 @@ select.form-control-sm{background:var(--sur2);}
   .quick-actions{grid-template-columns:1fr 1fr;}
   .topbar-search input{width:140px;}
 }
+/* === CHAT / MESSAGING STYLES === */
+.chat-layout{display:flex;height:calc(100vh - 140px);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;background:var(--sur);}
+.chat-sidebar{width:300px;min-width:260px;border-right:1px solid var(--bdr);display:flex;flex-direction:column;background:var(--sur);}
+.chat-sidebar-head{padding:12px 14px;border-bottom:1px solid var(--bdr);font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;}
+.chat-conv-list{flex:1;overflow-y:auto;}
+.chat-conv-item{padding:12px 14px;border-bottom:1px solid var(--bdr);cursor:pointer;transition:background .15s;display:flex;gap:10px;align-items:flex-start;}
+.chat-conv-item:hover{background:var(--sur2);}
+.chat-conv-item.active{background:rgba(62,160,232,.1);border-left:3px solid var(--blue);}
+.chat-conv-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--amber),var(--amber-d));color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;}
+.chat-conv-info{flex:1;min-width:0;}
+.chat-conv-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.chat-conv-last{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+.chat-conv-time{font-size:10px;color:var(--muted);white-space:nowrap;flex-shrink:0;}
+.chat-conv-badge{background:var(--red);color:#fff;font-size:9px;padding:2px 6px;border-radius:99px;min-width:18px;text-align:center;}
+.chat-pane{flex:1;display:flex;flex-direction:column;min-width:0;}
+.chat-pane-head{padding:12px 16px;border-bottom:1px solid var(--bdr);font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;background:var(--sur);}
+.chat-pane-head .back-btn{display:none;cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid var(--bdr);background:var(--sur2);font-size:11px;}
+.chat-messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px;}
+.chat-bubble{max-width:70%;padding:10px 14px;border-radius:12px;font-size:12px;line-height:1.45;word-break:break-word;position:relative;}
+.chat-bubble.sent{align-self:flex-end;background:linear-gradient(135deg,var(--amber),var(--amber-d));color:#fff;border-bottom-right-radius:4px;}
+.chat-bubble.received{align-self:flex-start;background:var(--sur2);color:var(--txt);border-bottom-left-radius:4px;border:1px solid var(--bdr);}
+.chat-bubble .bubble-time{font-size:9px;opacity:.65;margin-top:4px;text-align:right;}
+.chat-bubble.sent .bubble-time{color:rgba(255,255,255,.7);}
+.chat-bubble.received .bubble-time{color:var(--muted);}
+.chat-input-area{padding:10px 14px;border-top:1px solid var(--bdr);display:flex;gap:8px;align-items:flex-end;background:var(--sur);}
+.chat-input-area textarea{flex:1;resize:none;border:1px solid var(--bdr);border-radius:10px;padding:10px 14px;font-size:12px;background:var(--sur2);color:var(--txt);font-family:inherit;max-height:100px;outline:none;}
+.chat-input-area textarea:focus{border-color:var(--amber);}
+.chat-send-btn{width:40px;height:40px;border-radius:50%;border:none;background:linear-gradient(135deg,var(--amber),var(--amber-d));color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .15s;}
+.chat-send-btn:hover{transform:scale(1.08);}
+.chat-empty{text-align:center;padding:60px 20px;color:var(--muted);}
+.chat-empty .mat-ico{font-size:48px;display:block;margin-bottom:12px;opacity:.4;}
+@media(max-width:768px){
+  .chat-layout{flex-direction:column;}
+  .chat-sidebar{width:100%;min-width:0;max-height:40vh;border-right:none;border-bottom:1px solid var(--bdr);}
+  .chat-pane-head .back-btn{display:inline-flex;}
+  .chat-bubble{max-width:85%;}
+}
 </style>
 </head>
 <body>
@@ -592,7 +629,7 @@ select.form-control-sm{background:var(--sur2);}
     </div>
     <div id="empNav" style="display:none;">
     <button class="nav-item" data-view="myprofile" onclick="gotoView('myprofile')"><span class="mat-ico">account_circle</span><span>My Profile</span></button>
-    <button class="nav-item" data-view="msgadmin" onclick="gotoView('msgadmin')"><span class="mat-ico">mail</span><span>Message to Admin</span><span class="nav-badge" id="nb-msgadmin" style="background:rgba(62,160,232,.15);color:var(--blue);display:none;">0</span></button>
+    <button class="nav-item" data-view="messages" onclick="gotoView('messages')"><span class="mat-ico">forum</span><span>Messages</span><span class="nav-badge" id="nb-msgemp" style="background:rgba(62,160,232,.15);color:var(--blue);display:none;">0</span></button>
     </div>
     <button class="nav-item" data-view="trainings" onclick="gotoView('trainings')"><span class="mat-ico">school</span><span>Trainings</span><span class="nav-badge" id="nb-trainings">0</span></button>
     <button class="nav-item" data-view="retraining" onclick="gotoView('retraining')"><span class="mat-ico">replay</span><span>Round 2 Training</span><span class="nav-badge" id="nb-retraining" style="background:rgba(240,136,62,.2);color:var(--orange)">0</span></button>
@@ -608,6 +645,7 @@ select.form-control-sm{background:var(--sur2);}
       <button class="nav-item" data-view="trainstatus" onclick="gotoView('trainstatus')"><span class="mat-ico">fact_check</span><span>Training Status</span></button>
     </div>
     <button class="nav-item" data-view="notifications" onclick="gotoView('notifications')"><span class="mat-ico">notifications</span><span>Notifications</span><span class="nav-badge" id="nb-notif" style="background:rgba(232,72,58,.2);color:var(--red)">3</span></button>
+    <button id="navMsgAdmin" class="nav-item" data-view="messages" onclick="gotoView('messages')"><span class="mat-ico">forum</span><span>Messages</span><span class="nav-badge" id="nb-messages" style="background:rgba(62,160,232,.15);color:var(--blue);display:none;">0</span></button>
     <div id="adminNav">
       <div class="nav-section-title">Admin</div>
       <button class="nav-item" data-view="settings" onclick="gotoView('settings')"><span class="mat-ico">settings</span><span>Settings</span></button>
@@ -676,6 +714,7 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-adminaccess"></div>
     <div class="view" id="view-myprofile"></div>
     <div class="view" id="view-msgadmin"></div>
+    <div class="view" id="view-messages"></div>
     <div class="view" id="view-settings"></div>
   </div>
 </div>
@@ -985,6 +1024,7 @@ let DB={
   },
   customQuestions:[],  // persisted custom questions from admin
   feedbackForms:[],   // post-test feedback from employees
+  messages:[],       // chat messages between admin and employees
   admins:[{username:"admin",password:"admin123",name:"Admin User",role:"admin"}]
 };
 
@@ -2255,6 +2295,7 @@ function startApp(){
   document.getElementById("roleBadge").textContent=isAdmin?"Admin":"Employee";
   document.getElementById("roleBadge").className="role-chip "+(isAdmin?"admin":"employee");
   document.getElementById("adminNav").style.display=isAdmin?"block":"none";
+  document.getElementById("navMsgAdmin").style.display=isAdmin?"flex":"none";
   document.getElementById("reportsNav").style.display=isAdmin?"block":"none";
   document.getElementById("empManageNav").style.display=isAdmin?"block":"none";
   document.getElementById("empNav").style.display=isAdmin?"none":"block";
@@ -2297,12 +2338,27 @@ function updateBadges(){
   var offCount=0;var empIdSet2=DB.employees.map(function(e){return e.id;});
   DB.trainings.forEach(function(t){var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});if(!enrolled.length)return;var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});enrolled.forEach(function(eid){var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;var r2Rec=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});if(!r2Rec)return;var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Rec.r2TrnId;});if(!r2Trn)return;var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});if(!r2Att.length)return;if(r2Att.some(function(r){return r.pass;}))return;offCount++;});});
   var offEl=document.getElementById("nb-offlinetraining");if(offEl)offEl.textContent=offCount;
-  // Employee: show unread admin replies badge on Message to Admin
+  // Employee: show unread Help Desk messages badge
   if(!isAdmin&&currentUser&&currentUser.id){
-    var adminRepliesUnread=DB.notifications.filter(function(n){return n.fromEmp===currentUser.id&&n.replies&&n.replies.some(function(r){return r.byId!==currentUser.id;});}).length;
-    var msgBadge=document.getElementById('nb-msgadmin');
-    if(msgBadge){msgBadge.style.display=adminRepliesUnread>0?'inline-flex':'none';msgBadge.textContent=adminRepliesUnread;}
+    var empMsgUnread=DB.messages.filter(function(m){return m.toId===currentUser.id&&!m.read;}).length;
+    var msgBadge=document.getElementById('nb-msgemp');
+    if(msgBadge){msgBadge.style.display=empMsgUnread>0?'inline-flex':'none';msgBadge.textContent=empMsgUnread;}
   }
+  // Messages badge for both admin and employee
+  var msgUnread=0;
+  if(DB.messages&&DB.messages.length){
+    if(isAdmin){
+      msgUnread=DB.messages.filter(function(m){return m.toId==='admin'&&!m.read;}).length;
+    }else if(currentUser&&currentUser.id){
+      msgUnread=DB.messages.filter(function(m){return m.toId===currentUser.id&&!m.read;}).length;
+    }
+  }
+  // Admin badge
+  var msgBadge=document.getElementById('nb-messages');
+  if(msgBadge){msgBadge.style.display=msgUnread>0?'inline-flex':'none';msgBadge.textContent=msgUnread;}
+  // Employee badge (in empNav)
+  var msgEmpBadge=document.getElementById('nb-msgemp');
+  if(msgEmpBadge){msgEmpBadge.style.display=msgUnread>0?'inline-flex':'none';msgEmpBadge.textContent=msgUnread;}
   document.getElementById("notifDot").style.display=unread>0?"block":"none";
 }
 function updateLoginClock(){
@@ -2333,10 +2389,10 @@ function gotoView(v){
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
-  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",msgadmin:"Message to Admin",trainings:"Training Management",retraining:"Round 2 Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
+  const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",messages:"Messages",trainings:"Training Management",retraining:"Round 2 Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,trainings:renderTrainings,retraining:renderRetraining,offlinetraining:renderOfflineTraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,messages:renderMessages,trainings:renderTrainings,retraining:renderRetraining,offlinetraining:renderOfflineTraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   if(v==="dashboard"&&isAdmin){var ds=document.getElementById("view-dashboard");var ah=getBSCAuditHTML();if(ah&&ds){var oldSlot=ds.querySelector(".bsc-audit-slot");if(oldSlot)oldSlot.remove();var wrapper=document.createElement("div");wrapper.className="bsc-audit-slot";wrapper.innerHTML=ah;ds.appendChild(wrapper);}}
   closeSidebar();
@@ -3324,7 +3380,7 @@ function renderMyProfile(){
   h+='<div style="font-size:12px;color:var(--muted);margin-top:4px;">'+emp.dept+' · '+emp.desig+' · '+emp.shift+'</div>';
   h+='<div style="font-size:12px;color:var(--muted);">'+emp.mobile+(emp.location?' · '+emp.location:'')+'</div>';
   h+='<span class="badge badge-'+(emp.status==='active'?'active':'danger')+'" style="margin-top:6px;">'+emp.status+'</span></div>';
-  h+='<button class="btn btn-amber" onclick="gotoView(\'msgadmin\')"><span class="mat-ico">mail</span> Message Admin</button>';
+  h+='<button class="btn btn-amber" onclick="gotoView(\'messages\')"><span class="mat-ico">forum</span> Message Admin</button>';
   h+='</div>';
   // Summary stats
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px;">';
@@ -3391,7 +3447,7 @@ function renderMyProfile(){
       h+='<div style="font-size:10px;color:var(--muted);margin-top:4px;">'+n.time+'</div>';
       h+='</div>';
     });
-  }else{h+='<div style="text-align:center;color:var(--muted);padding:16px;font-size:12px;">You have not sent any messages yet. <a href="#" onclick="gotoView(\'msgadmin\');return false;" style="color:var(--amber);">Send one now</a>.</div>';}
+  }else{h+='<div style="text-align:center;color:var(--muted);padding:16px;font-size:12px;">You have not sent any messages yet. <a href="#" onclick="gotoView(\'messages\');return false;" style="color:var(--amber);">Send one now</a>.</div>';}
   h+='</div>'; // end tab-messages
   h+='</div>'; // end tab container
   document.getElementById('view-myprofile').innerHTML=h;
@@ -3427,124 +3483,355 @@ function uploadMyPhoto(){
 }
 
 /* ============================================================
-   EMPLOYEE: MESSAGE TO ADMIN
+   MESSAGES — HELP DESK STYLE CHAT (Admin & Employee)
 ============================================================ */
-function renderEmpMsgAdmin(){
-  if(isAdmin||!currentUser||!currentUser.id){document.getElementById('view-msgadmin').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Employee Only</h3><p>This page is for employees only.</p></div>';return;}
+var _chatOpenConvId=null; // currently open conversation
+var _chatMobileShowPane=false;
+
+function getConvId(id1,id2){
+  // Sort so admin|emp is always the same regardless of sender
+  var a=id1==='admin'?'admin':id1;
+  var b=id2==='admin'?'admin':id2;
+  return [a,b].sort().join('|');
+}
+function getConvMessages(convId){
+  return (DB.messages||[]).filter(function(m){return m.convId===convId;}).sort(function(a,b){return(a.timestamp||0)-(b.timestamp||0);});
+}
+function getConversationsForUser(){
+  var msgs=DB.messages||[];
+  var convMap={};
+  var myId=isAdmin?'admin':(currentUser?currentUser.id:'');
+  msgs.forEach(function(m){
+    if(!m.convId)return;
+    if(!convMap[m.convId])convMap[m.convId]={convId:m.convId,lastMsg:m,lastTime:m.timestamp||0,unread:0,otherId:'',otherName:''};
+    var c=convMap[m.convId];
+    if((m.timestamp||0)>c.lastTime){c.lastMsg=m;c.lastTime=m.timestamp||0;}
+    // Determine the other person in this conversation
+    if(m.fromId!==myId){c.otherId=m.fromId;c.otherName=m.fromName;}
+    if(m.toId!==myId){c.otherId=m.toId;c.otherName=m.toName;}
+    // Count unread (messages sent TO me that I haven't read)
+    if(m.toId===myId&&!m.read)c.unread++;
+  });
+  // Convert to array and sort by last message time descending
+  return Object.values(convMap).sort(function(a,b){return b.lastTime-a.lastTime;});
+}
+function renderMessages(){
+  var view=document.getElementById('view-messages');
+  if(!currentUser){view.innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Login Required</h3></div>';return;}
+  _chatOpenConvId=null;
+  _chatMobileShowPane=false;
+  if(isAdmin){
+    renderAdminMessages(view);
+  }else{
+    renderEmployeeMessages(view);
+  }
+}
+function renderAdminMessages(view){
+  var convs=getConversationsForUser();
+  // Find employee data for names
+  var empMap={};
+  DB.employees.forEach(function(e){empMap[e.id]=e;});
+  // Also include conversations from notifications (legacy)
+  var legacyConvIds={};
+  DB.notifications.forEach(function(n){
+    if(n.fromEmp&&n.fromEmp!=='admin'){
+      var cid=getConvId('admin',n.fromEmp);
+      if(!legacyConvIds[cid]&&!convs.find(function(c){return c.convId===cid;})){
+        var emp=empMap[n.fromEmp];
+        legacyConvIds[cid]={convId:cid,otherId:n.fromEmp,otherName:n.fromEmpName||(emp?emp.name:n.fromEmp),lastMsg:n,lastTime:n.timestamp||Date.now(),unread:n.read?0:1,legacy:true};
+      }
+    }
+  });
+  var allConvs=convs.concat(Object.values(legacyConvIds)).sort(function(a,b){return b.lastTime-a.lastTime;});
+  var h='<div class="chat-layout" id="chatLayout">';
+  // Left sidebar: conversation list
+  h+='<div class="chat-sidebar" id="chatSidebar">';
+  h+='<div class="chat-sidebar-head"><span class="mat-ico">forum</span> Messages</div>';
+  h+='<div class="chat-conv-list" id="chatConvList">';
+  if(allConvs.length===0){
+    h+='<div class="chat-empty"><span class="mat-ico">forum</span><p>No conversations yet</p><p style="font-size:11px;margin-top:4px;">Messages from employees will appear here</p></div>';
+  }else{
+    allConvs.forEach(function(c,idx){
+      var initial=(c.otherName||'?').charAt(0).toUpperCase();
+      var lastText=c.legacy?c.lastMsg.msg:c.lastMsg.text;
+      if(!lastText)lastText='';
+      if(lastText.length>40)lastText=lastText.substring(0,40)+'...';
+      var timeStr=formatMsgTime(c.lastTime);
+      h+='<div class="chat-conv-item'+(idx===0?' active':'')+'" data-conv="'+c.convId+'" onclick="openChatConv(\''+c.convId+'\',\''+escHtml(c.otherName||'')+'\',\''+escHtml(c.otherId||'')+'\')"' + (c.otherId && !c.legacy ? ' oncontextmenu="event.preventDefault();"' : '') + '>';
+      h+='<div class="chat-conv-avatar">'+initial+'</div>';
+      h+='<div class="chat-conv-info"><div class="chat-conv-name">'+escHtml(c.otherName||'Unknown')+'</div><div class="chat-conv-last">'+escHtml(lastText)+'</div></div>';
+      h+='<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;"><span class="chat-conv-time">'+timeStr+'</span>';
+      if(c.unread>0)h+='<span class="chat-conv-badge">'+c.unread+'</span>';
+      h+='</div></div>';
+    });
+  }
+  h+='</div></div>'; // end chat-sidebar, chat-conv-list
+  // Right pane: chat area (empty until conversation selected)
+  h+='<div class="chat-pane" id="chatPane">';
+  h+='<div class="chat-pane-head"><button class="back-btn" onclick="goBackToConvList()"><span class="mat-ico" style="font-size:16px;">arrow_back</span> Back</button><span class="mat-ico">chat</span> <span id="chatPaneTitle">Select a conversation</span></div>';
+  h+='<div class="chat-messages" id="chatMessages">';
+  h+='<div class="chat-empty"><span class="mat-ico">chat_bubble_outline</span><p>Choose a conversation from the left to start chatting</p></div>';
+  h+='</div>';
+  h+='<div class="chat-input-area" id="chatInputArea" style="display:none;">';
+  h+='<textarea id="chatMsgInput" rows="1" placeholder="Type a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" oninput="autoResizeTextarea(this)"></textarea>';
+  h+='<button class="chat-send-btn" onclick="sendChatMessage()"><span class="mat-ico">send</span></button>';
+  h+='</div>';
+  h+='</div>'; // end chat-pane
+  h+='</div>'; // end chat-layout
+  view.innerHTML=h;
+  // Auto-open: pending conversation (from quick msg button) or first conversation
+  if(_pendingOpenConv){
+    openChatConv(_pendingOpenConv.convId, _pendingOpenConv.otherName, _pendingOpenConv.otherId);
+    _pendingOpenConv=null;
+  }else if(allConvs.length>0){
+    var first=allConvs[0];
+    openChatConv(first.convId, first.otherName||'', first.otherId||'');
+  }
+}
+function renderEmployeeMessages(view){
+  // Employee sees a direct chat with admin
   var empId=currentUser.id;
   var empName=currentUser.name;
-  var sentMsgs=DB.notifications.filter(function(n){return n.fromEmp===empId;});
-  var h='<div class="section-header"><div class="section-title">Message to <span>Admin</span></div></div>';
-  // Compose box
-  h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:18px;margin-bottom:18px;">';
-  h+='<div style="font-weight:700;font-size:14px;margin-bottom:10px;"><span class="mat-ico" style="color:var(--amber);vertical-align:middle;">edit_note</span> Compose Message</div>';
-  h+='<textarea class="form-control-sm" id="empMsgText" rows="4" placeholder="Type your message to the admin here..." style="width:100%;resize:vertical;margin-bottom:10px;"></textarea>';
-  h+='<button class="btn btn-amber" onclick="sendEmpMsgToAdmin()"><span class="mat-ico">send</span> Send Message</button>';
+  var convId=getConvId('admin', empId);
+  _chatOpenConvId=convId;
+  // Mark all admin messages as read
+  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId===empId&&!m.read)m.read=true;});
+  saveDB();
+  var msgs=getConvMessages(convId);
+  var h='<div class="chat-layout" id="chatLayout">';
+  // No sidebar for employee — full chat with Admin
+  h+='<div class="chat-pane" style="border:none;">';
+  h+='<div class="chat-pane-head" style="gap:10px;">';
+  h+='<div class="chat-conv-avatar" style="width:32px;height:32px;font-size:14px;">A</div>';
+  h+='<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;">Admin</div><div style="font-size:10px;color:var(--green);display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;"></span> Online</div></div>';
+  h+='<span class="mat-ico" style="color:var(--muted);font-size:18px;">support_agent</span>';
   h+='</div>';
-  // Sent messages history
-  h+='<div style="font-size:13px;font-weight:700;margin-bottom:10px;">Sent Messages ('+sentMsgs.length+')</div>';
-  if(sentMsgs.length){
-    sentMsgs.slice(0,30).forEach(function(n){
-      h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:14px;margin-bottom:8px;">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;"><div style="font-size:12px;flex:1;"><b>'+n.msg+'</b></div><div style="font-size:10px;color:var(--muted);white-space:nowrap;margin-left:10px;">'+n.time+'</div></div>';
-      // Show admin replies
-      if(n.replies&&n.replies.length){
-        h+='<div style="margin-top:8px;border-top:1px solid var(--bdr);padding-top:8px;">';
-        n.replies.forEach(function(r){
-          var isAdminReply=(r.byId!==empId&&r.by!==empName);
-          h+='<div style="padding:6px 8px;margin-bottom:3px;border-radius:6px;font-size:11px;'+(isAdminReply?'background:rgba(255,176,32,.08);border-left:3px solid var(--amber);':'background:rgba(62,160,232,.08);border-left:3px solid var(--blue);')+'">';
-          h+='<b>'+(r.by||'')+'</b> <span style="color:var(--muted);">'+r.time+'</span><div style="margin-top:2px;">'+r.text+'</div></div>';
-        });
-        h+='</div>';
+  h+='<div class="chat-messages" id="chatMessages">';
+  if(msgs.length===0){
+    h+='<div class="chat-empty"><span class="mat-ico">chat_bubble_outline</span><p>No messages yet</p><p style="font-size:11px;margin-top:4px;">Send a message to Admin below</p></div>';
+  }else{
+    var lastDateEmp='';
+    msgs.forEach(function(m){
+      // Date separator
+      var msgDate=m.timestamp?new Date(m.timestamp).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'';
+      if(msgDate&&msgDate!==lastDateEmp){
+        h+='<div style="text-align:center;font-size:10px;color:var(--muted);padding:8px 0;"><span style="background:var(--sur2);padding:2px 10px;border-radius:99px;border:1px solid var(--bdr);">'+msgDate+'</span></div>';
+        lastDateEmp=msgDate;
       }
+      var isSent=m.fromId===empId;
+      h+='<div class="chat-bubble '+(isSent?'sent':'received')+'">';
+      h+=escHtml(m.text||'');
+      h+='<div class="bubble-time">'+formatMsgTime(m.timestamp)+'</div>';
       h+='</div>';
     });
-  }else{h+='<div style="text-align:center;color:var(--muted);padding:24px;font-size:12px;"><span class="mat-ico" style="font-size:32px;display:block;margin-bottom:8px;">outbox</span>No messages sent yet.</div>';}
-  document.getElementById('view-msgadmin').innerHTML=h;
+  }
+  h+='</div>';
+  h+='<div class="chat-input-area">';
+  h+='<textarea id="chatMsgInput" rows="1" placeholder="Type your message to Admin..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" oninput="autoResizeTextarea(this)"></textarea>';
+  h+='<button class="chat-send-btn" onclick="sendChatMessage()"><span class="mat-ico">send</span></button>';
+  h+='</div>';
+  h+='</div></div>';
+  view.innerHTML=h;
+  scrollChatToBottom();
+  updateBadges();
 }
-function sendEmpMsgToAdmin(){
-  var text=document.getElementById('empMsgText').value.trim();
-  if(!text){toast('Please type a message','error');return;}
-  var newNotif={id:genId('N'),msg:text,read:false,time:'Just now',icon:'mail',forEmp:'admin',fromEmp:currentUser.id,fromEmpName:currentUser.name};
-  DB.notifications.unshift(newNotif);
+function openChatConv(convId, otherName, otherId){
+  _chatOpenConvId=convId;
+  _chatMobileShowPane=true;
+  // Mark messages in this conv as read (admin reading employee messages)
+  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId==='admin'&&!m.read)m.read=true;});
   saveDB();
-  // CRITICAL FIX: Directly push this single notification to Firebase
-  // so admin can see it even if bulk saveDB() fails for employee auth
+  updateBadges();
+  // Highlight active conversation
+  document.querySelectorAll('.chat-conv-item').forEach(function(el){
+    el.classList.toggle('active', el.dataset.conv===convId);
+  });
+  // Update pane header
+  var titleEl=document.getElementById('chatPaneTitle');
+  if(titleEl)titleEl.textContent=otherName||'Chat';
+  // Show input area
+  var inputArea=document.getElementById('chatInputArea');
+  if(inputArea)inputArea.style.display='flex';
+  // Render messages
+  var msgs=getConvMessages(convId);
+  var msgContainer=document.getElementById('chatMessages');
+  if(!msgContainer)return;
+  if(msgs.length===0){
+    msgContainer.innerHTML='<div class="chat-empty"><span class="mat-ico">chat_bubble_outline</span><p>No messages yet. Start the conversation!</p></div>';
+  }else{
+    var h='';
+    var lastDate='';
+    msgs.forEach(function(m){
+      // Date separator
+      var msgDate=m.timestamp?new Date(m.timestamp).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'';
+      if(msgDate&&msgDate!==lastDate){
+        h+='<div style="text-align:center;font-size:10px;color:var(--muted);padding:8px 0;"><span style="background:var(--sur2);padding:2px 10px;border-radius:99px;border:1px solid var(--bdr);">'+msgDate+'</span></div>';
+        lastDate=msgDate;
+      }
+      var isSent=m.fromId==='admin';
+      h+='<div class="chat-bubble '+(isSent?'sent':'received')+'">';
+      h+=escHtml(m.text||'');
+      h+='<div class="bubble-time">'+formatMsgTime(m.timestamp)+'</div>';
+      h+='</div>';
+    });
+    msgContainer.innerHTML=h;
+  }
+  scrollChatToBottom();
+  // Mobile: hide sidebar, show pane
+  var sidebar=document.getElementById('chatSidebar');
+  var pane=document.getElementById('chatPane');
+  if(window.innerWidth<=768&&sidebar&&pane){
+    sidebar.style.display='none';
+    pane.style.display='flex';
+  }
+}
+function sendChatMessage(){
+  var input=document.getElementById('chatMsgInput');
+  if(!input)return;
+  var text=input.value.trim();
+  if(!text){toast('Please type a message','error');return;}
+  if(!_chatOpenConvId){
+    // For employee, convId is always admin|empId
+    if(!isAdmin&&currentUser){
+      _chatOpenConvId=getConvId('admin', currentUser.id);
+    }else{
+      toast('Select a conversation first','error');return;
+    }
+  }
+  var myId=isAdmin?'admin':currentUser.id;
+  var myName=isAdmin?'Admin':currentUser.name;
+  // Determine other person's ID and name from convId
+  var parts=_chatOpenConvId.split('|');
+  var otherId=parts[0]===myId?parts[1]:parts[0];
+  var otherName='';
+  if(otherId==='admin'){
+    otherName='Admin';
+  }else{
+    var emp=DB.employees.find(function(e){return e.id===otherId;});
+    otherName=emp?emp.name:otherId;
+  }
+  var now=Date.now();
+  var msg={
+    id:genId('MSG'),
+    convId:_chatOpenConvId,
+    fromId:myId,
+    fromName:myName,
+    toId:otherId,
+    toName:otherName,
+    text:text,
+    timestamp:now,
+    time:'Just now',
+    read:false
+  };
+  if(!DB.messages)DB.messages=[];
+  DB.messages.push(msg);
+  input.value='';
+  input.style.height='auto';
+  saveDB();
+  // Push to Firebase directly for real-time feel
   if(firebaseReady){
     (async function(){
       try{
-        // Try writing as current user first
-        await fbDB.collection('notifications').doc(String(newNotif.id)).set(sanitizeForFirestore(newNotif),{merge:true});
-        console.log('[sendEmpMsgToAdmin] Notification pushed to cloud directly');
-      }catch(e){
-        // If current user lacks permission, try as admin
-        try{
-          await authAsAdmin();
-          await fbDB.collection('notifications').doc(String(newNotif.id)).set(sanitizeForFirestore(newNotif),{merge:true});
-          console.log('[sendEmpMsgToAdmin] Notification pushed to cloud via admin auth');
-          // Keep admin auth — do NOT switch back to employee auth
-          // (employee auth would break visibility handler and other cloud reads)
-        }catch(e2){
-          console.error('[sendEmpMsgToAdmin] Failed to push notification to cloud:',e2.message);
-        }
-      }
+        await authAsAdmin();
+        await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
+      }catch(e){console.warn('Direct message push failed:',e);}
     })();
   }
-  toast('Message sent to Admin successfully!','success',3000);
-  renderEmpMsgAdmin();
+  // Append bubble to chat
+  var msgContainer=document.getElementById('chatMessages');
+  if(msgContainer){
+    // Remove empty state if present
+    var emptyState=msgContainer.querySelector('.chat-empty');
+    if(emptyState)emptyState.remove();
+    var bubble=document.createElement('div');
+    bubble.className='chat-bubble sent';
+    bubble.innerHTML=escHtml(text)+'<div class="bubble-time">Just now</div>';
+    msgContainer.appendChild(bubble);
+    scrollChatToBottom();
+  }
+  // Re-render conversation list for admin
+  if(isAdmin){
+    // Update last message in sidebar without full re-render
+    updateConvListLastMsg(_chatOpenConvId, text, now);
+  }
   updateBadges();
+}
+function updateConvListLastMsg(convId, text, time){
+  var items=document.querySelectorAll('.chat-conv-item');
+  items.forEach(function(el){
+    if(el.dataset.conv===convId){
+      var lastEl=el.querySelector('.chat-conv-last');
+      var timeEl=el.querySelector('.chat-conv-time');
+      if(lastEl){var t=text.length>40?text.substring(0,40)+'...':text;lastEl.textContent=t;}
+      if(timeEl)timeEl.textContent=formatMsgTime(time);
+      // Move to top
+      var parent=el.parentNode;
+      parent.insertBefore(el, parent.firstChild);
+      el.classList.add('active');
+    }else{
+      el.classList.remove('active');
+    }
+  });
+}
+function scrollChatToBottom(){
+ setTimeout(function(){
+   var mc=document.getElementById('chatMessages');
+   if(mc)mc.scrollTop=mc.scrollHeight;
+ },50);
+}
+function autoResizeTextarea(el){
+  el.style.height='auto';
+  el.style.height=Math.min(el.scrollHeight,100)+'px';
+}
+function goBackToConvList(){
+  _chatOpenConvId=null;
+  _chatMobileShowPane=false;
+  var sidebar=document.getElementById('chatSidebar');
+  var pane=document.getElementById('chatPane');
+  if(sidebar)sidebar.style.display='';
+  if(pane)pane.style.display='';
+  // Re-render to reset state
+  renderMessages();
+}
+function formatMsgTime(ts){
+  if(!ts)return '';
+  var d=new Date(ts);
+  var now=new Date();
+  var diff=now-d;
+  if(diff<60000)return 'Just now';
+  if(diff<3600000)return Math.floor(diff/60000)+'m ago';
+  if(d.toDateString()===now.toDateString()){
+    return d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+  }
+  return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+}
+function escHtml(s){
+  if(!s)return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ============================================================
+   EMPLOYEE: MESSAGE TO ADMIN (LEGACY — now redirects to Help Desk)
+============================================================ */
+function renderEmpMsgAdmin(){
+  // Redirect to the unified Help Desk messaging system
+  gotoView('messages');
 }
 
 /* ============================================================
    ADMIN: QUICK MESSAGE TO EMPLOYEE FROM CARD
 ============================================================ */
+var _pendingOpenConv=null;
 function openQuickMsgToEmp(empId){
   var emp=DB.employees.find(function(e){return e.id===empId;});
   if(!emp){toast('Employee not found','error');return;}
-  // Show recent messages between admin and this employee
-  var recentMsgs=DB.notifications.filter(function(n){return (n.forEmp===empId)||(n.fromEmp===empId);}).slice(0,10);
-  var chatHTML='';
-  if(recentMsgs.length){
-    chatHTML+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;">Recent Messages</div>';
-    recentMsgs.forEach(function(n){
-      var isAdminMsg=n.forEmp===empId;
-      chatHTML+='<div style="padding:6px 8px;margin-bottom:4px;border-radius:6px;font-size:11px;'+(isAdminMsg?'background:rgba(255,176,32,.08);border-left:3px solid var(--amber);':'background:rgba(62,160,232,.08);border-left:3px solid var(--blue);')+'">';
-      chatHTML+='<b>'+(isAdminMsg?'Admin':(n.fromEmpName||emp.name))+'</b> <span style="color:var(--muted);font-size:9px;">'+n.time+'</span>';
-      chatHTML+='<div style="margin-top:2px;">'+n.msg+'</div>';
-      // Show replies
-      if(n.replies&&n.replies.length){
-        n.replies.forEach(function(r){
-          var isEmp=r.byId===empId||r.by===emp.name;
-          chatHTML+='<div style="padding:4px 6px;margin-top:3px;border-radius:4px;font-size:10px;'+(isEmp?'background:rgba(62,160,232,.1);':'background:var(--sur2);')+'">';
-          chatHTML+='<b>'+(r.by||'')+'</b> <span style="color:var(--muted);font-size:9px;">'+r.time+'</span><div style="margin-top:1px;">'+r.text+'</div></div>';
-        });
-      }
-      chatHTML+='</div>';
-    });
-  }else{chatHTML='<div style="text-align:center;color:var(--muted);padding:12px;font-size:11px;">No messages yet with '+emp.name+'</div>';}
-  var m='<div class="modal-accent"></div>';
-  m+='<div class="modal-head"><div class="modal-ico" style="background:rgba(62,160,232,.15)"><span class="mat-ico" style="color:var(--blue);font-size:22px;">chat</span></div>';
-  m+='<div><h2>Message '+emp.name+'</h2><div style="font-size:12px;color:var(--muted);">'+emp.id+' · '+emp.dept+'</div></div>';
-  m+='<button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>';
-  m+='<div class="modal-body">';
-  m+='<div style="max-height:250px;overflow-y:auto;margin-bottom:12px;">'+chatHTML+'</div>';
-  m+='<div class="form-group"><label class="form-label-sm">Type your message</label>';
-  m+='<textarea class="form-control-sm" id="quickMsgText" rows="3" placeholder="Type message to '+emp.name+'..." onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendQuickMsg(\''+empId+'\');}"></textarea>';
-  m+='</div></div>';
-  m+='<div class="modal-foot"><button class="btn btn-amber" onclick="sendQuickMsg(\''+empId+'\')"><span class="mat-ico">send</span> Send</button>';
-  m+='<button class="btn btn-outline" onclick="closeModal()">Close</button></div>';
-  openModal(m,'520px');
-  setTimeout(function(){var ta=document.getElementById('quickMsgText');if(ta)ta.focus();},200);
+  // Navigate to Help Desk Messages and auto-open this employee's conversation
+  _pendingOpenConv={convId:getConvId('admin',empId),otherName:emp.name,otherId:empId};
+  gotoView('messages');
 }
 function sendQuickMsg(empId){
-  var text=document.getElementById('quickMsgText').value.trim();
-  if(!text){toast('Please type a message','error');return;}
-  var emp=DB.employees.find(function(e){return e.id===empId;});
-  DB.notifications.unshift({id:genId('N'),msg:text,read:false,time:'Just now',icon:'mail',forEmp:empId,fromEmp:currentUser.id||'admin',fromEmpName:currentUser.name||'Admin'});
-  saveDB();
-  toast('Message sent to '+(emp?emp.name:empId),'success',3000);
-  openQuickMsgToEmp(empId); // refresh modal with new message
-  updateBadges();
+  // Legacy function — now handled by Help Desk sendChatMessage()
+  toast('Use the Messages panel to chat','info');
 }
 
 /* ============================================================
@@ -5287,51 +5574,109 @@ function submitQuiz(){
 function handleSubmitTestClick(){var allAnswered=quizState.answers.every(function(a){return a>=0;});var unanswered=quizState.answers.filter(function(a){return a<0;}).length;if(unanswered>0){toast(unanswered+' question(s) not answered. Please answer all before submitting.','error');return;}showFeedbackForm();}
 function showFeedbackForm(){if(!quizState.active)return;var overlay=document.getElementById('feedbackOverlay');if(overlay){overlay.style.display='flex';return;}
 var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
-var today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
-var empInfoRows=`<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);width:100px;"><b>Name:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.name||'—'}</td><td style="padding:4px 8px;font-size:12px;color:var(--muted);width:100px;"><b>Employee ID:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.id||'—'}</td></tr>
-<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Department:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.dept||'—'}</td><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Designation:</b></td><td style="padding:4px 8px;font-size:13px;">${currentUser.desig||'—'}</td></tr>
-<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Date:</b></td><td style="padding:4px 8px;font-size:13px;">${today}</td><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Manager:</b></td><td style="padding:4px 8px;font-size:13px;"><select id="fb_manager_select" onchange="var v=this.value;if(v==='__custom__'){document.getElementById('fb_manager').value='';document.getElementById('fb_manager').style.display='inline-block';document.getElementById('fb_manager').focus();}else{document.getElementById('fb_manager').value=v;document.getElementById('fb_manager').style.display=v?'none':'inline-block';}"><option value="">-- Select Manager --</option>${(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(trnMatch?trnMatch.manager||DB.settings.defaultManager:'')?' selected':'')+'>'+m+'</option>';}).join('')}<option value="__custom__">+ Custom...</option></select><input id="fb_manager" value="${trnMatch?trnMatch.manager||DB.settings.defaultManager||'':''}" placeholder="Type manager name" style="display:${(trnMatch&&trnMatch.manager)?'none':'inline-block'};margin-left:4px;padding:3px 6px;border:1px solid var(--bdr);border-radius:4px;background:var(--sur2);color:var(--txt);font-size:12px;width:140px;"></td></tr>
-<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Training:</b></td><td style="padding:4px 8px;font-size:13px;" colspan="3"><b style="color:var(--amber);">${quizState.training}</b></td></tr>
-<tr><td style="padding:4px 8px;font-size:12px;color:var(--muted);"><b>Trainer:</b></td><td style="padding:4px 8px;font-size:13px;" colspan="3">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td></tr>`;
-var likertRows=FB_QUESTIONS.map(function(q,i){return '<tr><td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--bdr);">'+(i+1)+'. '+q+'</td>'
-+FB_SCALE.map(function(label,li){var v=li+1;return '<td style="text-align:center;padding:6px 4px;border-bottom:1px solid var(--bdr);"><button class="fb_likert_'+i+' fb-likert-btn" data-val="'+v+'" onclick="setFbRating('+i+','+v+')" style="padding:4px 8px;border-radius:6px;border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:11px;cursor:pointer;transition:all .15s;min-width:60px;">'+label+'</button></td>';}).join('')
-+'</tr>';}).join('');
-var overallBtns=FB_OVERALL.map(function(label,i){var v=i+1;return '<button class="fb_overall_btn" data-val="'+v+'" onclick="setFbOverall('+v+')" style="padding:8px 16px;border-radius:8px;border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:12px;cursor:pointer;transition:all .15s;flex:1;text-align:center;">'+label+'</button>';}).join('');
-var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px;';
+var today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
+var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:60px;height:60px;" />';
+var managerHtml='<select id="fb_manager_select" style="padding:2px 4px;border:1px solid #999;font-size:10pt;font-family:Calibri,Arial,sans-serif;max-width:120px;" onchange="var v=this.value;if(v===\'__custom__\'){document.getElementById(\'fb_manager\').value=\'\';document.getElementById(\'fb_manager\').style.display=\'inline-block\';document.getElementById(\'fb_manager\').focus();}else{document.getElementById(\'fb_manager\').value=v;document.getElementById(\'fb_manager\').style.display=v?\'none\':\'inline-block\';}"><option value="">-- Select --</option>'+(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(trnMatch?trnMatch.manager||DB.settings.defaultManager:'')?' selected':'')+'>'+m+'</option>';}).join('')+'<option value="__custom__">+ Custom...</option></select><input id="fb_manager" value="'+(trnMatch?trnMatch.manager||DB.settings.defaultManager||'':'')+ '" placeholder="Type name" style="display:'+(trnMatch&&trnMatch.manager?'none':'inline-block')+';margin-left:4px;padding:2px 4px;border:none;border-bottom:1px solid #000;background:transparent;font-size:10pt;width:90px;font-family:Calibri,Arial,sans-serif;">';
+var likertRows='';for(var qi=0;qi<FB_QUESTIONS.length;qi++){var q=FB_QUESTIONS[qi];likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(qi+1)+'. '+q+'</td>';for(var si=0;si<5;si++){var sv=si+1;likertRows+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbRating('+qi+','+sv+')"><span class="fb_likert_'+qi+'" data-val="'+sv+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}likertRows+='</tr>';}
+var overallCircles='';for(var oi=0;oi<5;oi++){var ov=oi+1;overallCircles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbOverall('+ov+')"><span class="fb_overall_btn" data-val="'+ov+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}
+var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:10px;overflow-y:auto;';
 div.innerHTML=`
-<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r-lg);max-width:900px;width:100%;max-height:95vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
-  <div style="padding:16px 20px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--sur);z-index:2;border-radius:var(--r-lg) var(--r-lg) 0 0;">
-    <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,176,32,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span class="mat-ico" style="color:var(--amber);font-size:22px;">rate_review</span></div>
-    <div style="flex:1;"><div style="font-size:15px;font-weight:700;">IMSP 29 F05 — Training Feedback Form</div><div style="font-size:11px;color:var(--muted);">${quizState.training} — Required before results</div></div>
-  </div>
-  <div style="padding:16px 20px;">
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:12px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:14px;">warning</span> Feedback is mandatory — your test will be submitted after</div>
-    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px;">Employee Information</div>
-    <div class="table-wrap" style="margin-bottom:16px;"><table style="width:100%;border-collapse:collapse;">
-    ${empInfoRows}
-    </table></div>
-    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:8px;">Training Evaluation</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Please indicate your impressions of the items listed below.</div>
-    <div class="table-wrap" style="margin-bottom:16px;"><table style="width:100%;border-collapse:collapse;">
-    <thead><tr><th style="text-align:left;padding:6px 8px;font-size:11px;border-bottom:2px solid var(--amber);">Statement</th>${FB_SCALE.map(function(l){return '<th style="text-align:center;padding:6px 4px;font-size:10px;border-bottom:2px solid var(--amber);min-width:60px;">'+l+'</th>';}).join('')}</tr></thead>
-    <tbody>${likertRows}</tbody>
-    </table></div>
-    <div style="margin-bottom:16px;">
-      <label style="font-size:12px;font-weight:700;color:var(--txt);display:block;margin-bottom:8px;">How do you rate the training overall?</label>
-      <div style="display:flex;gap:6px;">${overallBtns}</div>
-    </div>
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px;font-weight:700;color:var(--txt);display:block;margin-bottom:8px;">What did you enjoy most about the training?</label>
-      <textarea id="fb_enjoy" rows="2" placeholder="Share what you liked..." style="width:100%;padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:13px;resize:vertical;font-family:inherit;"></textarea>
-    </div>
-    <div style="margin-bottom:8px;">
-      <label style="font-size:12px;font-weight:700;color:var(--txt);display:block;margin-bottom:8px;">Suggestions for improvement (Optional)</label>
-      <textarea id="fb_suggest" rows="2" placeholder="Any suggestions..." style="width:100%;padding:10px 14px;border-radius:var(--r-sm);border:1px solid var(--bdr);background:var(--sur2);color:var(--txt);font-size:13px;resize:vertical;font-family:inherit;"></textarea>
-    </div>
-  </div>
-  <div style="padding:14px 20px 20px;border-top:1px solid var(--bdr);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--sur);border-radius:0 0 var(--r-lg) var(--r-lg);">
-    <button class="btn btn-green" onclick="submitFeedbackAndQuiz()"><span class="mat-ico">check_circle</span> Submit Feedback & Complete Test</button>
-  </div>
+<div style="background:#fff;border:2px solid #000;width:100%;max-width:850px;font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;">
+<!-- HEADER TABLE: 3 cols ~17% | 53% | 30% -->
+<table style="width:100%;border-collapse:collapse;">
+<tr>
+  <td style="border:1px solid #000;width:17%;padding:6px;vertical-align:middle;text-align:center;" rowspan="4">${logoImg}</td>
+  <td style="border:1px solid #000;padding:4px 10px;vertical-align:middle;text-align:center;font-weight:bold;font-size:12px;letter-spacing:0.3px;">Prestige Office Management Private Limited</td>
+  <td style="border:1px solid #000;width:30%;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1px;color:#333;font-weight:bold;">Integrated Management System</td>
+  <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Issued Date:<br/><b>01/06/2024</b></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:11pt;text-decoration:underline;font-weight:bold;">Training Feedback Form</td>
+  <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Rev.<b>02</b></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;"></td>
+  <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>
+</tr>
+</table>
+<!-- EMPLOYEE INFORMATION: flat 3-col table matching docx -->
+<table style="width:100%;border-collapse:collapse;">
+<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>
+<tr>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">${currentUser.name||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;font-size:10pt;">${currentUser.dept||'\u2014'}</span></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.id||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;font-size:10pt;">${managerHtml}</span></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.desig||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;font-size:10pt;">${today}</span></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>
+  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>${quizState.training}</b></td>
+</tr>
+<tr>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>
+  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td>
+</tr>
+</table>
+<!-- INSTRUCTION -->
+<div style="padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;">Please indicate your impressions of the items listed below.</div>
+<!-- LIKERT TABLE -->
+<table style="width:100%;border-collapse:collapse;">
+<tr>
+  <td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Agree</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Agree</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>
+</tr>
+${likertRows}
+</table>
+<!-- OVERALL RATING -->
+<div style="padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;">How do you rate the training overall?</div>
+<table style="width:100%;border-collapse:collapse;">
+<tr>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>
+  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>
+</tr>
+<tr><td style="border:1px solid #000;"></td>${overallCircles}</tr>
+</table>
+<!-- OPEN QUESTIONS -->
+<table style="width:100%;border-collapse:collapse;margin-top:6px;">
+<tr><td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>
+<tr><td colspan="2" style="border:1px solid #000;padding:0;"><textarea id="fb_enjoy" rows="2" placeholder="Share what you liked..." style="width:100%;padding:6px 8px;border:none;background:#fff;color:#000;font-size:10pt;resize:vertical;font-family:Calibri,Arial,sans-serif;outline:none;"></textarea></td></tr>
+</table>
+<table style="width:100%;border-collapse:collapse;margin-top:4px;">
+<tr><td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">Suggestions for improvement:</td></tr>
+<tr><td colspan="2" style="border:1px solid #000;padding:0;"><textarea id="fb_suggest" rows="2" placeholder="Any suggestions..." style="width:100%;padding:6px 8px;border:none;background:#fff;color:#000;font-size:10pt;resize:vertical;font-family:Calibri,Arial,sans-serif;outline:none;"></textarea></td></tr>
+</table>
+<!-- SIGNATURES -->
+<table style="width:100%;border-collapse:collapse;margin-top:4px;">
+<tr>
+  <td style="border:1px solid #000;width:50%;padding:4px 10px 0 10px;"><div style="border-top:1px solid #000;margin-top:25px;font-size:8.5pt;text-align:center;color:#333;">Employee Signature &amp; Date</div></td>
+  <td style="border:1px solid #000;width:50%;padding:4px 10px 0 10px;"><div style="border-top:1px solid #000;margin-top:25px;font-size:8.5pt;text-align:center;color:#333;">Manager Signature &amp; Date</div></td>
+</tr>
+</table>
+<!-- FOOTER -->
+<div style="padding:4px 8px;font-size:8pt;color:#888;text-align:left;">Page 1 of 1</div>
+<!-- SUBMIT BUTTON -->
+<div style="padding:8px 10px 12px;text-align:center;border-top:1px solid #eee;">
+  <button onclick="submitFeedbackAndQuiz()" style="padding:10px 28px;background:#1a73e8;color:#fff;border:none;border-radius:4px;font-size:12pt;font-weight:bold;cursor:pointer;font-family:Calibri,Arial,sans-serif;">Submit Feedback &amp; Complete Test</button>
+</div>
 </div>
 `;
 document.body.appendChild(div);}
@@ -5351,8 +5696,8 @@ const FB_QUESTIONS=[
 ];
 const FB_SCALE=['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
 const FB_OVERALL=['Excellent','Good','Average','Poor','Very Poor'];
-function setFbRating(qIdx,val){_fbRatings[qIdx]=val;var btns=document.querySelectorAll('.fb_likert_'+qIdx);btns.forEach(function(b){b.style.background=parseInt(b.dataset.val)===val?'var(--amber)':'var(--sur2)';b.style.color=parseInt(b.dataset.val)===val?'#151515':'var(--txt)';b.style.borderColor=parseInt(b.dataset.val)===val?'var(--amber)':'var(--bdr)';});}
-function setFbOverall(val){_fbOverall=val;var btns=document.querySelectorAll('.fb_overall_btn');btns.forEach(function(b){b.style.background=parseInt(b.dataset.val)===val?'var(--amber)':'var(--sur2)';b.style.color=parseInt(b.dataset.val)===val?'#151515':'var(--txt)';b.style.borderColor=parseInt(b.dataset.val)===val?'var(--amber)':'var(--bdr)';});}
+function setFbRating(qIdx,val){_fbRatings[qIdx]=val;var circles=document.querySelectorAll('.fb_likert_'+qIdx);circles.forEach(function(c){if(parseInt(c.dataset.val)===val){c.style.background='#000';c.style.borderColor='#000';}else{c.style.background='#fff';c.style.borderColor='#000';}});}
+function setFbOverall(val){_fbOverall=val;var circles=document.querySelectorAll('.fb_overall_btn');circles.forEach(function(c){if(parseInt(c.dataset.val)===val){c.style.background='#000';c.style.borderColor='#000';}else{c.style.background='#fff';c.style.borderColor='#000';}});}
 // Default Drive config — overridden by DB.settings if admin changes them
 var DRIVE_FOLDER_ID='1Lko3eUwqrq_CnyvIiPLrz6_lAX_x_BMJ';
 var DRIVE_PDF_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwLyrt9-3dS7MroEH1BJ2kfwAbgqKF0IuzvaBGuOMTkPXVIMPJTt3r3ceyDqoP1VMVoIw/exec';
@@ -5361,30 +5706,25 @@ function getDriveFolder(){return (DB.settings.driveFolder||DRIVE_FOLDER_ID).trim
 var PTS_LOGO_B64='data:image/jpeg;base64,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';
 function generateFeedbackPDF_HTML(fb){
 var ratings=fb.ratings||{};
-// IMSP 29 F05 — always use official company name for this controlled document
 var companyName='Prestige Office Management Private Limited';
-// Format date as DD/MM/YYYY
 var fmtDate='';
 if(fb.date){var dp=fb.date.split('-');if(dp.length===3)fmtDate=dp[2]+'/'+dp[1]+'/'+dp[0];else fmtDate=fb.date;}
 var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:65px;height:65px;" />';
 var likertRows='';
 FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?r.score:0;
-var checks='';
-for(var c=0;c<5;c++){var v=c+1;var marked=v===sc?'<b style=\'font-size:14px;color:#000;\'>✓</b>':'<span style=\'color:#bbb;font-size:12px;\'>□</span>';
-checks+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;font-size:9px;">'+marked+'</td>';}
-likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+checks+'</tr>';});
-var overallChecks='';
-for(var c=0;c<5;c++){var v=c+1;var marked=v===fb.overallRating?'<b style=\'font-size:14px;color:#000;\'>✓</b>':'<span style=\'color:#bbb;font-size:12px;\'>□</span>';
-overallChecks+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;font-size:9px;">'+marked+'</td>';}
+var circles='';
+for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
+likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'</tr>';});
+var overallCircles='';
+for(var c=0;c<5;c++){var v=c+1;var filled=v===fb.overallRating;overallCircles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
 var html='<!DOCTYPE html><html><head><meta charset="UTF-8">';
 html+='<style>@page{size:A4;margin:6mm 8mm;}body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}</style>';
 html+='</head><body>';
 html+='<table style="border:2px solid #000;width:100%;">';
-// === HEADER: Logo | Company Name | Document Info ===
 html+='<tr>';
-html+='<td style="border:1px solid #000;width:75px;padding:4px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
+html+='<td style="border:1px solid #000;width:17%;padding:4px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
 html+='<td style="border:1px solid #000;padding:4px 8px;vertical-align:middle;text-align:center;font-weight:bold;font-size:13px;letter-spacing:0.5px;">'+companyName+'</td>';
-html+='<td style="border:1px solid #000;width:100px;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Document No:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>';
+html+='<td style="border:1px solid #000;width:30%;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>';
 html+='</tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:3px 8px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1.5px;color:#333;font-weight:bold;">Integrated Management System</td>';
@@ -5398,27 +5738,30 @@ html+='<tr>';
 html+='<td style="border:1px solid #000;"></td>';
 html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>';
 html+='</tr>';
-// === EMPLOYEE INFORMATION — 3-column layout matching original IMSP 29 F05 ===
-html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10pt;padding:4px 6px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
-// Row 1: Name | Employee ID | Department
+html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:15%;">Name:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.empName||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><table style="width:100%;border:none;border-collapse:collapse;"><tr><td style="border:none;padding:0;font-size:9.5pt;font-weight:bold;background:#f2f7fc;width:35%;">Employee ID:</td><td style="border:none;padding:0;">'+(fb.empId||'')+'</td></tr><tr><td style="border:none;padding:0;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">Department:</td><td style="border:none;padding:0;">'+(fb.dept||'')+'</td></tr></table></td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">'+(fb.empName||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;">'+(fb.dept||'')+'</span></td>';
 html+='</tr>';
-// Row 2: Job Title | Date | Manager
+html+='<tr>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.empId||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;">'+(fb.manager||'')+'</span></td>';
+html+='</tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>';
 html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.desig||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><table style="width:100%;border:none;border-collapse:collapse;"><tr><td style="border:none;padding:0;font-size:9.5pt;font-weight:bold;background:#f2f7fc;width:35%;">Date:</td><td style="border:none;padding:0;">'+fmtDate+'</td></tr><tr><td style="border:none;padding:0;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">Manager:</td><td style="border:none;padding:0;">'+(fb.manager||'')+'</td></tr></table></td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;">'+fmtDate+'</span></td>';
 html+='</tr>';
-// Row 3: Training Course | Trainer
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><table style="width:100%;border:none;border-collapse:collapse;"><tr><td style="border:none;padding:0;font-size:9.5pt;font-weight:bold;background:#f2f7fc;width:35%;">Trainer:</td><td style="border:none;padding:0;">'+(fb.trainer||'')+'</td></tr></table></td>';
+html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
 html+='</tr>';
-// === LIKERT SCALE ===
+html+='<tr>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>';
+html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.trainer||'')+'</td>';
+html+='</tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
@@ -5429,23 +5772,21 @@ html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>';
 html+='</tr>';
 html+=likertRows;
-// === OVERALL RATING ===
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>How do you rate the training overall?</b></td></tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;width:40%;"><b>How do you rate the training overall?</b></td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>';
 html+='</tr>';
-html+='<tr><td style="border:1px solid #000;"></td>'+overallChecks+'</tr>';
-// === OPEN QUESTIONS ===
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:0;"><table style="width:100%;border:none;"><tr><td style="border:none;padding:3px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;border-bottom:1px solid #000;">What did you enjoy most about the training?</td></tr><tr><td style="border:none;padding:5px 6px;font-size:9.5pt;min-height:35px;">'+(fb.enjoy||'')+'</td></tr></table></td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:0;"><table style="width:100%;border:none;"><tr><td style="border:none;padding:3px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;border-bottom:1px solid #000;">Suggestions for improvement:</td></tr><tr><td style="border:none;padding:5px 6px;font-size:9.5pt;min-height:35px;">'+(fb.suggestions||'')+'</td></tr></table></td></tr>';
-// === SIGNATURES ===
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:8px 10px 0 10px;"><table style="width:100%;border:none;"><tr><td style="border:none;width:50%;padding:0;"><div style="border-top:1px solid #000;margin-top:30px;font-size:8pt;text-align:center;color:#333;">Employee Signature</div></td><td style="border:none;width:50%;padding:0;"><div style="border-top:1px solid #000;margin-top:30px;font-size:8pt;text-align:center;color:#333;">Manager Signature</div></td></tr></table></td></tr>';
-// === FOOTER: Page 1 of 1 ===
-html+='<tr><td colspan="6" style="border:1px solid #000;border-top:1px solid #ccc;padding:4px 6px;font-size:7pt;color:#888;text-align:center;">IMSP 29 F05 Rev.02 | Page 1 of 1 | '+companyName+'</td></tr>';
+html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'</tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:35px;">'+(fb.enjoy||'')+'</td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">Suggestions for improvement:</td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:35px;">'+(fb.suggestions||'')+'</td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:8px 10px 0 10px;"><table style="width:100%;border:none;"><tr><td style="border:none;width:50%;padding:0;"><div style="border-top:1px solid #000;margin-top:30px;font-size:8pt;text-align:center;color:#333;">Employee Signature &amp; Date</div></td><td style="border:none;width:50%;padding:0;"><div style="border-top:1px solid #000;margin-top:30px;font-size:8pt;text-align:center;color:#333;">Manager Signature &amp; Date</div></td></tr></table></td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;border-top:1px solid #ccc;padding:4px 6px;font-size:7pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
 html+='</table>';
 html+='</body></html>';
 return html;}
@@ -7967,7 +8308,7 @@ function saveDB(){
   }catch(e){}
   // Step 2: Firebase sync — use CLEAN COPIES for upload, never modify in-memory DB
   // SKIP bulk sync for employees — they don't have write access to most collections.
-  // Employee-specific writes (like notifications) are handled directly in sendEmpMsgToAdmin().
+  // Employee-specific writes (like messages) are handled directly in sendChatMessage().
   if(firebaseReady && isAdmin){
     // Create tombstone-filtered copies ONLY for Firebase upload
     // This prevents deleted items from being resurrected in the cloud
@@ -8025,6 +8366,7 @@ function saveDB(){
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveCollection('feedbackForms',DB.feedbackForms||[],'id'),
+      fbSaveCollection('messages',DB.messages||[],'id'),
       fbSaveCollection('correctiveActions',DB.correctiveActions||[],'id'),
       fbSaveSettings()
     ]).then(results=>{
@@ -8088,6 +8430,7 @@ function loadDBFromLocal(){
       DB.customQuestions=saved.customQuestions;
     }
     if(saved.feedbackForms&&Array.isArray(saved.feedbackForms))DB.feedbackForms=saved.feedbackForms;
+    if(saved.messages&&Array.isArray(saved.messages))DB.messages=saved.messages;
     if(saved.correctiveActions&&Array.isArray(saved.correctiveActions))DB.correctiveActions=saved.correctiveActions;
     return true;
   }catch(e){console.warn("Local load failed:",e);return false;}
@@ -8171,6 +8514,7 @@ async function loadDBFromFirestore(){
       ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
       ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}],
       ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
+      ['messages','id',d=>{if(d.size>0)DB.messages=d.docs.map(x=>x.data());}],
       ['correctiveActions','id',d=>{if(d.size>0)DB.correctiveActions=d.docs.map(x=>x.data());}]
     ];
     var firstErrCode='';
