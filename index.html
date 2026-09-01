@@ -593,7 +593,7 @@ select.form-control-sm{background:var(--sur2);}
         </div>
       </div>
       <div class="checkbox-row">
-        <label class="checkbox-label"><input type="checkbox" id="rememberMe"> Remember me</label>
+        <!-- Remember me removed — no auto-login allowed -->
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
@@ -1863,7 +1863,7 @@ function startAutoSync(){
         fbSaveSettings()
       ];
       await Promise.all(syncPromises);
-      // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
+      // STEP 2: Admin pulls test results, certificates & messages from employees (merge, never overwrite)
       if(isAdmin){
         try{
           const fbTestSnap=await fbDB.collection('testResults').get();
@@ -1874,10 +1874,16 @@ function startAutoSync(){
           const fbCerts=fbCertSnap.docs.map(d=>d.data());
           let newCerts=0;
           fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
+          // Pull new messages from employees
+          const fbMsgSnap=await fbDB.collection('messages').get();
+          const fbMsgs=fbMsgSnap.docs.map(d=>d.data());
+          let newMsgs=0;
+          fbMsgs.forEach(fbM=>{if(!DB.messages.find(m=>m.id===fbM.id)){DB.messages.push(fbM);newMsgs++;}});
+          if(newMsgs){console.log('[AutoSync] Pulled '+newMsgs+' new message(s) from cloud');updateBadges();}
           // Reconcile training completed arrays from all testResults (source of truth)
           const trainingsUpdated=reconcileTrainingsFromResults()>0;
           // Save merged data to localStorage (don't re-push to avoid loop)
-          if(newTests||newCerts||trainingsUpdated){
+          if(newTests||newCerts||newMsgs||trainingsUpdated){
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
             if(typeof renderAll==='function')renderAll();
           }
@@ -2033,6 +2039,7 @@ async function doLogin(){
   var id=document.getElementById("loginId").value.trim();
   var pw=document.getElementById("loginPw").value;
   if(!id||!pw){toast("Please enter credentials","error");return;}
+  console.log('[doLogin] Attempt: loginType='+loginType+' id='+id+' _initDone='+_initDone+' employees='+DB.employees.length+' admins='+DB.admins.length);
   if(!_initDone){toast("Still loading...","info");return;}
   if(loginType==="admin"&&id.toUpperCase().startsWith("EMP")){setLoginType("employee");}
   if(loginType==="employee"&&(id.toLowerCase()==="admin")){setLoginType("admin");}
@@ -2042,7 +2049,26 @@ async function doLogin(){
     // FAST PATH: Check local DB first (instant, no network)
     if(loginType==="admin"){
       var admin=DB.admins.find(function(a){return a.username===id;});
-      if(!admin||admin.password!==pw){toast("Invalid admin credentials","error");return;}
+      if(!admin){toast("Admin username '"+id+"' not found","error");return;}
+      if(admin.password!==pw){
+        // If local password doesn't match, try Firebase Auth as fallback
+        // (handles case where password was changed in Firebase Console)
+        if(firebaseReady){
+          try{
+            console.log('[doLogin] Local admin pw mismatch, trying Firebase Auth...');
+            await fbAuth.signInWithEmailAndPassword(toEmail(id),pw);
+            // Firebase Auth succeeded — update local DB with correct password
+            admin.password=pw;
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            console.log('[doLogin] Firebase Auth OK, updated local password');
+          }catch(fbErr){
+            console.warn('[doLogin] Firebase Auth also failed:',fbErr.message);
+            toast("Invalid admin credentials","error");return;
+          }
+        }else{
+          toast("Invalid admin credentials","error");return;
+        }
+      }
       currentUser=Object.assign({},admin,{type:"admin"});isAdmin=true;
     }else{
       var empId=id.toUpperCase();
@@ -2077,7 +2103,23 @@ async function doLogin(){
       var nameOk=emp.name&&emp.name.trim().toLowerCase()===pwN.toLowerCase();
       var pwOk=emp.password&&emp.password===pwN;
       if(!nameOk&&!pwOk){
-        toast('Wrong credentials for '+emp.name+'. Use Name or Password.','error',5000);return;
+        // Fallback: try Firebase Auth with the typed password
+        if(firebaseReady){
+          try{
+            console.log('[doLogin] Employee local pw mismatch, trying Firebase Auth for '+empId+'...');
+            await fbAuth.signInWithEmailAndPassword(toEmail(empId),pwN);
+            // Firebase Auth succeeded — update local password and allow login
+            emp.password=pwN;
+            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+            console.log('[doLogin] Employee Firebase Auth OK, updated local password');
+            pwOk=true;
+          }catch(fbErr2){
+            console.warn('[doLogin] Employee Firebase Auth also failed:',fbErr2.message);
+          }
+        }
+        if(!pwOk){
+          toast('Wrong credentials for '+emp.name+'. Use Name or Password.','error',5000);return;
+        }
       }
       currentUser=Object.assign({},emp,{type:"employee"});isAdmin=false;
     }
@@ -2102,7 +2144,7 @@ async function doLogin(){
     }
     // LOGIN SUCCESS
     var safeUser=Object.assign({},currentUser);delete safeUser.password;
-    if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
+    // Remember me removed — no localStorage session saved
     startApp();
     // Sync Firebase Auth for employee in background
     // CRITICAL: After employee auth, re-auth as admin so visibility handler & sync work
@@ -2334,7 +2376,7 @@ function updateBadges(){
   });
   var r2El=document.getElementById("nb-retraining");if(r2El)r2El.textContent=r2Count;
   // Offline training badge
-  var offCount=0;var empIdSet2=DB.employees.map(function(e){return e.id;});
+  var offCount=0;
   DB.trainings.forEach(function(t){var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});if(!enrolled.length)return;var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});enrolled.forEach(function(eid){var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;var r2Rec=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});if(!r2Rec)return;var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Rec.r2TrnId;});if(!r2Trn)return;var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});if(!r2Att.length)return;if(r2Att.some(function(r){return r.pass;}))return;offCount++;});});
   var offEl=document.getElementById("nb-offlinetraining");if(offEl)offEl.textContent=offCount;
   // Employee: show unread Help Desk messages badge
@@ -3514,11 +3556,13 @@ function getConversationsForUser(){
   // Convert to array and sort by last message time descending
   return Object.values(convMap).sort(function(a,b){return b.lastTime-a.lastTime;});
 }
-function renderMessages(){
+async function renderMessages(){
   var view=document.getElementById('view-messages');
   if(!currentUser){view.innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Login Required</h3></div>';return;}
   _chatOpenConvId=null;
   _chatMobileShowPane=false;
+  // Pull latest messages from cloud before rendering
+  await pullMessagesFromCloud();
   if(isAdmin){
     renderAdminMessages(view);
   }else{
@@ -3594,8 +3638,21 @@ function renderEmployeeMessages(view){
   var convId=getConvId('admin', empId);
   _chatOpenConvId=convId;
   // Mark all admin messages as read
-  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId===empId&&!m.read)m.read=true;});
-  saveDB();
+  var markedAny=false;
+  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId===empId&&!m.read){m.read=true;markedAny=true;}});
+  // Lightweight save + cloud push for read status (NO full saveDB)
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  if(markedAny&&firebaseReady){
+    (async function(){
+      try{
+        await authAsAdmin();
+        var convMsgs=(DB.messages||[]).filter(function(m){return m.convId===convId&&m.toId===empId&&m.read;});
+        var batch=fbDB.batch();
+        convMsgs.forEach(function(m){batch.set(fbDB.collection('messages').doc(String(m.id)),{read:true},{merge:true});});
+        if(batch._ops.length)await batch.commit();
+      }catch(e){console.warn('[Chat] Emp read-status push error:',e);}
+    })();
+  }
   var msgs=getConvMessages(convId);
   var h='<div class="chat-layout" id="chatLayout">';
   // No sidebar for employee — full chat with Admin
@@ -3638,8 +3695,21 @@ function openChatConv(convId, otherName, otherId){
   _chatOpenConvId=convId;
   _chatMobileShowPane=true;
   // Mark messages in this conv as read (admin reading employee messages)
-  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId==='admin'&&!m.read)m.read=true;});
-  saveDB();
+  var markedAny=false;
+  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId==='admin'&&!m.read){m.read=true;markedAny=true;}});
+  // Lightweight save + cloud push for read status (NO full saveDB)
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  if(markedAny&&firebaseReady){
+    (async function(){
+      try{
+        if(!isAdmin)await authAsAdmin();
+        var convMsgs=(DB.messages||[]).filter(function(m){return m.convId===convId&&m.toId==='admin'&&m.read;});
+        var batch=fbDB.batch();
+        convMsgs.forEach(function(m){batch.set(fbDB.collection('messages').doc(String(m.id)),{read:true},{merge:true});});
+        if(batch._ops.length)await batch.commit();
+      }catch(e){console.warn('[Chat] Read-status push error:',e);}
+    })();
+  }
   updateBadges();
   // Highlight active conversation
   document.querySelectorAll('.chat-conv-item').forEach(function(el){
@@ -3726,14 +3796,23 @@ function sendChatMessage(){
   DB.messages.push(msg);
   input.value='';
   input.style.height='auto';
-  saveDB();
-  // Push to Firebase directly for real-time feel
+  // Lightweight save: localStorage only (NO full saveDB which triggers 12-collection sync)
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  // Push to Firebase directly — works for BOTH admin and employee
   if(firebaseReady){
     (async function(){
       try{
-        await authAsAdmin();
-        await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
-      }catch(e){console.warn('Direct message push failed:',e);}
+        // For admin, already authenticated. For employee, re-auth as admin to write.
+        if(isAdmin){
+          await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
+        }else{
+          await authAsAdmin();
+          await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
+          // Re-auth as employee so visibility handler works correctly
+          try{if(currentUser&&currentUser.password){await fbAuth.signInWithEmailAndPassword(toEmail(currentUser.id),currentUser.password);}}catch(reAuthErr){}
+        }
+        console.log('[Chat] Message pushed to cloud:',msg.id);
+      }catch(e){console.warn('[Chat] Direct message push failed:',e);}
     })();
   }
   // Append bubble to chat
@@ -3781,6 +3860,26 @@ function scrollChatToBottom(){
 function autoResizeTextarea(el){
   el.style.height='auto';
   el.style.height=Math.min(el.scrollHeight,100)+'px';
+}
+/* Pull new messages from Firestore and merge with local DB.messages */
+async function pullMessagesFromCloud(){
+  if(!firebaseReady)return 0;
+  try{
+    if(!isAdmin){try{await authAsAdmin();}catch(e){return 0;}}
+    var snap=await fbDB.collection('messages').get();
+    var cloudMsgs=snap.docs.map(function(d){return d.data();});
+    if(!cloudMsgs.length)return 0;
+    var localIds=new Set((DB.messages||[]).map(function(m){return m.id;}));
+    var newCount=0;
+    cloudMsgs.forEach(function(cm){
+      if(!localIds.has(cm.id)){DB.messages.push(cm);newCount++;}
+    });
+    if(newCount>0){
+      console.log('[Chat] Pulled '+newCount+' new message(s) from cloud');
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    }
+    return newCount;
+  }catch(e){console.warn('[Chat] pullMessagesFromCloud error:',e);return 0;}
 }
 function goBackToConvList(){
   _chatOpenConvId=null;
@@ -5397,7 +5496,8 @@ function submitQuiz(){
     if(pass&&!trnMatch.completed.includes(empId)){trnMatch.completed.push(empId);trnMatch.completedDates[empId]=today;}
   }
   updateBadges();
-  saveDB();
+  // Lightweight save: localStorage only (NO full saveDB — quiz result is pushed to Firebase directly below)
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
   // Force immediate Firebase save for test result so it's not lost
   if(firebaseReady){
     (async function(){
@@ -5517,7 +5617,10 @@ function submitQuiz(){
               }catch(e){console.warn('FB auto-escalation:',e);}
             })();
           }
-          saveDB();
+          // Lightweight save: localStorage only (BSC data is pushed to Firebase directly above)
+          try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+          // Trigger full sync in background for admin (non-blocking)
+          if(isAdmin&&firebaseReady){try{saveDB();}catch(e){}}
           console.log('[BSC Auto-Escalation] failCnt='+failCnt+' eid='+eid+' trn='+trnName+' CA total='+(DB.correctiveActions||[]).length);
         })();
         updateBadges();
@@ -8775,12 +8878,9 @@ async function freshStartSite(){
 /* ============================================================
    INIT
 ============================================================ */
-/* Force clear stale login cache to fix credential issues */
+/* Clear stale login cache — no auto-login allowed */
 (function(){
-  try{
-    const old=localStorage.getItem("mep_user");
-    if(old){const p=JSON.parse(old);if(!p.type||(p.type!=="admin"&&p.type!=="employee")){localStorage.removeItem("mep_user");}}
-  }catch(e){localStorage.removeItem("mep_user");}
+  try{ localStorage.removeItem("mep_user"); }catch(e){}
 })();
 
 async function initApp(){
@@ -8790,6 +8890,21 @@ async function initApp(){
   const loginBtn=document.getElementById('loginBtn');
   if(loadMsg)loadMsg.style.display='block';
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Loading data...';}
+
+  // SAFETY TIMEOUT: Force-enable login after 15s even if Firebase hangs
+  setTimeout(function(){
+    if(!_initDone){
+      console.warn('[initApp] Safety timeout (15s) — forcing login enabled with local data');
+      _initDone=true;
+      var btn=document.getElementById('loginBtn');
+      if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
+      var lm=document.getElementById('fbLoadStatus');
+      if(lm)lm.style.display='none';
+      var sv=document.getElementById('loginSyncBtn');
+      if(sv)sv.style.display='inline-block';
+      toast('Cloud is slow — using local data. Click "Sync Data" to retry.','warning',5000);
+    }
+  },15000);
 
   // 1. Load from localStorage immediately (sync)
   loadDB();
@@ -8904,9 +9019,9 @@ async function initApp(){
     document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
     document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
     if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
-    // Auth persistence + session check (needed for auto-login)
-    try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
-    var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
+    // NO auto-login — user must always enter credentials manually
+    // Firebase auth persistence and localStorage session checks removed
+    // to prevent employee devices from auto-logging in as admin.
     return;
   }
   if(loadMsg)loadMsg.style.display='none';
@@ -8962,42 +9077,9 @@ async function initApp(){
   DB.settings.theme=t;
   document.getElementById("themeBtn").querySelector(".mat-ico").textContent=t==="dark"?"dark_mode":"light_mode";
 
-  // Try Firebase Auth persistence first
-  try{
-    if(firebaseReady){
-      await new Promise(r=>{const unsub=fbAuth.onAuthStateChanged(r);setTimeout(unsub,3000);});
-      const fbUser=fbAuth.currentUser;
-      if(fbUser){
-        const uid=fbUser.email.split('@')[0].toUpperCase();
-        let found=false;
-        if(uid==='ADMIN'){
-          const admin=DB.admins.find(a=>a.username==='admin');
-          if(admin){currentUser={...admin,type:"admin"};isAdmin=true;found=true;}
-        }else{
-          const emp=DB.employees.find(e=>e.id===uid);
-          if(emp){currentUser={...emp,type:"employee"};isAdmin=false;found=true;}
-        }
-        if(found){startApp();return;}
-      }
-    }
-  }catch(e){console.warn('Auth persistence check error:',e);}
-
-  // Fallback: check localStorage session
-  const saved=localStorage.getItem("mep_user");
-  if(saved){
-    try{
-      const parsed=JSON.parse(saved);
-      let valid=false;
-      if(parsed.type==="admin"){
-        const match=DB.admins.find(a=>a.username===parsed.username);
-        if(match){currentUser={...match,type:"admin"};isAdmin=true;valid=true;}
-      }else if(parsed.type==="employee"){
-        const match=DB.employees.find(e=>e.id===parsed.id);
-        if(match){currentUser={...match,type:"employee"};isAdmin=false;valid=true;}
-      }
-      if(valid){startApp();}else{localStorage.removeItem("mep_user");}
-    }catch{localStorage.removeItem("mep_user");}
-  }
+  // NO auto-login — always show login form
+  // Firebase auth persistence and localStorage session checks removed
+  // to prevent employee devices from auto-logging in as admin.
 }
 
 initApp();
