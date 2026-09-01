@@ -5704,31 +5704,36 @@ div.innerHTML=`
   <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>
 </tr>
 </table>
-<!-- EMPLOYEE INFORMATION: flat 3-col table matching docx -->
+<!-- EMPLOYEE INFORMATION: 3-col layout matching IMSP 29 F05 sheet -->
 <table style="width:100%;border-collapse:collapse;">
 <tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">${currentUser.name||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;font-size:10pt;">${currentUser.dept||'\u2014'}</span></td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Name:</td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Employee ID:</td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:50%;">Department:</td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.id||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;font-size:10pt;">${managerHtml}</span></td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.name||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.id||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.dept||'\u2014'}</td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.desig||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;font-size:10pt;">${today}</span></td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:</td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:</td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>
-  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>${quizState.training}</b></td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.desig||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${today}</td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${managerHtml}</td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>
-  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td>
+  <td colspan="2" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>
+  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>
+</tr>
+<tr>
+  <td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;"><b>${quizState.training}</b></td>
+  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td>
 </tr>
 </table>
 <!-- INSTRUCTION -->
@@ -5842,27 +5847,32 @@ html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align
 html+='</tr>';
 html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">'+(fb.empName||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;">'+(fb.dept||'')+'</span></td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Name:</td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Employee ID:</td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:50%;">Department:</td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.empId||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;">'+(fb.manager||'')+'</span></td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.empName||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.empId||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.dept||'')+'</td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.desig||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;">'+fmtDate+'</span></td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:</td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:</td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>';
-html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.desig||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+fmtDate+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.manager||'')+'</td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>';
-html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.trainer||'')+'</td>';
+html+='<td colspan="2" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>';
+html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>';
+html+='</tr>';
+html+='<tr>';
+html+='<td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
+html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.trainer||'')+'</td>';
 html+='</tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
 html+='<tr>';
@@ -6001,8 +6011,23 @@ _fbRatings={};_fbOverall=0;
 if(firebaseReady){(async function(){try{if(!isAdmin)await authAsAdmin();fbDB.collection('feedbackForms').doc(String(fb.id)).set(sanitizeForFirestore(fb),{merge:true});console.log('Feedback saved to Firebase');if(!isAdmin)await authAsAdmin();}catch(e){console.warn('Firebase feedback save error:',e);}})();}
 // Upload IMSP 29 F05 Feedback PDF to Google Drive
 setTimeout(function(){uploadFeedbackPDFToDrive(fb);},500);
-// Push feedback to Google Sheet via the debounced queueSheetSync system
-queueSheetSync(["Feedback"]);
+// Append this feedback row directly to Google Sheet (does NOT clear existing rows)
+(function(){
+  try{
+    var url=DB.settings.sheetUrl||"";
+    if(!url) return;
+    // Build single-row payload for this feedback only
+    var company=DB.settings.companyName||"PTS SAFETY";
+    var qScores=[];for(var k in (fb.ratings||{})){var r=fb.ratings[k];if(r&&r.score)qScores.push(r.score);}
+    var avgScore=qScores.length?Math.round(qScores.reduce(function(a,b){return a+b;},0)/qScores.length*10)/10:'';
+    var row={Company:company,Name:fb.empName||'',"Employee ID":fb.empId||'',Department:fb.dept||'',"Job Title":fb.desig||'',Date:fb.date||'',Manager:fb.manager||'',"Training Course":fb.training||'',Trainer:fb.trainer||'',Category:fb.category||''};
+    for(var i=0;i<FB_QUESTIONS.length;i++){var rk='q'+(i+1);var rd=(fb.ratings||{})[rk];row['Q'+(i+1)]=rd?rd.label:'';row['Q'+(i+1)+' Score']=rd?rd.score:'';}
+    row['Overall Rating']=fb.overallLabel||'';row['Overall Score']=fb.overallRating||'';row['Average Score']=avgScore;row['What did you enjoy most?']=fb.enjoy||'';row['Suggestions']=fb.suggestions||'';
+    appendRowToSheet(url, row, "Feedback").then(function(){
+      console.log('[Feedback] Appended to Google Sheet successfully');
+    }).catch(function(e){console.warn('[Feedback] Sheet append error:',e);});
+  }catch(e){console.warn('[Feedback] Sheet append error:',e);}
+})();
 submitQuiz();
 }
 
@@ -7595,25 +7620,34 @@ function renderSettings(){
           <span style="font-size:11px;color:var(--muted);margin-left:auto;">${DB.settings.sheetAutoSync!==false?'<span style=\'color:var(--green);\'>ON</span> — Data auto-updates on every change':'<span style=\'color:var(--red);\'>OFF</span> — Only manual sync'}  </span>
         </div>
         <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.7;overflow-x:auto;max-height:260px;overflow-y:auto;">
-          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script):</div>
+          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script) — <b>UPDATED with append mode support:</b></div>
 function doPost(e){<br>
 &nbsp;&nbsp;try{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var body=JSON.parse(e.postData.contents);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var body=JSON.parse(e.parameter.json);<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var sheetName=body.sheet||"Data";<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var action=body.action||"replace";<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var data=body.data||[];<br>
 &nbsp;&nbsp;&nbsp;&nbsp;if(!Array.isArray(data)||data.length===0)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
 &nbsp;&nbsp;&nbsp;&nbsp;if(!sheet) sheet=ss.insertSheet(sheetName);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;// Clear old data and rewrite (keeps sheet in sync with app)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()>0) sheet.deleteRows(1,sheet.getLastRow());<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var headers=Object.keys(data[0]);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return r[k]||"";}));<br>
-&nbsp;&nbsp;&nbsp;&nbsp;});<br>
-&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(action==="append"){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// APPEND MODE: add new rows without clearing existing data<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0) sheet.appendRow(headers);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for(var i=0;i&lt;data.length;i++){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return data[i][k]||"";}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}else{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// REPLACE MODE: clear old data and rewrite all<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()&gt;0) sheet.deleteRows(1,sheet.getLastRow());<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for(var i=0;i&lt;data.length;i++){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return data[i][k]||"";}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length,action:action})).setMimeType(ContentService.MimeType.JSON);<br>
 &nbsp;&nbsp;}catch(err){<br>
 &nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"error",msg:err.toString()}));<br>
 &nbsp;&nbsp;}<br>
@@ -7627,7 +7661,7 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
           <button class="btn btn-outline" onclick="testSheetConnection()"><span class="mat-ico">wifi_tethering</span> Test</button>
         </div>
         <div id="syncStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
-        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (full test results with employee, trainer, manager, cert details), <b>Employees</b> (master list with stats), <b>Trainings</b> (all trainings + enrolled/completed employees), <b>Certificates</b> (all issued certs with trainer & validity), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback</b> (IMSP 29 F05 responses with scores). Each sync replaces the sheet data to stay in sync. All sheets include Company name for audit trail.</div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (full test results with employee, trainer, manager, cert details), <b>Employees</b> (master list with stats), <b>Trainings</b> (all trainings + enrolled/completed employees), <b>Certificates</b> (all issued certs with trainer & validity), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback</b> (IMSP 29 F05 responses with scores). Full sync replaces sheet data. Individual submissions (feedback) use append mode to add rows without clearing. All sheets include Company name for audit trail. <b style="color:var(--amber);">Update your Apps Script to support action:"append" — see code hint below.</b></div>
       </div>
       <div class="form-section" style="border:1px solid ${_driveTested?(_driveConnected?'rgba(62,207,142,.35)':'rgba(232,72,58,.35)'):'rgba(62,207,142,.15)'};background:${_driveTested?(_driveConnected?'rgba(62,207,142,.04)':'rgba(232,72,58,.04)'):'rgba(62,207,142,.02)'};">
         <div class="form-section-title" style="color:var(--green);display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="color:var(--green);">cloud_upload</span> Google Drive Connection <span id="driveStatusDot" style="width:12px;height:12px;border-radius:50%;display:inline-block;background:${_driveTested?(_driveConnected?'var(--green)':'var(--red)'):'var(--muted)'};" title="${_driveTested?(_driveConnected?'Drive Connected':'Drive Not Connected'):'Not tested yet'}"></span> <span id="driveStatusLabel" style="font-size:11px;font-weight:400;color:${_driveTested?(_driveConnected?'var(--green)':'var(--red)'):'var(--muted)'};">${_driveTested?(_driveConnected?'Connected':'Not Connected'):'Not tested'}</span></div>
@@ -7876,7 +7910,7 @@ function buildFeedbackPayload(){
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
-  var json=JSON.stringify({sheet:sheetName,data:payload});
+  var json=JSON.stringify({sheet:sheetName,action:"replace",data:payload});
   // Form POST — only method that works with Google Apps Script
   return new Promise(function(resolve){
     var fname='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
@@ -7900,6 +7934,33 @@ async function pushToSheet(url,payload,sheetName){
     form.submit();
   });
 }
+// Append a SINGLE row to a Google Sheet (does NOT clear existing data)
+// Use for individual submissions (feedback, test results) to add rows without overwriting
+async function appendRowToSheet(url, row, sheetName){
+  var json=JSON.stringify({sheet:sheetName, action:"append", data:[row]});
+  return new Promise(function(resolve){
+    var fname='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
+    var iframe=document.createElement('iframe');
+    iframe.name=fname;iframe.style.display='none';
+    document.body.appendChild(iframe);
+    var form=document.createElement('form');
+    form.method='POST';form.action=url;form.target=fname;
+    var input=document.createElement('input');
+    input.type='hidden';input.name='json';input.value=json;
+    form.appendChild(input);document.body.appendChild(form);
+    var done=false;
+    function cleanup(){
+      if(done)return;done=true;
+      try{document.body.removeChild(iframe);}catch(e){}
+      try{document.body.removeChild(form);}catch(e){}
+      resolve({appended:true});
+    }
+    iframe.onload=cleanup;
+    setTimeout(cleanup,6000);
+    form.submit();
+  });
+}
+
 async function syncToGoogleSheet(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
   if(!url){toast("Paste your Google Apps Script URL in Settings first","error");return;}
