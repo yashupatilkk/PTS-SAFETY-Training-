@@ -713,7 +713,6 @@ select.form-control-sm{background:var(--sur2);}
     <div class="view" id="view-correctiveactions"></div>
     <div class="view" id="view-adminaccess"></div>
     <div class="view" id="view-myprofile"></div>
-    <div class="view" id="view-msgadmin"></div>
     <div class="view" id="view-messages"></div>
     <div class="view" id="view-settings"></div>
   </div>
@@ -2392,7 +2391,7 @@ function gotoView(v){
   const titles={dashboard:"Dashboard",employees:"Employee Management",empcards:"Employee Cards",myprofile:"My Profile",messages:"Messages",trainings:"Training Management",retraining:"Round 2 Training",equipment:"Equipment Library",sop:"SOP Library",quiz:"Online Tests",certificates:"Certificates",reports:"Reports",trainstatus:"Training Completion Status",notifications:"Notifications",correctiveactions:"Corrective Actions Log",adminaccess:"Admin Access Management",settings:"Settings"};
   document.getElementById("pageTitle").textContent=titles[v]||v;
   document.getElementById("mainContent").scrollTop=0;
-  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,msgadmin:renderEmpMsgAdmin,messages:renderMessages,trainings:renderTrainings,retraining:renderRetraining,offlinetraining:renderOfflineTraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
+  const renderers={dashboard:renderDashboard,employees:renderEmployees,empcards:renderEmpCards,myprofile:renderMyProfile,messages:renderMessages,trainings:renderTrainings,retraining:renderRetraining,offlinetraining:renderOfflineTraining,equipment:renderEquipment,sop:renderSOP,quiz:renderQuizMenu,certificates:renderCertificates,reports:renderReports,trainstatus:renderTrainStatus,notifications:renderNotifications,correctiveactions:renderCorrectiveActions,adminaccess:renderAdminAccess,settings:renderSettings};
   if(renderers[v])renderers[v]();
   if(v==="dashboard"&&isAdmin){var ds=document.getElementById("view-dashboard");var ah=getBSCAuditHTML();if(ah&&ds){var oldSlot=ds.querySelector(".bsc-audit-slot");if(oldSlot)oldSlot.remove();var wrapper=document.createElement("div");wrapper.className="bsc-audit-slot";wrapper.innerHTML=ah;ds.appendChild(wrapper);}}
   closeSidebar();
@@ -3573,7 +3572,7 @@ function renderAdminMessages(view){
   h+='<div class="chat-empty"><span class="mat-ico">chat_bubble_outline</span><p>Choose a conversation from the left to start chatting</p></div>';
   h+='</div>';
   h+='<div class="chat-input-area" id="chatInputArea" style="display:none;">';
-  h+='<textarea id="chatMsgInput" rows="1" placeholder="Type a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" oninput="autoResizeTextarea(this)"></textarea>';
+  h+='<textarea id="chatMsgInput" rows="1" placeholder="Type a message..." onkeydown="if(event.key===\x27Enter\x27&&!event.shiftKey){event.preventDefault();sendChatMessage();}" oninput="autoResizeTextarea(this)"></textarea>';
   h+='<button class="chat-send-btn" onclick="sendChatMessage()"><span class="mat-ico">send</span></button>';
   h+='</div>';
   h+='</div>'; // end chat-pane
@@ -3627,7 +3626,7 @@ function renderEmployeeMessages(view){
   }
   h+='</div>';
   h+='<div class="chat-input-area">';
-  h+='<textarea id="chatMsgInput" rows="1" placeholder="Type your message to Admin..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" oninput="autoResizeTextarea(this)"></textarea>';
+  h+='<textarea id="chatMsgInput" rows="1" placeholder="Type your message to Admin..." onkeydown="if(event.key===\x27Enter\x27&&!event.shiftKey){event.preventDefault();sendChatMessage();}" oninput="autoResizeTextarea(this)"></textarea>';
   h+='<button class="chat-send-btn" onclick="sendChatMessage()"><span class="mat-ico">send</span></button>';
   h+='</div>';
   h+='</div></div>';
