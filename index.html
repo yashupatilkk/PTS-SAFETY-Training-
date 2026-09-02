@@ -593,7 +593,7 @@ select.form-control-sm{background:var(--sur2);}
         </div>
       </div>
       <div class="checkbox-row">
-        <!-- Remember me removed — no auto-login allowed -->
+        <label class="checkbox-label"><input type="checkbox" id="rememberMe"> Remember me</label>
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
@@ -1001,6 +1001,10 @@ let DB={
   employees:[],
   trainings:[],
   testResults:[],
+  // Practice attempts are intentionally local-only and never enter official records.
+  practiceResults:[],
+  // Practice certificates are for learning acknowledgement only; never official credentials.
+  practiceCertificates:[],
   certificates:[],
   // videos removed — YouTube links are stored directly on training objects
   sops:[
@@ -1863,27 +1867,21 @@ function startAutoSync(){
         fbSaveSettings()
       ];
       await Promise.all(syncPromises);
-      // STEP 2: Admin pulls test results, certificates & messages from employees (merge, never overwrite)
+      // STEP 2: Admin pulls test results & certificates from employees (merge, never overwrite)
       if(isAdmin){
         try{
           const fbTestSnap=await fbDB.collection('testResults').get();
           const fbTests=fbTestSnap.docs.map(d=>d.data());
           let newTests=0;
-          fbTests.forEach(fbR=>{if(!DB.testResults.find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
+          fbTests.forEach(fbR=>{if(!DB.testResults.filter(r=>!r.practice).find(r=>r.id===fbR.id)){DB.testResults.push(fbR);newTests++;}});
           const fbCertSnap=await fbDB.collection('certificates').get();
           const fbCerts=fbCertSnap.docs.map(d=>d.data());
           let newCerts=0;
           fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
-          // Pull new messages from employees
-          const fbMsgSnap=await fbDB.collection('messages').get();
-          const fbMsgs=fbMsgSnap.docs.map(d=>d.data());
-          let newMsgs=0;
-          fbMsgs.forEach(fbM=>{if(!DB.messages.find(m=>m.id===fbM.id)){DB.messages.push(fbM);newMsgs++;}});
-          if(newMsgs){console.log('[AutoSync] Pulled '+newMsgs+' new message(s) from cloud');updateBadges();}
           // Reconcile training completed arrays from all testResults (source of truth)
           const trainingsUpdated=reconcileTrainingsFromResults()>0;
           // Save merged data to localStorage (don't re-push to avoid loop)
-          if(newTests||newCerts||newMsgs||trainingsUpdated){
+          if(newTests||newCerts||trainingsUpdated){
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
             if(typeof renderAll==='function')renderAll();
           }
@@ -2039,7 +2037,6 @@ async function doLogin(){
   var id=document.getElementById("loginId").value.trim();
   var pw=document.getElementById("loginPw").value;
   if(!id||!pw){toast("Please enter credentials","error");return;}
-  console.log('[doLogin] Attempt: loginType='+loginType+' id='+id+' _initDone='+_initDone+' employees='+DB.employees.length+' admins='+DB.admins.length);
   if(!_initDone){toast("Still loading...","info");return;}
   if(loginType==="admin"&&id.toUpperCase().startsWith("EMP")){setLoginType("employee");}
   if(loginType==="employee"&&(id.toLowerCase()==="admin")){setLoginType("admin");}
@@ -2049,26 +2046,7 @@ async function doLogin(){
     // FAST PATH: Check local DB first (instant, no network)
     if(loginType==="admin"){
       var admin=DB.admins.find(function(a){return a.username===id;});
-      if(!admin){toast("Admin username '"+id+"' not found","error");return;}
-      if(admin.password!==pw){
-        // If local password doesn't match, try Firebase Auth as fallback
-        // (handles case where password was changed in Firebase Console)
-        if(firebaseReady){
-          try{
-            console.log('[doLogin] Local admin pw mismatch, trying Firebase Auth...');
-            await fbAuth.signInWithEmailAndPassword(toEmail(id),pw);
-            // Firebase Auth succeeded — update local DB with correct password
-            admin.password=pw;
-            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-            console.log('[doLogin] Firebase Auth OK, updated local password');
-          }catch(fbErr){
-            console.warn('[doLogin] Firebase Auth also failed:',fbErr.message);
-            toast("Invalid admin credentials","error");return;
-          }
-        }else{
-          toast("Invalid admin credentials","error");return;
-        }
-      }
+      if(!admin||admin.password!==pw){toast("Invalid admin credentials","error");return;}
       currentUser=Object.assign({},admin,{type:"admin"});isAdmin=true;
     }else{
       var empId=id.toUpperCase();
@@ -2103,23 +2081,7 @@ async function doLogin(){
       var nameOk=emp.name&&emp.name.trim().toLowerCase()===pwN.toLowerCase();
       var pwOk=emp.password&&emp.password===pwN;
       if(!nameOk&&!pwOk){
-        // Fallback: try Firebase Auth with the typed password
-        if(firebaseReady){
-          try{
-            console.log('[doLogin] Employee local pw mismatch, trying Firebase Auth for '+empId+'...');
-            await fbAuth.signInWithEmailAndPassword(toEmail(empId),pwN);
-            // Firebase Auth succeeded — update local password and allow login
-            emp.password=pwN;
-            try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-            console.log('[doLogin] Employee Firebase Auth OK, updated local password');
-            pwOk=true;
-          }catch(fbErr2){
-            console.warn('[doLogin] Employee Firebase Auth also failed:',fbErr2.message);
-          }
-        }
-        if(!pwOk){
-          toast('Wrong credentials for '+emp.name+'. Use Name or Password.','error',5000);return;
-        }
+        toast('Wrong credentials for '+emp.name+'. Use Name or Password.','error',5000);return;
       }
       currentUser=Object.assign({},emp,{type:"employee"});isAdmin=false;
     }
@@ -2144,7 +2106,7 @@ async function doLogin(){
     }
     // LOGIN SUCCESS
     var safeUser=Object.assign({},currentUser);delete safeUser.password;
-    // Remember me removed — no localStorage session saved
+    if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
     startApp();
     // Sync Firebase Auth for employee in background
     // CRITICAL: After employee auth, re-auth as admin so visibility handler & sync work
@@ -2351,7 +2313,7 @@ function startApp(){
 }
 function updateBadges(){
   document.getElementById("nb-employees").textContent=DB.employees.length;
-  document.getElementById("nb-trainings").textContent=DB.trainings.length;
+  document.getElementById("nb-trainings").textContent=(DB.trainings||[]).filter(function(t){return !t._isR2Training;}).length;
   document.getElementById("nb-equipment").textContent=EQUIPMENT_DATA.length;
   var myNotifsForBadge=(typeof isAdmin!=='undefined'&&isAdmin)?DB.notifications:(typeof currentUser!=='undefined'&&currentUser)?DB.notifications.filter(function(n){return !n.forEmp||n.forEmp===currentUser.id;}):DB.notifications;
   const unread=myNotifsForBadge.filter(n=>!n.read).length;
@@ -2360,24 +2322,26 @@ function updateBadges(){
   // Also count records nested inside trainings for badge consistency
   DB.trainings.forEach(function(t){caCount+=(t.retrainingRecords||[]).length;caCount+=(t.offlineRecords||[]).length;});
   var caEl=document.getElementById("nb-ca");if(caEl)caEl.textContent=caCount;
-  // Round 2 Training badge: count employees who failed and haven't passed
+  // Round 2 badge: count each original failed training + employee case once.
+  // R2 trainings themselves are excluded; a second failure belongs to Offline Training.
   var r2Count=0;
   var empIdSet2=DB.employees.map(function(e){return e.id;});
-  var r2TrnMap={};
-  DB.testResults.forEach(function(r){if(empIdSet2.indexOf(r.empId)<0)return;if(!r2TrnMap[r.training])r2TrnMap[r.training]=[];r2TrnMap[r.training].push(r);});
-  Object.keys(r2TrnMap).forEach(function(trnName){
-    var empAtt={};
-    r2TrnMap[trnName].forEach(function(r){if(!empAtt[r.empId])empAtt[r.empId]=[];empAtt[r.empId].push(r);});
-    Object.keys(empAtt).forEach(function(eid){
-      var hasPass=empAtt[eid].some(function(r){return r.pass;});
-      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===trnName;});
-      if(!hasPass&&!hasCert)r2Count++;
+  DB.trainings.filter(function(t){return !t._isR2Training;}).forEach(function(t){
+    var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});
+    var trnRes=DB.testResults.filter(function(r){return !r.practice&&r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});
+    var candidateIds=[].concat(enrolled,trnRes.map(function(r){return r.empId;})).filter(function(eid,i,a){return a.indexOf(eid)===i;});
+    candidateIds.forEach(function(eid){
+      var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;
+      if(att.some(function(r){return isOfficialResultPass(r);}))return;
+      var hasCert=getOfficialTrainingCertificates().some(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
+      if((t.offlineTrained||[]).includes(eid))return;
+      r2Count++;
     });
   });
   var r2El=document.getElementById("nb-retraining");if(r2El)r2El.textContent=r2Count;
   // Offline training badge
-  var offCount=0;
-  DB.trainings.forEach(function(t){var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});if(!enrolled.length)return;var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});enrolled.forEach(function(eid){var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;var r2Rec=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});if(!r2Rec)return;var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Rec.r2TrnId;});if(!r2Trn)return;var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});if(!r2Att.length)return;if(r2Att.some(function(r){return r.pass;}))return;offCount++;});});
+  var offCount=0;var empIdSet2=DB.employees.map(function(e){return e.id;});
+  DB.trainings.filter(function(t){return !t._isR2Training;}).forEach(function(t){var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});var trnRes=DB.testResults.filter(function(r){return !r.practice&&r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});var candidateIds=[].concat(enrolled,trnRes.map(function(r){return r.empId;})).filter(function(eid,i,a){return a.indexOf(eid)===i;});candidateIds.forEach(function(eid){var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;var hasPass=att.some(function(r){return isOfficialResultPass(r);});if(hasPass)return;var r2Rec=findR2Assignment(t,eid);if(!r2Rec)return;var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Rec.r2TrnId;});if(!r2Trn)return;var r2Att=DB.testResults.filter(function(r){return !r.practice&&r.training===r2Trn.name&&r.empId===eid;});if(!r2Att.length)return;      if(r2Att.some(function(r){return isOfficialResultPass(r);}))return;offCount++;});});
   var offEl=document.getElementById("nb-offlinetraining");if(offEl)offEl.textContent=offCount;
   // Employee: show unread Help Desk messages badge
   if(!isAdmin&&currentUser&&currentUser.id){
@@ -2463,7 +2427,7 @@ function getBSCAuditHTML(){
   if(!isAdmin)return '';
   var allCA=DB.correctiveActions||[];
   var totalTests=DB.testResults.length;
-  var passRate=totalTests>0?Math.round(DB.testResults.filter(function(r){return r.pass;}).length/totalTests*100):0;
+  var passRate=totalTests>0?Math.round(DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.pass;}).length/totalTests*100):0;
   var offlinePending=0;
   DB.trainings.forEach(function(t){(t.offlineTrained||[]).forEach(function(eid){var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});if(!hasCert)offlinePending++;});});
   var totalEmps=DB.employees.length;
@@ -2573,35 +2537,84 @@ function onGlobalSearch(q){
 /* ============================================================
    DASHBOARD
 ============================================================ */
+// Dashboard filter: ALL keeps the overall view; selecting a training scopes every metric.
+let dashboardTrainingFilter='ALL';
+// A dashboard result must belong to a real scheduled normal training and a real employee.
+// Results are retained even when legacy enrollment data is incomplete, because the
+// completed official assessment is the source of truth for pass/fail totals.
+// Category-only quiz attempts, R2 attempts, and practice attempts are excluded.
+function isDashboardOfficialResult(r){
+  if(!r||r.practice)return false;
+  var trn=DB.trainings.find(function(t){return t.name===r.training;});
+  if(!trn||trn._isR2Training)return false;
+  return !!DB.employees.find(function(e){return e.id===r.empId;});
+}
+function getDashboardOfficialResults(){
+  return (DB.testResults||[]).filter(isDashboardOfficialResult);
+}
+function getDashboardTrainingEmployees(t){
+  if(!t||t._isR2Training)return [];
+  return DB.employees.filter(function(e){return (t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));});
+}
+function getDashboardTrainings(){
+  return (DB.trainings||[]).filter(function(t){return t&&!t._isR2Training;});
+}
+function isOfficialTrainingCertificate(c){
+  if(!c||c.practice||c.isPractice||c.practiceCertificate||String(c.num||'').indexOf('PRA-')===0)return false;
+  var trn=DB.trainings.find(function(t){return t.name===c.training;});
+  return !!trn&&!trn._isR2Training;
+}
+function getOfficialTrainingCertificates(){
+  return (DB.certificates||[]).filter(isOfficialTrainingCertificate);
+}
+function isOfficialResultPass(r){
+  if(!r||r.practice)return false;
+  var trn=DB.trainings.find(function(t){return t.name===r.training;});
+  return Number(r.score||0)>=(trn&&trn.passing||70);
+}
 function renderDashboard(){
   if(!isAdmin){renderEmpDashboard();return;}
-  const total=DB.employees.length;
-  const totalTrn=DB.trainings.length;
+  var selectedTraining=dashboardTrainingFilter!=='ALL'?getDashboardTrainings().find(function(t){return t.name===dashboardTrainingFilter;}):null;
+  if(dashboardTrainingFilter!=='ALL'&&!selectedTraining){dashboardTrainingFilter='ALL';}
+  var officialTrainings=getDashboardTrainings();
+  var visibleTrainings=selectedTraining?[selectedTraining]:officialTrainings;
+  var scopedParticipants=selectedTraining?getDashboardTrainingEmployees(selectedTraining).map(function(e){return e.id;}):null;
+  const total=scopedParticipants?scopedParticipants.length:DB.employees.length;
+  const totalTrn=visibleTrainings.length;
   // Count unique (employee, training) pairs based on BEST attempt
   // An employee+training is "passed" if their highest score meets the passing threshold
   // An employee+training is "failed" only if their best score is STILL below passing
-  const bestByEmpTrn={};// key: "empId|training" → best test result (highest score)
-  DB.testResults.forEach(r=>{var k=r.empId+'|'+r.training;if(!bestByEmpTrn[k]||r.score>bestByEmpTrn[k].score)bestByEmpTrn[k]=r;});
-  var completed=0,failed=0,totalAttempts=DB.testResults.length,scoreSum=0;
-  Object.values(bestByEmpTrn).forEach(r=>{if(r.pass)completed++;else failed++;scoreSum+=r.score;});
+  const bestByEmpTrn={};// key: "empId|training" → best valid official result
+  var officialResults=getDashboardOfficialResults().filter(function(r){return !selectedTraining||r.training===selectedTraining.name;});
+  officialResults.forEach(function(r){var k=r.empId+'|'+r.training;if(!bestByEmpTrn[k]||r.score>bestByEmpTrn[k].score)bestByEmpTrn[k]=r;});
+  var completed=0,failed=0,totalAttempts=officialResults.length,scoreSum=0;
+  Object.values(bestByEmpTrn).forEach(function(r){if(isOfficialResultPass(r))completed++;else failed++;scoreSum+=Number(r.score||0);});
   const avgScore=Object.keys(bestByEmpTrn).length?Math.round(scoreSum/Object.keys(bestByEmpTrn).length):0;
-  const pending=DB.trainings.reduce((s,t)=>{
-    const enrolled=(t.enrolled||[]);
-    const passed=new Set(Object.values(bestByEmpTrn).filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
-    return s+enrolled.filter(eid=>!passed.has(eid)).length;
+  const pending=visibleTrainings.reduce(function(s,t){
+    const enrolled=getDashboardTrainingEmployees(t).map(function(e){return e.id;});
+    const passed=new Set(Object.values(bestByEmpTrn).filter(function(r){return isOfficialResultPass(r)&&r.training===t.name;}).map(function(r){return r.empId;}));
+    return s+enrolled.filter(function(eid){return !passed.has(eid);}).length;
   },0);
-  const certCount=DB.certificates.length;
+  const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||c.training===selectedTraining.name;}).length;
   const compPct=Object.keys(bestByEmpTrn).length?Math.round(completed/Object.keys(bestByEmpTrn).length*100):0;
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
     <p style="color:var(--muted);font-size:13px;">PTS SAFETY Training Management — ${new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p></div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:12px 14px;margin-bottom:18px;">
+      <span class="mat-ico" style="color:var(--purple);font-size:20px;">filter_alt</span><label for="dashboardTrainingFilter" style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);">Show dashboard data for training:</label>
+      <select id="dashboardTrainingFilter" class="form-control-sm" style="min-width:240px" onchange="dashboardTrainingFilter=this.value;renderDashboard()">
+        <option value="ALL" ${!selectedTraining?'selected':''}>All Trainings</option>
+        ${officialTrainings.map(function(t){return '<option value="'+String(t.name).replace(/"/g,'&quot;')+'" '+(selectedTraining&&selectedTraining.name===t.name?'selected':'')+'>'+t.name+'</option>';}).join('')}
+      </select>
+      <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name:'Showing all scheduled trainings'}</span>
+    </div>
     <div class="stat-grid" style="margin-bottom:18px;">
-      ${statCard("people","Total Employees",total,"#3ea0e8","All Departments")}
-      ${statCard("school","Total Trainings",totalTrn,"#8b6de8","Scheduled")}
-      ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Pass count")}
+      ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments")}
+      ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled")}
+      ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count")}
       ${statCard("pending","Pending",pending,"#f0883e","Awaiting training")}
-      ${statCard("cancel","Tests Failed",failed,"#e8483a","Retraining req.")}
+      ${statCard("cancel","Tests Failed",failed,"#e8483a","Official training fail count")}
       ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library")}
       ${statCard("workspace_premium","Certificates",certCount,"#c084fc","Issued")}
       ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%")}
@@ -2638,16 +2651,16 @@ function renderDashboard(){
       <div class="chart-card">
         <div class="chart-card-title"><span class="dot"></span>Recent Test Activities</div>
         <div class="activity-list">
-          ${DB.testResults.slice(-5).reverse().map(r=>`
+          ${officialResults.slice(-5).reverse().map(r=>`
             <div class="activity-item">
-              <div class="activity-ico" style="background:${r.pass?"rgba(62,207,142,.1)":"rgba(232,72,58,.1)"}">
-                <span class="mat-ico" style="color:${r.pass?"var(--green)":"var(--red)"};font-size:14px;">${r.pass?"check_circle":"cancel"}</span>
+              <div class="activity-ico" style="background:${isOfficialResultPass(r)?"rgba(62,207,142,.1)":"rgba(232,72,58,.1)"}">
+                <span class="mat-ico" style="color:${isOfficialResultPass(r)?"var(--green)":"var(--red)"};font-size:14px;">${isOfficialResultPass(r)?"check_circle":"cancel"}</span>
               </div>
               <div class="activity-info">
                 <div class="activity-title">${r.empName} — ${r.training}</div>
                 <div class="activity-time">${r.score}% · ID: ${r.empId} · ${formatDate(r.date)}</div>
               </div>
-              <span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"Pass":"Fail"}</span>
+              <span class="badge badge-${isOfficialResultPass(r)?"active":"danger"}">${isOfficialResultPass(r)?"Pass":"Fail"}</span>
             </div>
           `).join("")}
         </div>
@@ -2658,7 +2671,7 @@ function renderDashboard(){
       <div class="table-wrap" style="margin-top:8px;">
         <table><thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Training</th><th>Score</th><th>Result</th><th>Completion Date</th><th>Certificate</th></tr></thead>
         <tbody>
-          ${DB.testResults.filter(r=>r.pass).slice(-10).reverse().map(r=>`<tr>
+          ${officialResults.filter(isOfficialResultPass).slice(-10).reverse().map(r=>`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${r.empId}</td>
             <td><b>${r.empName}</b></td>
             <td><span class="badge badge-info">${r.dept}</span></td>
@@ -2668,7 +2681,7 @@ function renderDashboard(){
             <td style="font-weight:600;">${formatDate(r.date)}</td>
             <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> PDF</button>`:""}</td>
           </tr>`).join("")}
-          ${!DB.testResults.filter(r=>r.pass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
+          ${!officialResults.filter(isOfficialResultPass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
         </tbody></table>
       </div>
     </div>
@@ -2678,21 +2691,21 @@ function renderDashboard(){
     let c=0;const step=Math.max(1,Math.ceil(t/35));
     const iv=setInterval(()=>{c=Math.min(c+step,t);el.textContent=el.dataset.suffix?c+el.dataset.suffix:c;if(c>=t)clearInterval(iv);},25);
   });
-  setTimeout(()=>drawCharts(completed,failed),100);
+  setTimeout(()=>drawCharts(completed,failed,selectedTraining?selectedTraining.name:'ALL'),100);
 }
 function renderEmpDashboard(){
   const empId=currentUser.id;
-  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept)));
+  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept))).filter(function(t){return !t._isR2Training;});
   const r2Map={};
   DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){r2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason,r2Trainer:r.r2Trainer||''};}});});
   const r2TrnIds=new Set(Object.keys(r2Map));
-  const myResults=DB.testResults.filter(r=>r.empId===empId);
-  const myPassed=myResults.filter(r=>r.pass).length;
-  const myFailed=myResults.filter(r=>!r.pass).length;
-  const myCerts=DB.certificates.filter(c=>c.empId===empId).length;
+  const myResults=getDashboardOfficialResults().filter(r=>r.empId===empId);
+  const myPassed=myResults.filter(isOfficialResultPass).length;
+  const myFailed=myResults.filter(function(r){return !isOfficialResultPass(r);}).length;
+  const myCerts=getOfficialTrainingCertificates().filter(c=>c.empId===empId).length;
   const myAvg=myResults.length?Math.round(myResults.reduce((s,r)=>s+r.score,0)/myResults.length):0;
   const myPending=myTrns.filter(t=>{
-    const hasPass=DB.testResults.find(r=>r.empId===empId&&r.training===t.name&&r.pass);
+    const hasPass=getDashboardOfficialResults().find(function(r){return r.empId===empId&&r.training===t.name&&isOfficialResultPass(r);});
     return !hasPass;
   }).length;
   var dashR2Map={};
@@ -2730,9 +2743,9 @@ function renderEmpDashboard(){
       <div class="chart-card-title" style="margin-bottom:10px;font-family:'Oswald',sans-serif;font-size:16px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>📋 Trainings Assigned to You (${assignedTrns.length})</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
         ${assignedTrns.map(t=>{
-          const myPassResult=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+          const myPassResult=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===t.name&&isOfficialResultPass(r)).sort((a,b)=>b.score-a.score)[0];
           const done=!!myPassResult||(t.completed||[]).includes(empId);
-          const myResult=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
+          const myResult=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
           var retrainedFlag=(t.retrained||[]).includes(currentUser.id);
           var offlineFlag=(t.offlineTrained||[]).includes(currentUser.id);
           var statusBadge2=done?'✅ Done':offlineFlag?'📧 Offline Training':retrainedFlag?'🔄 Retraining':'⏳ Pending';
@@ -2759,7 +2772,7 @@ function renderEmpDashboard(){
         <tbody>${myResults.map(r=>`<tr>
           <td style="font-weight:600;">${r.training}</td>
           <td><b style="color:${r.score>=70?"var(--green)":"var(--red)"}">${r.score}%</b></td>
-          <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
+          <td><span class="badge badge-${isOfficialResultPass(r)?"active":"danger"}">${isOfficialResultPass(r)?"PASS":"FAIL"}</span></td>
           <td>${formatDate(r.date)}</td>
           <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Download</button>`:"—"}</td>
         </tr>`).join("")}</tbody></table>
@@ -2780,9 +2793,14 @@ function statCard(icon,label,val,color,sub){
     <div class="stat-sub">${sub}</div>
   </div>`;
 }
-function drawCharts(dashPassed,dashFailed){
-  if(dashPassed===undefined)dashPassed=DB.testResults.filter(r=>r.pass).length;
-  if(dashFailed===undefined)dashFailed=DB.testResults.filter(r=>!r.pass).length;
+function drawCharts(dashPassed,dashFailed,selectedTrainingName){
+  var chartResults=getDashboardOfficialResults().filter(function(r){return !selectedTrainingName||selectedTrainingName==='ALL'||r.training===selectedTrainingName;});
+  var chartBestByEmpTrn={};
+  chartResults.forEach(function(r){var k=r.empId+'|'+r.training;if(!chartBestByEmpTrn[k]||r.score>chartBestByEmpTrn[k].score)chartBestByEmpTrn[k]=r;});
+  var chartOutcomeResults=Object.values(chartBestByEmpTrn);
+  var chartTrainings=selectedTrainingName&&selectedTrainingName!=='ALL'?getDashboardTrainings().filter(function(t){return t.name===selectedTrainingName;}):getDashboardTrainings();
+  if(dashPassed===undefined)dashPassed=chartResults.filter(isOfficialResultPass).length;
+  if(dashFailed===undefined)dashFailed=chartResults.filter(function(r){return !isOfficialResultPass(r);}).length;
 
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
@@ -2798,10 +2816,10 @@ function drawCharts(dashPassed,dashFailed){
     var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
     var mKey=md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0');
     monthLabels.push(monthNames[md.getMonth()]+' '+String(md.getFullYear()).slice(2));
-    var monthResults=DB.testResults.filter(function(r){return r.date&&r.date.startsWith(mKey);});
+    var monthResults=chartResults.filter(function(r){return r.date&&r.date.startsWith(mKey);});
     monthTestData.push(monthResults.length);
-    monthPassedData.push(monthResults.filter(function(r){return r.pass;}).length);
-    monthFailedData.push(monthResults.filter(function(r){return !r.pass;}).length);
+    monthPassedData.push(monthResults.filter(isOfficialResultPass).length);
+    monthFailedData.push(monthResults.filter(function(r){return !isOfficialResultPass(r);}).length);
   }
   destroyChart("chartMonthly");
   var mCtx=document.getElementById("chartMonthly");
@@ -2810,10 +2828,10 @@ function drawCharts(dashPassed,dashFailed){
   destroyChart("chartDept");
   var dCtx=document.getElementById("chartDept");
   if(dCtx){
-    var activeDepts=DEPARTMENTS.filter(function(d){return DB.employees.some(function(e){return e.dept===d;});});
-    var deptTotal=activeDepts.map(function(d){return DB.employees.filter(function(e){return e.dept===d;}).length;});
-    var deptPassed=activeDepts.map(function(d){return DB.testResults.filter(function(r){return r.pass&&r.dept===d;}).length;});
-    var deptFailed=activeDepts.map(function(d){return DB.testResults.filter(function(r){return !r.pass&&r.dept===d;}).length;});
+    var activeDepts=DEPARTMENTS.filter(function(d){return (selectedTrainingName&&selectedTrainingName!=='ALL'?getDashboardTrainingEmployees(chartTrainings[0]).some(function(e){return e.dept===d;}):DB.employees.some(function(e){return e.dept===d;}));});
+    var deptTotal=activeDepts.map(function(d){return selectedTrainingName&&selectedTrainingName!=='ALL'?getDashboardTrainingEmployees(chartTrainings[0]).filter(function(e){return e.dept===d;}).length:DB.employees.filter(function(e){return e.dept===d;}).length;});
+    var deptPassed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return isOfficialResultPass(r)&&r.dept===d;}).length;});
+    var deptFailed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return !isOfficialResultPass(r)&&r.dept===d;}).length;});
     charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
   }
   // === PASS/FAIL DOUGHNUT ===
@@ -2823,16 +2841,17 @@ function drawCharts(dashPassed,dashFailed){
   // === TRAINING-WISE COMPLETION GROUPED BAR ===
   destroyChart("chartTrnCompletion");
   var tcCtx=document.getElementById("chartTrnCompletion");
-  if(tcCtx&&DB.trainings.length){
-    var trnNames=DB.trainings.map(function(t){return t.name.length>20?t.name.slice(0,20)+'...':t.name;});
-    var trnEnrolled=DB.trainings.map(function(t){return (t.enrolled||[]).length;});
-    var trnCompleted=DB.trainings.map(function(t){
-      var passedIds=new Set(DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).map(function(r){return r.empId;}));
+  if(tcCtx&&chartTrainings.length){
+    var trnNames=chartTrainings.map(function(t){return t.name.length>20?t.name.slice(0,20)+'...':t.name;});
+    var trnEnrolled=chartTrainings.map(function(t){return getDashboardTrainingEmployees(t).length;});
+    var trnCompleted=chartTrainings.map(function(t){
+      var passedIds=new Set(chartOutcomeResults.filter(function(r){return r.training===t.name&&isOfficialResultPass(r);}).map(function(r){return r.empId;}));
       return passedIds.size;
     });
-    var trnPending=DB.trainings.map(function(t){
-      var passedIds=new Set(DB.testResults.filter(function(r){return r.training===t.name&&r.pass;}).map(function(r){return r.empId;}));
-      return (t.enrolled||[]).filter(function(eid){return !passedIds.has(eid);}).length;
+    var trnPending=chartTrainings.map(function(t){
+      var passedIds=new Set(chartOutcomeResults.filter(function(r){return r.training===t.name&&isOfficialResultPass(r);}).map(function(r){return r.empId;}));
+      var trainingEmployees=getDashboardTrainingEmployees(t);
+      return trainingEmployees.filter(function(e){return !passedIds.has(e.id);}).length;
     });
     charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});
   }
@@ -2844,7 +2863,7 @@ function drawCharts(dashPassed,dashFailed){
     var rangeColors=["#e8483a","#f0883e","#ffb020","#3ea0e8","#3ecf8e","#8b6de8"];
     var rangeCounts=ranges.map(function(rng){
       var parts=rng.replace('%','').split('-').map(Number);
-      return DB.testResults.filter(function(r){return r.score>=parts[0]&&r.score<=parts[1];}).length;
+      return chartResults.filter(function(r){return r.score>=parts[0]&&r.score<=parts[1];}).length;
     });
     charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,stepSize:1},beginAtZero:true}}}});
   }
@@ -2881,8 +2900,8 @@ function renderEmployees(){
       <table>
         <thead><tr><th>Employee</th><th>Dept</th><th>Designation</th><th>Shift</th><th>Mobile</th><th>Status</th><th>Tests Passed</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(e=>{
-          const passed=DB.testResults.filter(r=>r.empId===e.id&&r.pass).length;
-          const certs=DB.certificates.filter(c=>c.empId===e.id).length;
+          const passed=new Set(getDashboardOfficialResults().filter(function(r){return r.empId===e.id&&isOfficialResultPass(r);}).map(function(r){return r.training;})).size;
+          const certs=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
           return`<tr>
             <td><div style="display:flex;align-items:center;gap:8px;">
               <div class="avatar" style="background:${avatarColor(e.name)}">${avatarInitials(e.name)}</div>
@@ -2911,7 +2930,7 @@ function renderEmployees(){
 function renderEmpEmployee(){
   const e=DB.employees.find(x=>x.id===currentUser.id);
   if(!e){document.getElementById("view-employees").innerHTML="<div class='empty-state'><span class='mat-ico'>person</span><h3>Profile not found</h3></div>";return;}
-  const myResults=DB.testResults.filter(r=>r.empId===e.id);
+  const myResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id);
   const myCerts=DB.certificates.filter(c=>c.empId===e.id);
   document.getElementById("view-employees").innerHTML=`
     <div class="section-header"><div class="section-title">My <span>Profile</span></div></div>
@@ -2940,7 +2959,7 @@ function renderEmpEmployee(){
       <tbody>${myResults.length?myResults.map(r=>`<tr>
         <td>${r.training}</td><td><b style="color:${r.score>=70?"var(--green)":"var(--red)"}">${r.score}%</b></td>
         <td style="color:var(--green);">${r.correct}</td><td style="color:var(--red);">${r.wrong}</td>
-        <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
+        <td><span class="badge badge-${isOfficialResultPass(r)?"active":"danger"}">${isOfficialResultPass(r)?"PASS":"FAIL"}</span></td>
         <td>${formatDate(r.date)}</td>
         <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico">download</span> Certificate</button>`:"—"}</td>
       </tr>`).join(""):"<tr><td colspan='7' style='text-align:center;color:var(--muted);padding:20px;'>No test history yet</td></tr>"}</tbody></table>
@@ -3132,8 +3151,8 @@ function updateEmployee(id){
 }
 function viewEmpHistory(id){
   const e=DB.employees.find(x=>x.id===id);if(!e)return;
-  const results=DB.testResults.filter(r=>r.empId===id);
-  const certs=DB.certificates.filter(c=>c.empId===id);
+  const results=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===id);
+  const certs=getOfficialTrainingCertificates().filter(function(c){return c.empId===id;});
   openModal(`
     <div class="modal-accent"></div>
     <div class="modal-head">
@@ -3144,8 +3163,8 @@ function viewEmpHistory(id){
     <div class="modal-body">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Test History (${results.length} tests)</div>
       ${results.length?`<div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th>Training</th><th>Score</th><th>Result</th><th>Date</th><th>Certificate</th></tr></thead>
-      <tbody>${results.map(r=>`<tr><td>${r.training}</td><td><b style="color:${r.pass?"var(--green)":"var(--red)"}">${r.score}%</b></td>
-        <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"PASS":"FAIL"}</span></td>
+      <tbody>${results.map(r=>`<tr><td>${r.training}</td><td><b style="color:${isOfficialResultPass(r)?"var(--green)":"var(--red)"}">${r.score}%</b></td>
+        <td><span class="badge badge-${isOfficialResultPass(r)?"active":"danger"}">${isOfficialResultPass(r)?"PASS":"FAIL"}</span></td>
         <td>${formatDate(r.date)}</td>
         <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> Cert</button>`:"—"}</td>
       </tr>`).join("")}</tbody></table></div>`:`<p style="color:var(--muted);font-size:12px;margin-bottom:14px;">No test history</p>`}
@@ -3169,7 +3188,7 @@ function renderEmpCards(){
   h+='<div style="display:flex;gap:8px;align-items:center;"><div class="search-wrap" style="width:200px;"><span class="mat-ico">search</span><input class="search-bar" placeholder="Search employee..." oninput="_empCardsSearch=this.value;renderEmpCards();" value="'+_empCardsSearch+'"></div><button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="exportAllDataExcel()" title="Download all data as Excel/CSV"><span class="mat-ico" style="font-size:12px;">download</span> Export All</button></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;">';
   filtered.forEach(function(e){
-    var results=DB.testResults.filter(function(r){return r.empId===e.id;});
+    var results=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===e.id;});
     var passCount=results.filter(function(r){return r.pass;}).length;
     var failCount=results.filter(function(r){return !r.pass;}).length;
     var photo=e.photo||'';
@@ -3202,10 +3221,10 @@ function openEmpCardDetail(empId){
   var photo=e.photo||'';
   var avatarHTML=photo?'<img src="'+photo+'" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:72px;height:72px;font-size:26px;background:'+avatarColor(e.name)+';">'+avatarInitials(e.name)+'</div>';
   // Stats
-  var allResults=DB.testResults.filter(function(r){return r.empId===empId;});
+  var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId;});
   var passCount=allResults.filter(function(r){return r.pass;}).length;
   var failCount=allResults.filter(function(r){return !r.pass;}).length;
-  var certCount=DB.certificates.filter(function(c){return c.empId===empId;}).length;
+  var certCount=getOfficialTrainingCertificates().filter(function(c){return c.empId===empId;}).length;
   var avgScore=allResults.length?Math.round(allResults.reduce(function(s,r){return s+r.score;},0)/allResults.length):0;
   // Training-wise breakdown
   var trnGroups={};
@@ -3381,10 +3400,10 @@ function renderMyProfile(){
   if(!emp){document.getElementById('view-myprofile').innerHTML='<div class="empty-state"><span class="mat-ico">error</span><h3>Profile Not Found</h3><p>Your employee record was not found. Contact admin.</p></div>';return;}
   var photo=emp.photo||'';
   var avatarHTML=photo?'<img src="'+photo+'" style="width:90px;height:90px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:90px;height:90px;font-size:30px;background:'+avatarColor(emp.name)+';">'+avatarInitials(emp.name)+'</div>';
-  var allResults=DB.testResults.filter(function(r){return r.empId===empId;});
+  var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId;});
   var passCount=allResults.filter(function(r){return r.pass;}).length;
   var failCount=allResults.filter(function(r){return !r.pass;}).length;
-  var certCount=DB.certificates.filter(function(c){return c.empId===empId;}).length;
+  var certCount=getOfficialTrainingCertificates().filter(function(c){return c.empId===empId;}).length;
   var avgScore=allResults.length?Math.round(allResults.reduce(function(s,r){return s+r.score;},0)/allResults.length):0;
   // Retraining count — only trainings where employee failed and hasn't passed yet (unresolved)
   var retrainCount=0;
@@ -3556,13 +3575,11 @@ function getConversationsForUser(){
   // Convert to array and sort by last message time descending
   return Object.values(convMap).sort(function(a,b){return b.lastTime-a.lastTime;});
 }
-async function renderMessages(){
+function renderMessages(){
   var view=document.getElementById('view-messages');
   if(!currentUser){view.innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Login Required</h3></div>';return;}
   _chatOpenConvId=null;
   _chatMobileShowPane=false;
-  // Pull latest messages from cloud before rendering
-  await pullMessagesFromCloud();
   if(isAdmin){
     renderAdminMessages(view);
   }else{
@@ -3638,21 +3655,8 @@ function renderEmployeeMessages(view){
   var convId=getConvId('admin', empId);
   _chatOpenConvId=convId;
   // Mark all admin messages as read
-  var markedAny=false;
-  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId===empId&&!m.read){m.read=true;markedAny=true;}});
-  // Lightweight save + cloud push for read status (NO full saveDB)
-  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  if(markedAny&&firebaseReady){
-    (async function(){
-      try{
-        await authAsAdmin();
-        var convMsgs=(DB.messages||[]).filter(function(m){return m.convId===convId&&m.toId===empId&&m.read;});
-        var batch=fbDB.batch();
-        convMsgs.forEach(function(m){batch.set(fbDB.collection('messages').doc(String(m.id)),{read:true},{merge:true});});
-        if(batch._ops.length)await batch.commit();
-      }catch(e){console.warn('[Chat] Emp read-status push error:',e);}
-    })();
-  }
+  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId===empId&&!m.read)m.read=true;});
+  saveDB();
   var msgs=getConvMessages(convId);
   var h='<div class="chat-layout" id="chatLayout">';
   // No sidebar for employee — full chat with Admin
@@ -3695,21 +3699,8 @@ function openChatConv(convId, otherName, otherId){
   _chatOpenConvId=convId;
   _chatMobileShowPane=true;
   // Mark messages in this conv as read (admin reading employee messages)
-  var markedAny=false;
-  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId==='admin'&&!m.read){m.read=true;markedAny=true;}});
-  // Lightweight save + cloud push for read status (NO full saveDB)
-  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  if(markedAny&&firebaseReady){
-    (async function(){
-      try{
-        if(!isAdmin)await authAsAdmin();
-        var convMsgs=(DB.messages||[]).filter(function(m){return m.convId===convId&&m.toId==='admin'&&m.read;});
-        var batch=fbDB.batch();
-        convMsgs.forEach(function(m){batch.set(fbDB.collection('messages').doc(String(m.id)),{read:true},{merge:true});});
-        if(batch._ops.length)await batch.commit();
-      }catch(e){console.warn('[Chat] Read-status push error:',e);}
-    })();
-  }
+  (DB.messages||[]).forEach(function(m){if(m.convId===convId&&m.toId==='admin'&&!m.read)m.read=true;});
+  saveDB();
   updateBadges();
   // Highlight active conversation
   document.querySelectorAll('.chat-conv-item').forEach(function(el){
@@ -3796,23 +3787,14 @@ function sendChatMessage(){
   DB.messages.push(msg);
   input.value='';
   input.style.height='auto';
-  // Lightweight save: localStorage only (NO full saveDB which triggers 12-collection sync)
-  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-  // Push to Firebase directly — works for BOTH admin and employee
+  saveDB();
+  // Push to Firebase directly for real-time feel
   if(firebaseReady){
     (async function(){
       try{
-        // For admin, already authenticated. For employee, re-auth as admin to write.
-        if(isAdmin){
-          await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
-        }else{
-          await authAsAdmin();
-          await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
-          // Re-auth as employee so visibility handler works correctly
-          try{if(currentUser&&currentUser.password){await fbAuth.signInWithEmailAndPassword(toEmail(currentUser.id),currentUser.password);}}catch(reAuthErr){}
-        }
-        console.log('[Chat] Message pushed to cloud:',msg.id);
-      }catch(e){console.warn('[Chat] Direct message push failed:',e);}
+        await authAsAdmin();
+        await fbDB.collection('messages').doc(String(msg.id)).set(sanitizeForFirestore(msg),{merge:true});
+      }catch(e){console.warn('Direct message push failed:',e);}
     })();
   }
   // Append bubble to chat
@@ -3860,26 +3842,6 @@ function scrollChatToBottom(){
 function autoResizeTextarea(el){
   el.style.height='auto';
   el.style.height=Math.min(el.scrollHeight,100)+'px';
-}
-/* Pull new messages from Firestore and merge with local DB.messages */
-async function pullMessagesFromCloud(){
-  if(!firebaseReady)return 0;
-  try{
-    if(!isAdmin){try{await authAsAdmin();}catch(e){return 0;}}
-    var snap=await fbDB.collection('messages').get();
-    var cloudMsgs=snap.docs.map(function(d){return d.data();});
-    if(!cloudMsgs.length)return 0;
-    var localIds=new Set((DB.messages||[]).map(function(m){return m.id;}));
-    var newCount=0;
-    cloudMsgs.forEach(function(cm){
-      if(!localIds.has(cm.id)){DB.messages.push(cm);newCount++;}
-    });
-    if(newCount>0){
-      console.log('[Chat] Pulled '+newCount+' new message(s) from cloud');
-      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-    }
-    return newCount;
-  }catch(e){console.warn('[Chat] pullMessagesFromCloud error:',e);return 0;}
 }
 function goBackToConvList(){
   _chatOpenConvId=null;
@@ -4003,7 +3965,7 @@ function exportMasterAuditExcel(){
       {Item:'Corrective Actions',Value:(DB.correctiveActions||[]).length},
       {Item:'Admin Accounts',Value:DB.admins.length},
       {Item:'Notifications',Value:DB.notifications.length},
-      {Item:'Pass Rate',Value:DB.testResults.length?Math.round(DB.testResults.filter(function(r){return r.pass;}).length/DB.testResults.length*100)+'%':'N/A'},
+      {Item:'Pass Rate',Value:DB.testResults.length?Math.round(DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.pass;}).length/DB.testResults.length*100)+'%':'N/A'},
       {Item:'Min Cert Score',Value:(DB.settings.minCertScore||70)+'%'},
       {Item:'Firebase Connected',Value:firebaseReady?'Yes':'No'}
     ];
@@ -4012,9 +3974,9 @@ function exportMasterAuditExcel(){
 
     // --- Sheet 2: Employees ---
     var empData=DB.employees.map(function(e){
-      var testCount=DB.testResults.filter(function(r){return r.empId===e.id;}).length;
-      var passCount=DB.testResults.filter(function(r){return r.empId===e.id&&r.pass;}).length;
-      var certCount=DB.certificates.filter(function(c){return c.empId===e.id;}).length;
+      var testCount=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===e.id;}).length;
+      var passCount=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===e.id&&r.pass;}).length;
+      var certCount=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
       var trnCount=DB.trainings.filter(function(t){return (t.enrolled||[]).includes(e.id);}).length;
       return {
         'Employee ID':e.id,'Name':e.name,'Department':e.dept,'Designation':e.desig,
@@ -4044,7 +4006,7 @@ function exportMasterAuditExcel(){
     XLSX.utils.book_append_sheet(wb,ws3,'Trainings');
 
     // --- Sheet 4: Test Results ---
-    var trData=DB.testResults.map(function(r){
+    var trData=DB.testResults.filter(r=>!r.practice).map(function(r){
       return {
         'Test ID':r.id,'Date':r.date,'Employee ID':r.empId,'Employee Name':r.empName,
         'Department':r.dept,'Training':r.training,'Category':r.cat||'',
@@ -4165,12 +4127,12 @@ async function deleteEmp(id){
   if(!confirm("Delete employee \""+empName+"\" ("+id+") PERMANENTLY? All data will be erased. This cannot be undone."))return;
 
   // === STEP 1: Collect IDs to delete from Firebase BEFORE touching local arrays ===
-  const testResultIds=DB.testResults.filter(r=>r.empId===id).map(r=>r.id);
+  const testResultIds=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===id).map(r=>r.id);
   const certNums=DB.certificates.filter(c=>c.empId===id).map(c=>c.num);
 
   // === STEP 2: Clean ALL local data + save to localStorage IMMEDIATELY
   DB.employees=DB.employees.filter(e=>e.id!==id);
-  DB.testResults=DB.testResults.filter(r=>r.empId!==id);
+  DB.testResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId!==id);
   DB.certificates=DB.certificates.filter(c=>c.empId!==id);
   DB.trainings.forEach(t=>{
     if(t.enrolled) t.enrolled=t.enrolled.filter(eid=>eid!==id);
@@ -4275,10 +4237,14 @@ function renderTrainings(){
     <div class="training-cards">
       ${filtered.map(t=>{
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
-        const enrolledCount=(t.enrolled||[]).length;
-        const testedEmps=new Set(DB.testResults.filter(r=>r.training===t.name).map(r=>r.empId));
-        const passedEmps=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
-        const failedEmpCount=testedEmps.size-passedEmps.size;
+        const eligibleEmployees=getDashboardTrainingEmployees(t);
+        const enrolledCount=eligibleEmployees.length;
+        const eligibleIds=new Set(eligibleEmployees.map(function(e){return e.id;}));
+        const resultBest={};
+        getDashboardOfficialResults().filter(function(r){return r.training===t.name;}).forEach(function(r){if(!resultBest[r.empId]||r.score>resultBest[r.empId].score)resultBest[r.empId]=r;});
+        const testedEmps=new Set(Object.keys(resultBest));
+        const passedEmps=new Set(Object.values(resultBest).filter(function(r){return r.score>=(t.passing||70);}).map(function(r){return r.empId;}));
+        const failedEmpCount=Array.from(testedEmps).filter(function(eid){return !passedEmps.has(eid);}).length;
         const completedCount=testedEmps.size;
         const passedCount=passedEmps.size;
         const pct=enrolledCount?Math.round(completedCount/enrolledCount*100):0;
@@ -4326,21 +4292,21 @@ function renderEmpTrainings(){
     <div class="section-header"><div class="section-title">My <span>Trainings</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
       <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-      <div><b>Video Required:</b> Watch 90% of the YouTube video to unlock the test. Forwarding/skipping will NOT be counted. You can only take the test <b>one time</b> after completing the video.</div>
+      <div><b>Video Required:</b> Watch 95% of the YouTube video to unlock the test. Forwarding/skipping will NOT be counted. You can only take the test <b>one time</b> after completing the video.</div>
     </div>
     <div class="training-cards">
       ${myTrns.map(t=>{
         const catInfo=CATEGORIES[t.cat]||{color:"#ffb020",icon:"📚"};
-        const myRes=DB.testResults.filter(r=>r.empId===empId&&r.training===t.name);
-        const myPassRes=myRes.filter(r=>r.pass);
+        const myRes=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===t.name);
+        const myPassRes=myRes.filter(isOfficialResultPass);
         const done=myPassRes.length>0;
         const bestRes=myRes.length?myRes.sort((a,b)=>b.score-a.score)[0]:null;
         const alreadyTested=myRes.length>0;
         const videoProgress=((t.videoProgress||{})[empId])||0;
         const ytEmbedId=extractYoutubeId(t.youtubeLink||'');
         const hasVideo=!!ytEmbedId;
-        const videoCompleted=videoProgress>=90;
-        const canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
+        const videoCompleted=hasVideo&&videoProgress>=95;
+        const canTakeTest=videoCompleted&&!alreadyTested;
         return`<div class="training-card">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
             <div class="overlay-grad"></div>
@@ -4371,7 +4337,7 @@ function renderEmpTrainings(){
                 <div id="trnVidBar_${t.id}" style="height:100%;width:${videoProgress}%;background:${videoCompleted?"var(--green)":"linear-gradient(90deg,var(--amber),var(--green))"};border-radius:99px;transition:width 0.5s ease;"></div>
               </div>
               ${!videoCompleted?`<div id="trnVidLock_${t.id}" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);">
-                <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% — forwarding/skipping not counted
+                <span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 95% — forwarding/skipping not counted
               </div>`:`<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);">
                 <span class="mat-ico" style="font-size:13px;">check_circle</span> Video completed! You can now take the test.
               </div>`}
@@ -4381,7 +4347,7 @@ function renderEmpTrainings(){
               <span class="badge badge-${done?"active":"warning"}">${done?"✅ Completed ("+bestRes.score+"%)":alreadyTested?"❌ Failed ("+bestRes.score+"%)":"⏳ Pending"}</span>
               <span style="font-size:10.5px;color:var(--muted);">Pass: ${t.passing}%</span>
             </div>
-            ${alreadyTested?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Your score: <b style="color:${bestRes.pass?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}</div>`:""}
+            ${alreadyTested?`<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Your score: <b style="color:${isOfficialResultPass(bestRes)?"var(--green)":"var(--red)"};">${bestRes.score}%</b> (${bestRes.correct}/${bestRes.total} correct) — Attempt #${bestRes.attempt}</div>`:""}
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
               ${canTakeTest?`
                 <button id="trnVidTestBtn_${t.id}" class="btn btn-sm btn-amber" onclick="startQuizForTrn('${t.id}')" ${!videoCompleted?"disabled style=\"opacity:0.5;cursor:not-allowed;\"":videoCompleted?"style=\"animation:pulseGlow 1.5s ease-in-out infinite;\"":""}><span class="mat-ico" style="font-size:11px;">quiz</span> Take Test</button>
@@ -4429,7 +4395,7 @@ function openAddTrnModal(){
         <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="nt_yturl" placeholder="https://youtube.com/watch?v=... or https://youtu.be/..." oninput="previewTrnVideo(this.value)"></div>
         <div id="trnVideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div class="video-embed-wrap" style="max-height:180px;"><iframe id="trnVideoFrame" src="" allowfullscreen></iframe></div></div>
         <div style="margin-top:8px;padding:8px 12px;background:rgba(255,176,32,.06);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;font-size:11px;color:var(--amber);">
-          <span class="mat-ico" style="font-size:13px;">info</span> Employees must watch <b>90% of this video</b> before the test button unlocks. Forwarding/skipping is NOT counted. Test can only be taken <b>one time</b> after video completion.
+          <span class="mat-ico" style="font-size:13px;">info</span> Employees must watch <b>95% of this video</b> before the test button unlocks. Forwarding/skipping is NOT counted. Test can only be taken <b>one time</b> after video completion.
         </div>
       </div>
       <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
@@ -4595,8 +4561,8 @@ function openTrainingDetail(id){
       ${enrolledEmps.length?`<div class="table-wrap"><table>
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Attempts</th><th>Score</th><th>Certificate</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
-          const bestPass=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
-          let allResults=DB.testResults.filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
+          const bestPass=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id&&r.training===t.name&&isOfficialResultPass(r)).sort((a,b)=>b.score-a.score)[0];
+          let allResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
           // Dedup: keep only one result per date (remove same-day duplicates)
           const seenDates=new Set();allResults=allResults.filter(r=>{if(seenDates.has(r.date))return false;seenDates.add(r.date);return true;});
           const doneFromResult=!!bestPass;
@@ -4607,7 +4573,7 @@ function openTrainingDetail(id){
           const failed=allResults.length>0&&!bestPass;
           const retrained=(t.retrained||[]).includes(e.id);
           const offlineTrained=(t.offlineTrained||[]).includes(e.id);
-          const failCount=allResults.filter(r=>!r.pass).length;
+          const failCount=allResults.filter(function(r){return !isOfficialResultPass(r);}).length;
           var statusBadge,statusText;
           if(done){statusBadge='active';statusText='✅ Completed';}
           else if(offlineTrained){statusBadge='info';statusText='📧 Offline Training';}
@@ -4716,7 +4682,7 @@ function removeEmployeeFromTraining(trnId,empId,empName){
 }
 function retrainEmployee(trnId,empId,empName){
   var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
-  var allResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+  var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId&&r.training===t.name;});
   var failCount=allResults.filter(function(r){return !r.pass;}).length;
   var bestScore=allResults.length?Math.max.apply(null,allResults.map(function(r){return r.score;})):0;
   if(!confirm('STEP 2: RETRAINING\n\nEmployee: '+empName+' ('+empId+')\nTraining: '+t.name+'\nPrevious attempts: '+allResults.length+' (Best: '+bestScore+'%, Failed: '+failCount+'x)\n\nThis will allow the employee to retake the test.\\nFor BSC Audit: Corrective action — retraining assigned.\n\nProceed?'))return;
@@ -4740,7 +4706,7 @@ function retrainEmployee(trnId,empId,empName){
 function sendOfflineNotice(trnId,empId,empName){
   var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
   var emp=DB.employees.find(function(e){return e.id===empId;});
-  var allResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+  var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId&&r.training===t.name;});
   var failCount=allResults.filter(function(r){return !r.pass;}).length;
   var bestScore=allResults.length?Math.max.apply(null,allResults.map(function(r){return r.score;})):0;
   if(!confirm('STEP 3: OFFLINE TRAINING NOTICE\n\nEmployee: '+empName+' ('+empId+')\nDepartment: '+(emp?emp.dept:'')+'\nTraining: '+t.name+'\nTrainer: '+t.trainer+'\nAttempts: '+allResults.length+' (Best: '+bestScore+'%, Failed: '+failCount+'x)\n\nThis will:\n1. Mark employee as "Offline Training" assigned\n2. Generate NCR PDF and upload to Google Drive\n3. Record corrective action for BSC audit\n\nProceed?'))return;
@@ -4796,7 +4762,7 @@ function uploadOfflineNCR_ToDrive(rec,trn,emp){
   html+='<tr><td style="border:1px solid #000;padding:4px 6px;font-weight:bold;font-size:9.5pt;background:#f2f7fc;">Verified By:</td><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;"></td><td style="border:1px solid #000;padding:4px 6px;font-weight:bold;font-size:9.5pt;background:#f2f7fc;">Verification Date:</td><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;"></td></tr>';
   html+='<tr><td style="border:1px solid #000;padding:4px 6px;font-weight:bold;font-size:9.5pt;background:#f2f7fc;">Remarks:</td><td colspan="3" style="border:1px solid #000;padding:4px 6px;font-size:10pt;min-height:40px;"></td></tr>';
   html+='<tr><td colspan="4" style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:10pt;padding:4px 6px;text-align:center;letter-spacing:1px;">ATTEMPT HISTORY</td></tr>';
-  var results=DB.testResults.filter(function(r){return r.empId===rec.empId&&r.training===rec.training;});
+  var results=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===rec.empId&&r.training===rec.training;});
   results.forEach(function(r,i){
     html+='<tr><td style="border:1px solid #000;padding:3px 6px;font-size:10px;">Attempt '+(i+1)+'</td><td style="border:1px solid #000;padding:3px 6px;font-size:10px;">'+r.date+'</td><td style="border:1px solid #000;padding:3px 6px;font-size:10px;">'+r.score+'%</td><td style="border:1px solid #000;padding:3px 6px;font-size:10px;color:'+(r.pass?'green':'red')+';font-weight:bold;">'+(r.pass?'PASS':'FAIL')+'</td></tr>';
   });
@@ -4817,12 +4783,12 @@ async function deleteTraining(id){
   if(!trn)return;
   var trnName=trn.name||id;
   // Collect IDs before cleaning
-  var linkedTestIds=DB.testResults.filter(function(r){return r.training===trn.name;}).map(function(r){return r.id;});
+  var linkedTestIds=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===trn.name;}).map(function(r){return r.id;});
   var linkedCertNums=DB.certificates.filter(function(c){return c.training===trn.name;}).map(function(c){return c.num;});
 
   // === STEP 1: Clean ALL local data IMMEDIATELY ===
   DB.trainings=DB.trainings.filter(function(t){return t.id!==id;});
-  linkedTestIds.forEach(function(tid){DB.testResults=DB.testResults.filter(function(r){return r.id!==tid;});});
+  linkedTestIds.forEach(function(tid){DB.testResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.id!==tid;});});
   linkedCertNums.forEach(function(cnum){DB.certificates=DB.certificates.filter(function(c){return c.num!==cnum;});});
   // CRITICAL: Save to localStorage IMMEDIATELY so delete persists even if Firebase fails
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
@@ -5060,13 +5026,13 @@ function initTrnVideoTracker(ytVideoId,trnId,empId){
             var tt=document.getElementById('trnVidTime_'+trnId);
             var cb=document.getElementById('trnVidTestBtn_'+trnId);
             var lm=document.getElementById('trnVidLock_'+trnId);
-            if(pb){pb.style.width=tracker.percent+'%';if(tracker.percent>=90)pb.style.background='var(--green)';}
-            if(pt){pt.textContent=tracker.percent+'%';pt.style.color=tracker.percent>=90?'var(--green)':'var(--amber)';}
+            if(pb){pb.style.width=tracker.percent+'%';if(tracker.percent>=95)pb.style.background='var(--green)';}
+            if(pt){pt.textContent=tracker.percent+'%';pt.style.color=tracker.percent>=95?'var(--green)':'var(--amber)';}
             if(tt){var cm=Math.floor(cur/60);var cs=Math.floor(cur%60);tt.textContent=cm+':'+String(cs).padStart(2,'0');}
-            // Unlock test button at 90%
-            if(cb&&tracker.percent>=90){cb.disabled=false;cb.style.opacity='1';cb.style.cursor='pointer';cb.style.animation='pulseGlow 1.5s ease-in-out infinite';}
+            // Unlock test button at 95%
+            if(cb&&tracker.percent>=95){cb.disabled=false;cb.style.opacity='1';cb.style.cursor='pointer';cb.style.animation='pulseGlow 1.5s ease-in-out infinite';}
             // Hide lock message
-            if(lm&&tracker.percent>=90){lm.style.display='none';}
+            if(lm&&tracker.percent>=95){lm.style.display='none';}
             // Save progress to training object
             if(tracker.percent>0){
               var trn2=DB.trainings.find(function(t){return t.id===trnId;});
@@ -5117,7 +5083,7 @@ function startQuizForTrn(trnId){
   // Check if already tested (BSC: allow retake if retrained)
   var empId=currentUser.id;
   var isRetrained2=(t.retrained||[]).includes(empId);
-  var existingResults=DB.testResults.filter(function(r){return r.empId===empId&&r.training===t.name;});
+  var existingResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId&&r.training===t.name;});
   if(existingResults.length>0&&!isRetrained2){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only. Contact admin for retraining.','error');return;}
   if(existingResults.length>0&&isRetrained2){var hasPass=existingResults.find(function(r){return r.pass;});if(hasPass){toast('You already passed this test (score: '+hasPass.score+'%). No retake needed.','success',3000);return;}toast('Retake allowed — previous attempt(s) failed. Give your best!','info',3000);}
   // Check video progress if YouTube link exists (use R2 video if applicable)
@@ -5125,10 +5091,9 @@ function startQuizForTrn(trnId){
   DB.trainings.forEach(function(tr){(tr.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId===trnId){r2RecForQuiz=r;}});});
   var quizVidLink=r2RecForQuiz&&r2RecForQuiz.r2Video?r2RecForQuiz.r2Video:t.youtubeLink||'';
   var ytId=extractYoutubeId(quizVidLink);
-  if(ytId){
-    var vp=((t.videoProgress||{})[empId])||0;
-    if(vp<90){toast('Watch at least 90% of the video first! Current: '+vp+'%','error');return;}
-  }
+  if(!ytId){toast('A training video is required before taking this test.','error');return;}
+  var vp=((t.videoProgress||{})[empId])||0;
+  if(vp<95){toast('Watch at least 95% of the video first! Current: '+vp+'%','error');return;}
   // Build question pool: custom questions first, then from bank
   var allQs=[];
   // Add custom questions stored in the training object
@@ -5277,7 +5242,7 @@ async function deleteSOP(id){
 function renderQuizMenu(){
   // For employees: show category grid + their test history
   if(!isAdmin){
-    var myResults=DB.testResults.filter(function(r){return r.empId===currentUser.id;}).sort(function(a,b){return b.date.localeCompare(a.date);});
+    var myResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===currentUser.id;}).sort(function(a,b){return b.date.localeCompare(a.date);});
     var passed=myResults.filter(function(r){return r.pass;}).length;
     var failed=myResults.length-passed;
     var avgScore=myResults.length?Math.round(myResults.reduce(function(s,r){return s+r.score;},0)/myResults.length):0;
@@ -5304,15 +5269,20 @@ function renderQuizMenu(){
       </div>
       <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
         <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-        <div>Click a category below to take an online test. For training-specific tests (with video), go to the <b>Trainings</b> page. Training tests allow retakes after failure (BSC auto-retraining). 90% video watch required for training-specific tests.</div>
+        <div><b>Official tests</b> update training completion, dashboard statistics, rankings, and certificates. For training-specific tests (with video), go to the <b>Trainings</b> page.</div>
       </div>
-      <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>Take a Test by Category</div>
+      <div style="background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.28);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
+        <span class="mat-ico" style="color:var(--blue);font-size:20px;">school</span>
+        <div style="flex:1"><b>Practice Test</b><br><span style="color:var(--muted)">Use this mode for learning and revision. Practice scores, attempts, rankings, dashboard totals, official certificates, retraining, and compliance reports are not affected.</span></div>
+        <select id="practiceCategorySelect" class="form-control-sm" style="min-width:150px"><option value="">Choose category</option>${TRAINING_CATS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('')}</select><button class="btn btn-sm" style="background:var(--blue);color:#fff" onclick="var c=document.getElementById('practiceCategorySelect').value;if(!c){toast('Choose a category for the practice test','error');return;}startPracticeQuiz(c)"><span class="mat-ico" style="font-size:12px;">play_arrow</span> Start Practice</button>
+      </div>
+      <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>Take an Official Test by Category</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:20px;">
         ${quizCats.map(cat=>{
           var catInfo=CATEGORIES[cat]||null;
           var resolvedCat=resolveQuizCategory(cat);
           var qCount=(QUESTION_BANK[resolvedCat]||[]).length;
-          var myPassedForCat=DB.testResults.filter(r=>r.empId===currentUser.id&&r.cat===cat&&r.pass).length;
+          var myPassedForCat=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===currentUser.id&&r.cat===cat&&r.pass).length;
           return'<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;cursor:pointer;transition:all var(--trans);position:relative;" onclick="startQuiz(\''+cat+'\',null)" onmouseover="this.style.borderColor=\''+(catInfo?.color||"var(--amber)")+'\'" onmouseout="this.style.borderColor=\'var(--bdr)\'">'+
             '<div style="font-size:28px;margin-bottom:8px;">'+(catInfo?.icon||"📋")+'</div>'+
             '<div style="font-size:12px;font-weight:700;text-transform:uppercase;">'+cat+'</div>'+
@@ -5322,7 +5292,7 @@ function renderQuizMenu(){
           '</div>';
         }).join("")}
       </div>
-      <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue);margin-right:6px;"></span>My Test History</div>
+      <div class="section-title" style="margin-bottom:10px;font-size:14px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue);margin-right:6px;"></span>My Official Test History</div>
       ${myResults.length?'<div class="table-wrap"><table><thead><tr><th>Date</th><th>Training</th><th>Score</th><th>Result</th><th>Attempt</th></tr></thead><tbody>'+myResults.map(function(r){return'<tr><td style="font-weight:600;">'+formatDate(r.date)+'</td><td>'+r.training+'</td><td><b style="color:'+(r.pass?'var(--green)':'var(--red)')+';">'+r.score+'%</b></td><td><span class="badge badge-'+(r.pass?'active':'danger')+'">'+(r.pass?'PASSED':'FAILED')+'</span></td><td>#'+r.attempt+'</td></tr>';}).join('')+'</tbody></table></div>':'<div class="empty-state"><span class="mat-ico">quiz</span><h3>No tests taken yet</h3><p>Select a category above to get started</p></div>'}
     `;
     return;
@@ -5338,7 +5308,7 @@ function renderQuizMenu(){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
       ${cats.map(cat=>{
         const catInfo=CATEGORIES[cat]||null;
-        const myPassed=isAdmin?0:DB.testResults.filter(r=>r.empId===currentUser?.id&&r.training?.includes(cat)&&r.pass).length;
+        const myPassed=isAdmin?0:DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===currentUser?.id&&r.training?.includes(cat)&&r.pass).length;
         const resolvedCat=resolveQuizCategory(cat);
         const qCount=(QUESTION_BANK[resolvedCat]||[]).length;
         return`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;cursor:pointer;transition:all var(--trans);position:relative;" onclick="startQuiz('${cat}',null)" onmouseover="this.style.borderColor='${catInfo?.color||"var(--amber)"}'" onmouseout="this.style.borderColor='var(--bdr)'">
@@ -5352,13 +5322,23 @@ function renderQuizMenu(){
     </div>
   `;
 }
+function startPracticeQuiz(category){
+  if(!currentUser){toast("Please login first","error");return;}
+  startQuiz(category,null);
+  if(quizState.active){
+    quizState.practice=true;
+    quizState.training=resolveQuizCategory(category)+" Practice Test";
+    renderQuizActive();
+    toast("Practice mode: this attempt will not affect official records or certificates.","info",4500);
+  }
+}
 function startQuiz(category,trainingName){
   if(!currentUser){toast("Please login first","error");return;}
   // ONE ATTEMPT PER TRAINING: Check if employee already took this test (BSC: allow retake if retrained)
   if(trainingName){
     var trnMatch2=DB.trainings.find(function(t){return t.name===trainingName;});
     var isRetrained=trnMatch2&&(trnMatch2.retrained||[]).includes(currentUser.id);
-    var existingResults2=DB.testResults.filter(function(r){return r.empId===currentUser.id&&r.training===trainingName;});
+    var existingResults2=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===currentUser.id&&r.training===trainingName;});
     if(existingResults2.length>0&&!isRetrained){
       var best2=existingResults2.sort(function(a,b){return b.score-a.score;})[0];
       toast('You have already attempted \"'+trainingName+'\" (Score: '+best2.score+'%, '+(best2.pass?'Passed':'Failed')+'). Only one attempt is allowed. Contact admin for retraining.','warning',5000);
@@ -5392,7 +5372,7 @@ function startQuiz(category,trainingName){
   });
   const trnMatch=trainingName?DB.trainings.find(t=>t.name===trainingName):null;
   const timeLimit=processedQs.length*90;
-  quizState={active:true,training:trainingName||category+" Test",category,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch,startTime:Date.now()};
+  quizState={active:true,practice:false,training:trainingName||category+" Test",category,questions:processedQs,current:0,answers:new Array(processedQs.length).fill(-1),timer:null,timeLeft:timeLimit,trnMatch,startTime:Date.now()};
   renderQuizActive();
   quizState.timer=setInterval(()=>{
     quizState.timeLeft--;
@@ -5418,7 +5398,7 @@ function renderQuizActive(){
       <div class="quiz-header">
         <div class="quiz-ico" style="background:rgba(255,176,32,.1)"><span class="mat-ico" style="color:var(--amber);font-size:26px;">quiz</span></div>
         <div style="flex:1;">
-          <div class="quiz-title">${quizState.training}</div>
+          <div class="quiz-title">${quizState.training} ${quizState.practice?'<span class="badge badge-info" style="font-size:10px;vertical-align:middle;">PRACTICE — NOT OFFICIAL</span>':''}</div>
           <div style="font-size:11px;color:var(--muted);">Q ${current+1} of ${questions.length}</div>
         </div>
         <div class="timer-display${quizState.timeLeft<=30?" urgent":""}" id="timerDisp">${m}:${String(s).padStart(2,"0")}</div>
@@ -5454,6 +5434,43 @@ function selectAnswer(i){if(!quizState.active)return;quizState.answers[quizState
 function nextQuestion(){if(quizState.current<quizState.questions.length-1){quizState.current++;renderQuizActive();}}
 function prevQuestion(){if(quizState.current>0){quizState.current--;renderQuizActive();}}
 function jumpToQuestion(i){quizState.current=i;renderQuizActive();}
+function submitPracticeQuiz(){
+  if(window._practiceSubmitting)return;
+  window._practiceSubmitting=true;
+  clearInterval(quizState.timer);
+  var qs=quizState.questions, answers=quizState.answers, correct=0;
+  qs.forEach(function(q,i){if(answers[i]===q.a)correct++;});
+  var total=qs.length, wrong=answers.filter(function(a,i){return a>=0&&a!==qs[i].a;}).length;
+  var skipped=answers.filter(function(a){return a<0;}).length;
+  var score=Math.round(correct/total*100), empId=currentUser.id||currentUser.username||'USER';
+  var today=new Date().toISOString().split('T')[0];
+  if(!DB.practiceResults)DB.practiceResults=[];
+  if(!DB.practiceCertificates)DB.practiceCertificates=[];
+  var practiceCertNum='PRA-CERT-'+Date.now().toString(36).toUpperCase();
+  DB.practiceResults.push({id:genId('PRA'),empId:empId,empName:currentUser.name||currentUser.username||'User',dept:currentUser.dept||'',training:quizState.training,cat:quizState.category,score:score,correct:correct,wrong:wrong,skipped:skipped,total:total,date:today,practice:true,practiceCert:practiceCertNum});
+  DB.practiceCertificates.push({num:practiceCertNum,empId:empId,empName:currentUser.name||currentUser.username||'User',training:quizState.training,category:quizState.category,score:score,issued:today,practice:true});
+  saveDB();
+  quizState.active=false;
+  document.getElementById('view-quiz').innerHTML=`<div class="quiz-wrap"><div class="result-card"><div class="badge badge-info" style="font-size:12px;padding:6px 14px;margin-bottom:12px;">PRACTICE RESULT — NOT OFFICIAL</div><div class="result-score '+(score>=70?'result-pass':'result-fail')+'">'+score+'%</div><div class="result-label '+(score>=70?'result-pass':'result-fail')+'">'+(score>=70?'PRACTICE PASS':'KEEP PRACTICING')+'</div><div style="margin:12px 0;font-size:13px;color:var(--muted);">'+quizState.training+'</div><div style="display:flex;justify-content:center;gap:24px;margin:16px 0;"><div><b style="font-size:28px;color:var(--green)">'+correct+'</b><br><small>Correct</small></div><div><b style="font-size:28px;color:var(--red)">'+wrong+'</b><br><small>Wrong</small></div><div><b style="font-size:28px;color:var(--muted)">'+skipped+'</b><br><small>Skipped</small></div></div><div style="padding:10px;background:rgba(62,160,232,.08);border:1px solid rgba(62,160,232,.25);border-radius:8px;font-size:12px;color:var(--blue);">This practice attempt was saved separately for your learning. It does not create an official certificate, change your dashboard, affect rankings, trigger retraining, or enter official reports. A separate practice acknowledgement is available below.</div><button class="btn btn-blue" style="margin-top:16px" onclick="downloadPracticeCertificate('${practiceCertNum}')"><span class="mat-ico">download</span> Practice Certificate</button> <button class="btn btn-amber" style="margin-top:16px" onclick="renderQuizMenu()">Back to Online Tests</button></div></div>`;
+  window._practiceSubmitting=false;
+}
+function downloadPracticeCertificate(num){
+  var c=(DB.practiceCertificates||[]).find(function(x){return x.num===num;});
+  if(!c){toast('Practice certificate not found','error');return;}
+  if(!window.jspdf||!window.jspdf.jsPDF){toast('PDF library is not available','error');return;}
+  var doc=new window.jspdf.jsPDF({orientation:'landscape'});
+  doc.setFillColor(13,17,23);doc.rect(0,0,297,210,'F');
+  doc.setDrawColor(255,176,32);doc.setLineWidth(2);doc.rect(12,12,273,186);
+  doc.setTextColor(255,176,32);doc.setFontSize(28);doc.text('PTS SAFETY',148,42,{align:'center'});
+  doc.setTextColor(230,237,243);doc.setFontSize(20);doc.text('PRACTICE ACKNOWLEDGEMENT',148,62,{align:'center'});
+  doc.setFontSize(14);doc.text('This acknowledges that',148,88,{align:'center'});
+  doc.setFontSize(22);doc.setTextColor(62,207,142);doc.text(c.empName,148,104,{align:'center'});
+  doc.setTextColor(230,237,243);doc.setFontSize(14);doc.text('completed a practice test in',148,122,{align:'center'});
+  doc.setFontSize(17);doc.text(c.training,148,138,{align:'center'});
+  doc.setTextColor(255,176,32);doc.setFontSize(18);doc.text('Practice Score: '+c.score+'%',148,158,{align:'center'});
+  doc.setTextColor(125,133,144);doc.setFontSize(9);doc.text('For learning and revision purposes only. Not an official competency certificate.',148,176,{align:'center'});doc.text('Reference: '+c.num+'   Date: '+c.issued,148,187,{align:'center'});
+  doc.save(c.num+'.pdf');
+}
 function submitQuiz(){
   if(window._quizSubmitting){toast('Please wait, result is being saved','error');return;}
   window._quizSubmitting=true;
@@ -5479,9 +5496,10 @@ function submitQuiz(){
   const timeTakenSec=quizState.startTime?Math.round((Date.now()-quizState.startTime)/1000):0;
   const timeTakenStr=timeTakenSec>=60?Math.floor(timeTakenSec/60)+'m '+String(timeTakenSec%60).padStart(2,'0')+'s':timeTakenSec+'s';
   const certNum=qualifiesForCert&&pass?"CERT-"+Date.now().toString(36).toUpperCase():"";
-  const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||"",timeTaken:timeTakenSec,timeTakenStr:timeTakenStr};
+  const failureReason=pass?"Passed":"Score " + score + "% is below the required passing mark of " + passing + "% (" + correct + " correct, " + wrong + " wrong, " + skipped + " skipped).";
+  const result={id:genId("TST"),empId,empName,dept,training:quizState.training,cat:quizState.category,score,correct,wrong,skipped,total,pass,date:today,cert:certNum,attempt:DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===quizState.training).length+1,trainer:trnMatch?.trainer||"",passing, failureReason, timeTaken:timeTakenSec,timeTakenStr:timeTakenStr};
   // Dedup: remove any existing result for same emp+training+date+score (double-submit protection)
-  DB.testResults=DB.testResults.filter(r=>!(r.empId===empId&&r.training===quizState.training&&r.date===today&&r.score===score));
+  DB.testResults=DB.testResults.filter(r=>!r.practice).filter(r=>!(r.empId===empId&&r.training===quizState.training&&r.date===today&&r.score===score));
   DB.testResults.push(result);
   if(certNum){
     const expiry=new Date();
@@ -5496,8 +5514,7 @@ function submitQuiz(){
     if(pass&&!trnMatch.completed.includes(empId)){trnMatch.completed.push(empId);trnMatch.completedDates[empId]=today;}
   }
   updateBadges();
-  // Lightweight save: localStorage only (NO full saveDB — quiz result is pushed to Firebase directly below)
-  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  saveDB();
   // Force immediate Firebase save for test result so it's not lost
   if(firebaseReady){
     (async function(){
@@ -5552,12 +5569,12 @@ function submitQuiz(){
         var bscTrnId=trnMatch?trnMatch.id:null;
         var bscTrnCat=quizState.category;
         var bscTrnObj=trnMatch; // may be null for category-only quizzes
-        toast('BSC Auto-Escalation triggered for '+bscTrnName+' (fail #'+(DB.testResults.filter(function(r){return r.empId===empId&&!r.pass&&r.training===bscTrnName;}).length)+')','error',4000);
+        toast('BSC Auto-Escalation triggered for '+bscTrnName+' (fail #'+(DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId&&!r.pass&&r.training===bscTrnName;}).length)+')','error',4000);
         (function(){
           var t=bscTrnObj;var eid=empId;var ename=empName;
           var trnName=bscTrnName;var trnId=bscTrnId;
           // Count failures for this training/category
-          var allRes=DB.testResults.filter(function(r){return r.empId===eid&&(r.training===trnName||(trnMatch&&r.training===trnMatch.name));});
+          var allRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===eid&&(r.training===trnName||(trnMatch&&r.training===trnMatch.name));});
           var failCnt=allRes.filter(function(r){return !r.pass;}).length;
           var bestSc=allRes.length?Math.max.apply(null,allRes.map(function(r){return r.score;})):0;
           // Remove from completed if training exists
@@ -5617,10 +5634,7 @@ function submitQuiz(){
               }catch(e){console.warn('FB auto-escalation:',e);}
             })();
           }
-          // Lightweight save: localStorage only (BSC data is pushed to Firebase directly above)
-          try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
-          // Trigger full sync in background for admin (non-blocking)
-          if(isAdmin&&firebaseReady){try{saveDB();}catch(e){}}
+          saveDB();
           console.log('[BSC Auto-Escalation] failCnt='+failCnt+' eid='+eid+' trn='+trnName+' CA total='+(DB.correctiveActions||[]).length);
         })();
         updateBadges();
@@ -5673,7 +5687,7 @@ function submitQuiz(){
   else toast(`❌ Failed. Score: ${score}%. Required: ${passing}%.`,"error",4000);
 }
 
-function handleSubmitTestClick(){var allAnswered=quizState.answers.every(function(a){return a>=0;});var unanswered=quizState.answers.filter(function(a){return a<0;}).length;if(unanswered>0){toast(unanswered+' question(s) not answered. Please answer all before submitting.','error');return;}showFeedbackForm();}
+function handleSubmitTestClick(){var allAnswered=quizState.answers.every(function(a){return a>=0;});var unanswered=quizState.answers.filter(function(a){return a<0;}).length;if(unanswered>0){toast(unanswered+' question(s) not answered. Please answer all before submitting.','error');return;}if(quizState.practice){submitPracticeQuiz();return;}showFeedbackForm();}
 function showFeedbackForm(){if(!quizState.active)return;var overlay=document.getElementById('feedbackOverlay');if(overlay){overlay.style.display='flex';return;}
 var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
 var today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
@@ -5704,36 +5718,31 @@ div.innerHTML=`
   <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>
 </tr>
 </table>
-<!-- EMPLOYEE INFORMATION: 3-col layout matching IMSP 29 F05 sheet -->
+<!-- EMPLOYEE INFORMATION: flat 3-col table matching docx -->
 <table style="width:100%;border-collapse:collapse;">
 <tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>
 <tr>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Name:</td>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Employee ID:</td>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:50%;">Department:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">${currentUser.name||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;font-size:10pt;">${currentUser.dept||'\u2014'}</span></td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.name||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.id||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.dept||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.id||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;font-size:10pt;">${managerHtml}</span></td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:</td>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.desig||'\u2014'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;font-size:10pt;">${today}</span></td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${currentUser.desig||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${today}</td>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${managerHtml}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>
+  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>${quizState.training}</b></td>
 </tr>
 <tr>
-  <td colspan="2" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>
-  <td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>
-</tr>
-<tr>
-  <td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;"><b>${quizState.training}</b></td>
-  <td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td>
+  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>
+  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td>
 </tr>
 </table>
 <!-- INSTRUCTION -->
@@ -5847,32 +5856,27 @@ html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align
 html+='</tr>';
 html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Name:</td>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:25%;">Employee ID:</td>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:50%;">Department:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">'+(fb.empName||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;">'+(fb.dept||'')+'</span></td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.empName||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.empId||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.dept||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.empId||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;">'+(fb.manager||'')+'</span></td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:</td>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.desig||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;">'+fmtDate+'</span></td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.desig||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+fmtDate+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.manager||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>';
+html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td colspan="2" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>';
-html+='<td style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;font-size:10pt;vertical-align:middle;">'+(fb.trainer||'')+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>';
+html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.trainer||'')+'</td>';
 html+='</tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
 html+='<tr>';
@@ -6011,23 +6015,8 @@ _fbRatings={};_fbOverall=0;
 if(firebaseReady){(async function(){try{if(!isAdmin)await authAsAdmin();fbDB.collection('feedbackForms').doc(String(fb.id)).set(sanitizeForFirestore(fb),{merge:true});console.log('Feedback saved to Firebase');if(!isAdmin)await authAsAdmin();}catch(e){console.warn('Firebase feedback save error:',e);}})();}
 // Upload IMSP 29 F05 Feedback PDF to Google Drive
 setTimeout(function(){uploadFeedbackPDFToDrive(fb);},500);
-// Append this feedback row directly to Google Sheet (does NOT clear existing rows)
-(function(){
-  try{
-    var url=DB.settings.sheetUrl||"";
-    if(!url) return;
-    // Build single-row payload for this feedback only
-    var company=DB.settings.companyName||"PTS SAFETY";
-    var qScores=[];for(var k in (fb.ratings||{})){var r=fb.ratings[k];if(r&&r.score)qScores.push(r.score);}
-    var avgScore=qScores.length?Math.round(qScores.reduce(function(a,b){return a+b;},0)/qScores.length*10)/10:'';
-    var row={Company:company,Name:fb.empName||'',"Employee ID":fb.empId||'',Department:fb.dept||'',"Job Title":fb.desig||'',Date:fb.date||'',Manager:fb.manager||'',"Training Course":fb.training||'',Trainer:fb.trainer||'',Category:fb.category||''};
-    for(var i=0;i<FB_QUESTIONS.length;i++){var rk='q'+(i+1);var rd=(fb.ratings||{})[rk];row['Q'+(i+1)]=rd?rd.label:'';row['Q'+(i+1)+' Score']=rd?rd.score:'';}
-    row['Overall Rating']=fb.overallLabel||'';row['Overall Score']=fb.overallRating||'';row['Average Score']=avgScore;row['What did you enjoy most?']=fb.enjoy||'';row['Suggestions']=fb.suggestions||'';
-    appendRowToSheet(url, row, "Feedback").then(function(){
-      console.log('[Feedback] Appended to Google Sheet successfully');
-    }).catch(function(e){console.warn('[Feedback] Sheet append error:',e);});
-  }catch(e){console.warn('[Feedback] Sheet append error:',e);}
-})();
+// Push feedback to Google Sheet via the debounced queueSheetSync system
+queueSheetSync(["Feedback"]);
 submitQuiz();
 }
 
@@ -6035,7 +6024,9 @@ submitQuiz();
    CERTIFICATES
 ============================================================ */
 function renderCertificates(){
-  const certs=isAdmin?DB.certificates:DB.certificates.filter(c=>c.empId===currentUser.id);
+  const officialCerts=getOfficialTrainingCertificates();
+  const certs=isAdmin?officialCerts:officialCerts.filter(c=>c.empId===currentUser.id);
+  const practiceCerts=isAdmin?(DB.practiceCertificates||[]):(DB.practiceCertificates||[]).filter(c=>c.empId===currentUser.id);
   const expiring=certs.filter(c=>{const d=daysUntil(c.expiry);return d>=0&&d<=30;});
   document.getElementById("view-certificates").innerHTML=`
     <div class="section-header">
@@ -6068,6 +6059,11 @@ function renderCertificates(){
           `<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No certificates issued yet</td></tr>`}
         </tbody>
       </table>
+    </div>
+    <div style="margin-top:20px;padding:14px;background:rgba(62,160,232,.07);border:1px solid rgba(62,160,232,.25);border-radius:var(--r);">
+      <div class="section-title" style="font-size:15px;margin-bottom:8px;">Practice <span>Acknowledgements</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">These documents are for practice and learning purposes only. They are not official competency certificates and are excluded from dashboards, rankings, compliance reports, and training completion.</div>
+      ${practiceCerts.length?`<div class="table-wrap"><table><thead><tr><th>Reference</th><th>Employee</th><th>Practice Test</th><th>Score</th><th>Date</th><th>Download</th></tr></thead><tbody>${practiceCerts.slice().reverse().map(c=>`<tr><td class="mono" style="color:var(--blue);">${c.num}</td><td>${c.empName}</td><td>${c.training}</td><td><b style="color:var(--blue);">${c.score}%</b></td><td>${formatDate(c.issued)}</td><td><button class="btn btn-sm" style="background:var(--blue);color:#fff" onclick="downloadPracticeCertificate('${c.num}')"><span class="mat-ico" style="font-size:12px;">download</span> PDF</button></td></tr>`).join('')}</tbody></table></div>`:`<div style="font-size:12px;color:var(--muted);padding:12px 0;">No practice acknowledgements yet.</div>`}
     </div>
   `;
 }
@@ -6199,7 +6195,8 @@ function downloadCertificate(certNum){
   toast("Certificate downloaded successfully","success");
 }
 function exportCertExcel(){
-  const certs=isAdmin?DB.certificates:DB.certificates.filter(c=>c.empId===currentUser.id);
+  const officialCerts=getOfficialTrainingCertificates();
+  const certs=isAdmin?officialCerts:officialCerts.filter(c=>c.empId===currentUser.id);
   const ws=XLSX.utils.json_to_sheet(certs.map(c=>({
     "Certificate No":c.num,"Employee ID":c.empId,"Employee Name":c.empName,
     "Training":c.training,"Score":c.score+"%","Department":c.dept,
@@ -6215,8 +6212,9 @@ function exportCertExcel(){
 ============================================================ */
 function renderReports(){
   if(!isAdmin){document.getElementById("view-reports").innerHTML="<div class='empty-state'><span class='mat-ico'>lock</span><h3>Admin Access Only</h3></div>";return;}
-  const passCount=DB.testResults.filter(r=>r.pass).length;
-  const failCount=DB.testResults.filter(r=>!r.pass).length;
+  const reportResults=getDashboardOfficialResults();
+  const passCount=reportResults.filter(isOfficialResultPass).length;
+  const failCount=reportResults.filter(function(r){return !isOfficialResultPass(r);}).length;
   document.getElementById("view-reports").innerHTML=`
     <div class="section-header"><div class="section-title">Reports & <span>Analytics</span></div></div>
     <div style="background:linear-gradient(135deg,rgba(255,176,32,.1),rgba(139,109,232,.1));border:1px solid rgba(255,176,32,.3);border-radius:var(--r);padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
@@ -6243,7 +6241,7 @@ function renderReports(){
     <div class="table-wrap">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--sur2);border-bottom:1px solid var(--bdr);flex-wrap:wrap;gap:8px;">
         <div><strong style="font-size:12px;text-transform:uppercase;">All Test Results</strong>
-          <span style="font-size:11px;color:var(--muted);margin-left:8px;">(${DB.testResults.length} records · <span style="color:var(--green)">${passCount} PASS</span> · <span style="color:var(--red)">${failCount} FAIL</span>)</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:8px;">(${reportResults.length} official records · <span style="color:var(--green)">${passCount} PASS</span> · <span style="color:var(--red)">${failCount} FAIL</span>)</span>
         </div>
         <div style="display:flex;gap:6px;">
           <button class="btn btn-sm btn-outline" onclick="recalcPassFail()"><span class="mat-ico" style="font-size:12px;">sync</span> Recalculate</button>
@@ -6254,7 +6252,7 @@ function renderReports(){
       <table>
         <thead><tr><th>Date</th><th>Emp ID</th><th>Name</th><th>Dept</th><th>Training</th><th>Score</th><th>Correct</th><th>Wrong</th><th>Total Q</th><th>Attempt</th><th>Time Taken</th><th>Result</th><th>Certificate No</th></tr></thead>
         <tbody>
-          ${DB.testResults.length?DB.testResults.map(r=>`<tr>
+          ${reportResults.length?reportResults.map(r=>`<tr>
             <td>${formatDate(r.date)}</td>
             <td class="mono" style="color:var(--amber);font-weight:700;">${r.empId}</td>
             <td>${r.empName}</td>
@@ -6266,7 +6264,7 @@ function renderReports(){
             <td>${r.total}</td>
             <td>#${r.attempt}</td>
             <td style="color:var(--blue);font-size:11px;">${r.timeTakenStr||'—'}</td>
-            <td><span class="badge badge-${r.pass?"active":"danger"}">${r.pass?"✅ PASS":"❌ FAIL"}</span></td>
+            <td><span class="badge badge-${isOfficialResultPass(r)?"active":"danger"}">${isOfficialResultPass(r)?"✅ PASS":"❌ FAIL"}</span></td>
             <td class="mono" style="font-size:10px;color:var(--purple);">${r.cert||"—"}</td>
           </tr>`).join(""):`<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:24px;">No test results yet</td></tr>`}
         </tbody>
@@ -6278,7 +6276,7 @@ function renderReports(){
     if(!ctx)return;
     const catData=TRAINING_CATS.slice(0,8);
     const enrolled=catData.map(c=>DB.trainings.filter(t=>t.cat===c).reduce((s,t)=>(t.enrolled||[]).length+s,0));
-    const passed=catData.map(c=>DB.testResults.filter(r=>r.pass&&(r.cat===c||r.training?.toLowerCase().includes(c.toLowerCase()))).length);
+    const passed=catData.map(c=>DB.testResults.filter(r=>!r.practice).filter(r=>r.pass&&(r.cat===c||r.training?.toLowerCase().includes(c.toLowerCase()))).length);
     const isDark=document.documentElement.getAttribute("data-theme")==="dark";
     const textColor=isDark?"#7d8590":"#656d76";
     new Chart(ctx,{type:"bar",data:{labels:catData,datasets:[{label:"Enrolled",data:enrolled,backgroundColor:"rgba(62,160,232,.7)",borderRadius:4},{label:"Passed",data:passed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxRotation:45}},y:{ticks:{color:textColor}}}}});
@@ -6300,12 +6298,12 @@ function showTrainingAnalytics(){
 }
 function getTrainingAnalyticsHTML(){
   var emps=DB.employees;
-  var trns=DB.trainings;
-  var results=DB.testResults;
-  var certs=DB.certificates;
+    var trns=getDashboardTrainings();
+    var results=getDashboardOfficialResults();
+    var certs=getOfficialTrainingCertificates();
   // Summary stats
   var totalAttempts=results.length;
-  var totalPass=results.filter(function(r){return r.pass;}).length;
+    var totalPass=results.filter(isOfficialResultPass).length;
   var avgScore=totalAttempts?Math.round(results.reduce(function(s,r){return s+r.score;},0)/totalAttempts):0;
   var totalCerts=certs.length;
   var html='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">';
@@ -6319,12 +6317,12 @@ function getTrainingAnalyticsHTML(){
   html+='<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Dept</th><th>Trainings Assigned</th><th>Completed</th><th>Pass Rate</th><th>Avg Score</th><th>Best Score</th><th>Certificates</th><th>Last Activity</th></tr></thead><tbody>';
   emps.forEach(function(e){
     var empResults=results.filter(function(r){return r.empId===e.id;});
-    var empPass=empResults.filter(function(r){return r.pass;}).length;
+    var empPass=empResults.filter(isOfficialResultPass).length;
     var empCerts=certs.filter(function(c){return c.empId===e.id;}).length;
     var empScore=empResults.length?Math.round(empResults.reduce(function(s,r){return s+r.score;},0)/empResults.length):0;
     var bestScore=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
     var assigned=trns.filter(function(t){return(t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));}).length;
-    var completed=new Set(empPass?empResults.filter(function(r){return r.pass;}).map(function(r){return r.training;}):[]).size;
+    var completed=new Set(empPass?empResults.filter(isOfficialResultPass).map(function(r){return r.training;}):[]).size;
     var passRate=empResults.length?Math.round(empPass/empResults.length*100):0;
     var lastDate=empResults.length?empResults.sort(function(a,b){return b.date.localeCompare(a.date);})[0].date:'—';
     var scoreColor=empScore>=75?'var(--green)':empScore>=50?'var(--amber)':'var(--red)';
@@ -6345,7 +6343,7 @@ function getTrainingAnalyticsHTML(){
   html+='<div class="table-wrap"><table><thead><tr><th>Training</th><th>Category</th><th>Enrolled</th><th>Tested</th><th>Passed</th><th>Pass Rate</th><th>Avg Score</th><th>Certs Issued</th></tr></thead><tbody>';
   trns.forEach(function(t){
     var tResults=results.filter(function(r){return r.training===t.name;});
-    var tPass=tResults.filter(function(r){return r.pass;}).length;
+    var tPass=tResults.filter(isOfficialResultPass).length;
     var tCerts=certs.filter(function(c){return c.training===t.name;}).length;
     var tAvg=tResults.length?Math.round(tResults.reduce(function(s,r){return s+r.score;},0)/tResults.length):0;
     var tPassRate=tResults.length?Math.round(tPass/tResults.length*100):0;
@@ -6367,13 +6365,13 @@ function getTrainingAnalyticsHTML(){
 function exportAnalyticsExcel(){
   var rows=[];
   DB.employees.forEach(function(e){
-    var empResults=DB.testResults.filter(function(r){return r.empId===e.id;});
-    var empPass=empResults.filter(function(r){return r.pass;}).length;
+    var empResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===e.id;});
+    var empPass=empResults.filter(isOfficialResultPass).length;
     var empCerts=DB.certificates.filter(function(c){return c.empId===e.id;}).length;
     var empScore=empResults.length?Math.round(empResults.reduce(function(s,r){return s+r.score;},0)/empResults.length):0;
     var bestScore=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
     var assigned=DB.trainings.filter(function(t){return(t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));}).length;
-    var completed=new Set(empPass?empResults.filter(function(r){return r.pass;}).map(function(r){return r.training;}):[]).size;
+    var completed=new Set(empPass?empResults.filter(isOfficialResultPass).map(function(r){return r.training;}):[]).size;
     var passRate=empResults.length?Math.round(empPass/empResults.length*100):0;
     var lastDate=empResults.length?empResults.sort(function(a,b){return b.date.localeCompare(a.date);})[0].date:'—';
     rows.push({'Employee ID':e.id,'Name':e.name,'Department':e.dept,'Designation':e.desig,'Shift':e.shift,'Trainings Assigned':assigned,'Completed':completed,'Total Tests':empResults.length,'Passed':empPass,'Pass Rate':passRate+'%','Avg Score':empScore+'%','Best Score':bestScore+'%','Certificates':empCerts,'Last Test Date':lastDate});
@@ -6381,7 +6379,7 @@ function exportAnalyticsExcel(){
   // Per-employee per-training detail rows
   DB.employees.forEach(function(e){
     DB.trainings.forEach(function(t){
-      var empTrnRes=DB.testResults.filter(function(r){return r.empId===e.id&&r.training===t.name;});
+      var empTrnRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===e.id&&r.training===t.name;});
       if(empTrnRes.length>0){
         var best=empTrnRes.reduce(function(a,b){return a.score>b.score?a:b;});
         rows.push({'Employee ID':e.id,'Name':e.name,'Training':t.name,'Category':t.cat,'Attempts':empTrnRes.length,'Best Score':best.score+'%','Passed':best.pass?'Yes':'No','Pass Mark':t.passing+'%','Certificate':best.cert||'N/A','Test Date':best.date});
@@ -6402,7 +6400,7 @@ function exportTrnReport(){
   XLSX.writeFile(wb,"trainings_report.xlsx");toast("Training report exported","success");
 }
 function exportTestReport(){
-  const rows=DB.testResults.map(r=>({
+  const rows=DB.testResults.filter(r=>!r.practice).map(r=>({
     "Date Attended":r.date,"Employee ID":r.empId,"Employee Name":r.empName,"Department":r.dept,"Training Name":r.training,"Category":r.cat||"","Score (%)":r.score,"Correct":r.correct,"Wrong":r.wrong,"Total Qs":r.total,"Attempt":r.attempt,"Time Taken":r.timeTakenStr||"","Result":r.pass?"PASS":"FAIL","Certificate No":r.cert||"N/A"
   }));
   const ws=XLSX.utils.json_to_sheet(rows);
@@ -6411,14 +6409,14 @@ function exportTestReport(){
   XLSX.writeFile(wb,"MEP_Test_Results_"+new Date().toISOString().split("T")[0]+".xlsx");toast("Test results exported","success");
 }
 function exportPassReport(){
-  const ws=XLSX.utils.json_to_sheet(DB.testResults.filter(r=>r.pass).map(r=>({
+  const ws=XLSX.utils.json_to_sheet(DB.testResults.filter(r=>!r.practice).filter(r=>r.pass).map(r=>({
     "Date":r.date,"Employee ID":r.empId,"Name":r.empName,"Department":r.dept,"Training":r.training,"Score":r.score+"%","Certificate":r.cert||"N/A"
   })));
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Pass Report");
   XLSX.writeFile(wb,"pass_report.xlsx");toast("Pass report exported","success");
 }
 function exportFailReport(){
-  const ws=XLSX.utils.json_to_sheet(DB.testResults.filter(r=>!r.pass).map(r=>({
+  const ws=XLSX.utils.json_to_sheet(DB.testResults.filter(r=>!r.practice).filter(r=>!r.pass).map(r=>({
     "Date":r.date,"Employee ID":r.empId,"Name":r.empName,"Department":r.dept,"Training":r.training,"Score":r.score+"%","Remarks":"Retraining Required"
   })));
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Fail Report");
@@ -6427,7 +6425,7 @@ function exportFailReport(){
 function exportPendingReport(){
   const pending=[];
   DB.trainings.forEach(t=>(t.enrolled||[]).forEach(eid=>{
-    const hasPass=DB.testResults.find(r=>r.empId===eid&&r.training===t.name&&r.pass);
+    const hasPass=DB.testResults.filter(r=>!r.practice).find(r=>r.empId===eid&&r.training===t.name&&r.pass);
     if(!hasPass&&!(t.completed||[]).includes(eid)){const e=DB.employees.find(x=>x.id===eid);if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});}
   }));
   const ws=XLSX.utils.json_to_sheet(pending.length?pending:[{"Note":"No pending trainings"}]);
@@ -6436,7 +6434,7 @@ function exportPendingReport(){
 }
 function exportMonthlyReport(){
   const months={};
-  DB.testResults.forEach(r=>{const m=r.date?r.date.substring(0,7):"Unknown";if(!months[m])months[m]={month:m,total:0,pass:0,fail:0,scores:[]};months[m].total++;if(r.pass)months[m].pass++;else months[m].fail++;months[m].scores.push(r.score);});
+  DB.testResults.filter(r=>!r.practice).forEach(r=>{const m=r.date?r.date.substring(0,7):"Unknown";if(!months[m])months[m]={month:m,total:0,pass:0,fail:0,scores:[]};months[m].total++;if(r.pass)months[m].pass++;else months[m].fail++;months[m].scores.push(r.score);});
   const rows=Object.values(months).sort((a,b)=>a.month.localeCompare(b.month)).map(m=>({
     "Month":m.month,"Total":m.total,"Passed":m.pass,"Failed":m.fail,"Pass Rate":m.total?Math.round(m.pass/m.total*100)+"%":"0%","Avg Score":m.scores.length?Math.round(m.scores.reduce((s,v)=>s+v,0)/m.scores.length)+"%":"0%"
   }));
@@ -6447,7 +6445,7 @@ function exportMonthlyReport(){
 }
 function recalcPassFail(){
   let fixed=0;
-  DB.testResults.forEach(r=>{
+  DB.testResults.filter(r=>!r.practice).forEach(r=>{
     const trn=DB.trainings.find(t=>t.name===r.training);
     const passing=trn?.passing||70;
     const shouldPass=r.score>=passing;
@@ -6473,7 +6471,7 @@ function backfillCorrectiveActions(){
   // Group failures by employee+training
   var failGroups={};
   (DB.testResults||[]).forEach(function(r){
-    if(r.pass)return;
+    if(r.practice||isOfficialResultPass(r))return;
     var key=r.empId+'||'+r.training;
     if(!failGroups[key])failGroups[key]={empId:r.empId,empName:r.empName,dept:r.dept||'',training:r.training,cat:r.cat||'',results:[]};
     failGroups[key].results.push(r);
@@ -6735,6 +6733,14 @@ function confirmCAAssignV2(){
 /* ============================================================
    ROUND 2 TRAINING — Same as Training Management but for retraining
 ============================================================ */
+function findR2Assignment(originalTraining,empId){
+  if(!originalTraining)return null;
+  var nested=(originalTraining.retrainingRecords||[]).find(function(r){return r.empId===empId&&r.r2TrnId;});
+  if(nested)return nested;
+  var fallback=DB.trainings.slice().reverse().find(function(t){return t._isR2Training&&t._r2ForFailedTrnId===originalTraining.id&&t._r2ForEmpId===empId;});
+  if(!fallback)return null;
+  return {empId:empId,r2TrnId:fallback.id,r2TrnName:fallback.name,r2Video:fallback.youtubeLink||'',r2Deadline:fallback.deadline||'',r2Trainer:fallback.trainer||'',reason:fallback.desc||'',date:fallback.date||''};
+}
 function renderRetraining(){
   // EMPLOYEE VIEW: Show their R2 trainings with video + test
   if(!isAdmin){
@@ -6746,7 +6752,7 @@ function renderRetraining(){
     var h='<div class="section-header"><div class="section-title">My <span>Round 2 Training</span></div></div>';
     h+='<div style="background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">';
     h+='<span class="mat-ico" style="color:var(--amber);font-size:20px;">replay</span>';
-    h+='<div><b>Round 2 Training</b> \u2014 You failed the first test. Watch the video and take the test again. Watch <b>90%</b> to unlock.</div></div>';
+    h+='<div><b>Round 2 Training</b> \u2014 You failed the first test. Watch the video and take the test again. Watch <b>95%</b> to unlock.</div></div>';
     if(!myR2Trns.length){
       h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No R2 Trainings</h3><p>You have no Round 2 trainings assigned.</p></div>';
       empEl.innerHTML=h;return;
@@ -6755,7 +6761,7 @@ function renderRetraining(){
     myR2Trns.forEach(function(t){
       var catInfo=CATEGORIES[t.cat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
       var r2Info=r2Map[t.id]||null;
-      var myRes=DB.testResults.filter(function(r){return r.empId===myId&&r.training===t.name;});
+      var myRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===myId&&r.training===t.name;});
       var myPassRes=myRes.filter(function(r){return r.pass;});
       var done=myPassRes.length>0;
       var bestRes=myRes.length?myRes.slice().sort(function(a,b){return b.score-a.score;})[0]:null;
@@ -6763,8 +6769,8 @@ function renderRetraining(){
       var videoProgress=((t.videoProgress||{})[myId])||0;
       var ytEmbedId=extractYoutubeId(t.youtubeLink||'');
       var hasVideo=!!ytEmbedId;
-      var videoCompleted=videoProgress>=90;
-      var canTakeTest=hasVideo?videoCompleted&&!alreadyTested:!alreadyTested;
+      var videoCompleted=hasVideo&&videoProgress>=95;
+      var canTakeTest=videoCompleted&&!alreadyTested;
       h+='<div class="training-card">';
       h+='<div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)">';
       h+='<div class="overlay-grad"></div>';
@@ -6787,7 +6793,7 @@ function renderRetraining(){
         h+='<div style="padding:8px 10px;background:var(--sur2);border-radius:0 0 var(--r-sm) var(--r-sm);border:1px solid var(--bdr);border-top:none;margin-top:-4px;">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:11px;font-weight:700;color:var(--amber);">Watch Progress</span><span style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);"><span id="trnVidTime_'+t.id+'">0:00</span><span id="trnVidPct_'+t.id+'" style="font-weight:700;color:'+(videoCompleted?'var(--green)':'var(--amber)')+';">'+videoProgress+'%</span></span></div>';
         h+='<div style="height:6px;background:var(--sur3);border-radius:99px;overflow:hidden;margin-bottom:6px;"><div id="trnVidBar_'+t.id+'" style="height:100%;width:'+videoProgress+'%;background:'+(videoCompleted?'var(--green)':'linear-gradient(90deg,var(--amber),var(--green))')+';border-radius:99px;transition:width 0.5s ease;"></div></div>';
-        if(!videoCompleted){h+='<div id="trnVidLock_'+t.id+'" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 90% \u2014 forwarding/skipping not counted</div>';}else{h+='<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video completed! You can now take the test.</div>';}
+        if(!videoCompleted){h+='<div id="trnVidLock_'+t.id+'" style="padding:5px 10px;background:rgba(232,72,58,.08);border-left:3px solid var(--red);border-radius:0 8px 8px 0;font-size:11px;color:var(--red);"><span class="mat-ico" style="font-size:13px;">lock</span> Watch at least 95% \u2014 forwarding/skipping not counted</div>';}else{h+='<div style="padding:5px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video completed! You can now take the test.</div>';}
         h+='</div>';
       }
       h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:6px;">';
@@ -6823,24 +6829,30 @@ function renderRetraining(){
   DB.trainings.forEach(function(t){
     if(t._isR2Training)return;
     var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
-    if(!enrolled.length)return;
-    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var trnRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    // Include employees represented by official results even if legacy data missed enrollment IDs.
+    var candidateIds=[].concat(enrolled,trnRes.map(function(r){return r.empId;})).filter(function(eid,i,a){return a.indexOf(eid)===i;});
+    if(!candidateIds.length)return;
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
-    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
-    enrolled.forEach(function(eid){
+    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));});});
+    candidateIds.forEach(function(eid){
       var emp=DB.employees.find(function(e){return e.id===eid;});
       if(!emp)return;
       var att=eMap[eid]||[];if(att.length===0)return;
-      var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;
-      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
+      var hasPass=att.some(function(r){return isOfficialResultPass(r);});if(hasPass)return;
+      var hasCert=getOfficialTrainingCertificates().some(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
       var isOffline=(t.offlineTrained||[]).includes(eid);if(isOffline)return;
-      var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      var r2Record=findR2Assignment(t,eid);
       var r2TrnId=r2Record?r2Record.r2TrnId:'';
       var r2TrnObj=r2TrnId?DB.trainings.find(function(rt){return rt.id===r2TrnId;}):null;
-      var r2Att=r2TrnObj?DB.testResults.filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
-      var r2HasPass=r2Att.some(function(r){return r.pass;});if(r2HasPass)return;
+      var r2Att=r2TrnObj?DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
+      var r2HasPass=r2Att.some(function(r){return isOfficialResultPass(r);});if(r2HasPass)return;
       var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
-      needR2Rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,failedTrnName:t.name,failedTrnId:t.id,failedTrnCat:t.cat,firstScore:att[0].score,attempts:att.length,best:best,hasR2Assigned:!!r2Record,r2TrnName:r2Record?r2Record.r2TrnName:'',r2TrnId:r2TrnId,r2Video:r2Record?(r2Record.r2Video||''):'',r2Deadline:r2Record?(r2Record.r2Deadline||''):'',r2Trainer:r2Record?(r2Record.r2Trainer||''):'',whyReason:r2Record?(r2Record.reason||''):'',r2Failed:!r2HasPass&&r2Att.length>0,r2Att:r2Att.length,r2BestScore:r2Att.length?Math.max.apply(null,r2Att.map(function(r){return r.score;})):0});
+      var firstFail=att.find(function(r){return !isOfficialResultPass(r);})||att[0];
+      var firstReason=firstFail.failureReason||firstFail.reason||('Score '+firstFail.score+'% is below the required passing mark of '+(t.passing||70)+'%.');
+      var r2Fail=r2Att.find(function(r){return !isOfficialResultPass(r);});
+      var r2Reason=r2Fail?(r2Fail.failureReason||r2Fail.reason||('Score '+r2Fail.score+'% is below the required passing mark of '+(r2TrnObj&&r2TrnObj.passing||70)+'%.')):'';
+      needR2Rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,failedTrnName:t.name,failedTrnId:t.id,failedTrnCat:t.cat,firstScore:firstFail.score,firstDate:firstFail.date||'',firstPassing:t.passing||70,firstReason:firstReason,attempts:att.length,best:best,hasR2Assigned:!!r2Record,r2TrnName:r2Record?r2Record.r2TrnName:'',r2TrnId:r2TrnId,r2Video:r2Record?(r2Record.r2Video||''):'',r2Deadline:r2Record?(r2Record.r2Deadline||''):'',r2Trainer:r2Record?(r2Record.r2Trainer||''):'',whyReason:r2Record?(r2Record.reason||''):'',r2Failed:!r2HasPass&&r2Att.length>0,r2Att:r2Att.length,r2BestScore:r2Att.length?Math.max.apply(null,r2Att.map(function(r){return r.score;})):0,r2Score:r2Fail?r2Fail.score:0,r2Date:r2Fail?r2Fail.date||'':'',r2Reason:r2Reason,r2Passing:r2TrnObj&&r2TrnObj.passing||70});
     });
   });
   var noR2=needR2Rows.filter(function(r){return !r.hasR2Assigned;});
@@ -6851,6 +6863,7 @@ function renderRetraining(){
   var totalAssigned=needR2Rows.filter(function(r){return r.hasR2Assigned;}).length;
   var totalR2Failed=needR2Rows.filter(function(r){return r.r2Failed;}).length;
   var h='<div class="section-header"><div class="section-title">Round 2 <span>Training</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-amber" onclick="openCreateR2TrainingModal()"><span class="mat-ico">add</span> Create R2 Training</button></div></div>';
+  h+='<div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.25);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:14px;font-size:11px;color:var(--muted);"><b style="color:var(--amber);">All first-test failures: '+needR2Rows.length+' employee'+(needR2Rows.length===1?'':'s')+'</b> — every employee is listed below under the failed training name. This includes <b>'+totalNeedR2+'</b> waiting for assignment and <b>'+totalAssigned+'</b> with Round 2 assigned. Use <b>All</b> to see both sections together.</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;">';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--amber);cursor:pointer;" onclick="window._r2filter=\'needR2\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:var(--amber);">'+totalNeedR2+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Need R2</div></div>';
   h+='<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--green);cursor:pointer;" onclick="window._r2filter=\'assigned\';renderRetraining()"><div style="font-size:28px;font-weight:800;color:var(--green);">'+totalAssigned+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">R2 Assigned</div></div>';
@@ -6865,23 +6878,36 @@ function renderRetraining(){
   h+='</div></div>';
   if(noR2.length>0){
     h+='<div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:16px;">warning</span> Need R2 Assignment ('+noR2.length+')</div>';
-    h+='<div class="training-cards">';
+    noR2.sort(function(a,b){return a.failedTrnName.localeCompare(b.failedTrnName)||a.empName.localeCompare(b.empName);});
+    var r2NeedGroupOpen=false,r2NeedGroupName='';
     noR2.forEach(function(r){
+      if(r2NeedGroupName!==r.failedTrnName){
+        if(r2NeedGroupOpen)h+='</div>';
+        r2NeedGroupName=r.failedTrnName;r2NeedGroupOpen=true;
+        h+='<div style="margin:14px 0 8px;padding:9px 12px;border-left:4px solid var(--red);background:rgba(232,72,58,.06);border-radius:0 var(--r-sm) var(--r-sm) 0;"><div style="font-size:12px;font-weight:800;color:var(--red);">Failed Training: '+escAttr(r.failedTrnName)+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Each employee below requires a separate Round 2 training record</div></div><div class="training-cards">';
+      }
       var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
       h+='<div class="training-card" style="cursor:default;"><div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)"><div class="overlay-grad"></div><span class="category-chip">'+escAttr(r.failedTrnCat)+'</span><span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(232,72,58,.85);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">error</span> Failed</span><span style="font-size:48px;">'+catInfo.icon+'</span></div><div class="training-body">';
       h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="width:40px;height:40px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div><div style="min-width:0;"><div class="training-title" style="font-size:14px;margin-bottom:2px;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div></div>';
       h+='<div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:4px;"><span class="mat-ico" style="font-size:13px;">error</span> Failed: '+escAttr(r.failedTrnName)+'</div>';
-      h+='<div class="training-meta"><span><span class="mat-ico" style="font-size:12px;">quiz</span>Score: <b style="color:var(--red);">'+r.firstScore+'%</b></span><span><span class="mat-ico" style="font-size:12px;">replay</span>Tries: '+r.attempts+'</span></div>';
-      h+='<div style="margin-top:10px;"><button class="btn btn-sm btn-amber" style="width:100%;justify-content:center;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button></div>';
+      h+='<div class="training-meta"><span><span class="mat-ico" style="font-size:12px;">quiz</span>Score: <b style="color:var(--red);">'+r.firstScore+'%</b></span><span><span class="mat-ico" style="font-size:12px;">replay</span>Tries: '+r.attempts+'</span><span>Pass mark: '+r.firstPassing+'%</span></div>';
+      h+='<div style="margin-top:7px;padding:7px 9px;background:rgba(232,72,58,.06);border-left:3px solid var(--red);border-radius:0 6px 6px 0;font-size:10.5px;color:var(--muted);"><b style="color:var(--red);">Why failed:</b> '+escAttr(r.firstReason)+(r.firstDate?' <span style="color:var(--muted);">('+formatDate(r.firstDate)+')</span>':'')+'</div>';
+      h+='<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-sm btn-amber" style="flex:1;justify-content:center;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:12px;">add_circle</span> Assign R2 Training</button><button class="btn btn-sm" style="background:var(--blue);color:#fff;justify-content:center;" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" onclick="openR2QuickMsg(this.dataset.t,this.dataset.e,this.dataset.n)"><span class="mat-ico" style="font-size:12px;">mail</span> Message</button></div>';
       h+='</div></div>';
     });
-    h+='</div>';
+    if(r2NeedGroupOpen)h+='</div>';
   }
   if(hasR2.length>0){
     if(noR2.length>0){h+='<div style="height:1px;background:var(--bdr);margin:20px 0 16px;"></div>';}
     h+='<div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="mat-ico" style="font-size:16px;">school</span> R2 Trainings Created ('+hasR2.length+')</div>';
-    h+='<div class="training-cards">';
+    hasR2.sort(function(a,b){return a.failedTrnName.localeCompare(b.failedTrnName)||a.empName.localeCompare(b.empName);});
+    var r2CreatedGroupOpen=false,r2CreatedGroupName='';
     hasR2.forEach(function(r){
+      if(r2CreatedGroupName!==r.failedTrnName){
+        if(r2CreatedGroupOpen)h+='</div>';
+        r2CreatedGroupName=r.failedTrnName;r2CreatedGroupOpen=true;
+        h+='<div style="margin:14px 0 8px;padding:9px 12px;border-left:4px solid var(--amber);background:rgba(255,176,32,.06);border-radius:0 var(--r-sm) var(--r-sm) 0;"><div style="font-size:12px;font-weight:800;color:var(--amber);">Failed Training: '+escAttr(r.failedTrnName)+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Round 2 training records: '+escAttr(r.r2TrnName)+'</div></div><div class="training-cards">';
+      }
       var catInfo=CATEGORIES[r.failedTrnCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
       var r2YtId=r.r2Video?extractYoutubeId(r.r2Video):'';
       h+='<div class="training-card" style="cursor:default;"><div class="training-thumb" style="background:linear-gradient(135deg,'+catInfo.color+'33,'+catInfo.color+'11)"><div class="overlay-grad"></div><span class="category-chip">'+escAttr(r.failedTrnCat)+'</span><span class="badge" style="position:absolute;top:8px;right:8px;background:linear-gradient(135deg,var(--amber),var(--orange));color:#000;font-size:9px;padding:3px 8px;z-index:2;"><span class="mat-ico" style="font-size:10px;">replay</span> Round 2</span>';
@@ -6896,15 +6922,17 @@ function renderRetraining(){
       h+='</div>';
       h+='<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);margin-top:8px;"><div style="width:32px;height:32px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div><div style="min-width:0;flex:1;"><div style="font-size:12px;font-weight:600;">'+escAttr(r.empName)+' <span style="color:var(--muted);font-weight:400;">'+escAttr(r.dept)+'</span></div></div><div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">1st Test</div><div style="font-size:13px;font-weight:700;color:var(--red);">'+r.firstScore+'%</div></div></div>';
       h+='<div style="font-size:11px;color:var(--red);margin-top:6px;display:flex;align-items:center;gap:4px;"><span class="mat-ico" style="font-size:12px;">error</span> Failed: <b>'+escAttr(r.failedTrnName)+'</b></div>';
+      h+='<div style="margin-top:6px;padding:7px 9px;background:rgba(232,72,58,.06);border-left:3px solid var(--red);border-radius:0 6px 6px 0;font-size:10.5px;color:var(--muted);"><b style="color:var(--red);">Why first test failed:</b> '+escAttr(r.firstReason)+(r.firstDate?' <span>('+formatDate(r.firstDate)+')</span>':'')+'<br/><b style="color:var(--orange);">Round 2 reason:</b> '+(r.r2Failed?escAttr(r.r2Reason||'Round 2 score below passing mark'): 'Round 2 test not failed yet')+'</div>';
       if(r.r2Failed){h+='<div style="padding:6px 10px;background:rgba(231,76,60,.08);border-left:3px solid #e74c3c;border-radius:0 8px 8px 0;font-size:11px;color:#e74c3c;margin-top:6px;"><span class="mat-ico" style="font-size:13px;">emergency</span> R2 test also failed (best: '+r.r2BestScore+'%, '+r.r2Att+' tries)</div>';}else{h+='<div style="padding:6px 10px;background:rgba(62,207,142,.08);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:11px;color:var(--green);margin-top:6px;"><span class="mat-ico" style="font-size:13px;">schedule</span> R2 in progress'+(r.r2Att>0?' ('+r.r2Att+' tries, best '+r.r2BestScore+'%)':' \u2014 awaiting test')+'</div>';}
       if(r2YtId){h+='<div style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r2YtId+'?rel=0" style="width:100%;height:180px;" allowfullscreen></iframe></div><a href="'+r.r2Video+'" target="_blank" style="font-size:10px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:3px;margin-bottom:6px;"><span class="mat-ico" style="font-size:11px;">open_in_new</span> Open in YouTube</a>';}
       if(r.whyReason){h+='<div style="font-size:10px;color:var(--muted);margin-top:4px;"><span class="mat-ico" style="font-size:11px;">edit_note</span> '+escAttr(r.whyReason)+'</div>';}
       h+='<div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">';
       h+='<button class="btn btn-sm btn-outline" style="border-color:var(--amber);color:var(--amber);" data-t="'+r.failedTrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-f="'+escAttr(r.failedTrnName)+'" onclick="openAssignR2Modal(this.dataset.t,this.dataset.e,this.dataset.n,this.dataset.f)"><span class="mat-ico" style="font-size:11px;">refresh</span> Re-assign</button>';
+      h+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;" data-t="'+r.r2TrnId+'" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" onclick="openR2QuickMsg(this.dataset.t,this.dataset.e,this.dataset.n)"><span class="mat-ico" style="font-size:11px;">mail</span> Message</button>';
       if(r.r2Failed){h+='<button class="btn btn-sm" style="background:rgba(231,76,60,.1);color:#e74c3c;border:1px solid rgba(231,76,60,.3);" onclick="gotoView(\'offlinetraining\')"><span class="mat-ico" style="font-size:11px;">groups</span> Offline Training</button>';}
       h+='</div></div></div>';
     });
-    h+='</div>';
+    if(r2CreatedGroupOpen)h+='</div>';
   }
   if(noR2.length===0&&hasR2.length===0){h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>All Clear!</h3><p>'+(q?'No matching records.':'No failed employees. Everyone passed!')+'</p></div>';}
   el.innerHTML=h;
@@ -6916,27 +6944,33 @@ function renderOfflineTraining(){
   var empIdSet=DB.employees.map(function(e){return e.id;});
   var rows=[];
   DB.trainings.forEach(function(t){
+    if(t._isR2Training)return;
     var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
-    if(!enrolled.length)return;
-    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var trnRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var candidateIds=[].concat(enrolled,trnRes.map(function(r){return r.empId;})).filter(function(eid,i,a){return a.indexOf(eid)===i;});
+    if(!candidateIds.length)return;
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
-    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});});
-    enrolled.forEach(function(eid){
+    Object.keys(eMap).forEach(function(eid){eMap[eid].sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));});});
+    candidateIds.forEach(function(eid){
       var emp=DB.employees.find(function(e){return e.id===eid;});
       if(!emp)return;
       var att=eMap[eid]||[];if(att.length===0)return;
-      var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;
-      var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      var hasPass=att.some(function(r){return isOfficialResultPass(r);});if(hasPass)return;
+      var r2Record=findR2Assignment(t,eid);
       if(!r2Record)return;
       var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Record.r2TrnId;});
       if(!r2Trn)return;
-      var r2Att=DB.testResults.filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});
+      var r2Att=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===r2Trn.name&&r.empId===eid;});
       if(r2Att.length===0)return;
-      var r2HasPass=r2Att.some(function(r){return r.pass;});if(r2HasPass)return;
+      var r2HasPass=r2Att.some(function(r){return isOfficialResultPass(r);});if(r2HasPass)return;
       var best1=0;att.forEach(function(r){if(r.score>best1)best1=r.score;});
       var best2=0;r2Att.forEach(function(r){if(r.score>best2)best2=r.score;});
+      var firstFail=att.find(function(r){return !isOfficialResultPass(r);})||att[0];
+      var r2Fail=r2Att.find(function(r){return !isOfficialResultPass(r);})||r2Att[0];
+      var firstReason=firstFail.failureReason||firstFail.reason||('Score '+firstFail.score+'% is below the required passing mark of '+(t.passing||70)+'%.');
+      var r2Reason=r2Fail.failureReason||r2Fail.reason||('Score '+r2Fail.score+'% is below the required passing mark of '+(r2Trn.passing||70)+'%.');
       var r2YtId=r2Record.r2Video?extractYoutubeId(r2Record.r2Video):'';
-      rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,origTrnName:t.name,origTrnId:t.id,origCat:t.cat,r2TrnName:r2Trn.name,r2TrnId:r2Trn.id,origScore:att[0].score,origBest:best1,origTries:att.length,r2Score:r2Att[0].score,r2Best:best2,r2Tries:r2Att.length,r2Video:r2Record.r2Video||'',r2YtId:r2YtId,r2Deadline:r2Record.r2Deadline||'',r2Trainer:r2Record.r2Trainer||''});
+      rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,origTrnName:t.name,origTrnId:t.id,origCat:t.cat,origTrainer:t.trainer||'',origManager:t.manager||'',r2TrnName:r2Trn.name,r2TrnId:r2Trn.id,r2Trainer:r2Record.r2Trainer||r2Trn.trainer||'',origScore:firstFail.score,origBest:best1,origTries:att.length,origDate:firstFail.date||'',origPassing:t.passing||70,origReason:firstReason,r2Score:r2Fail.score,r2Best:best2,r2Tries:r2Att.length,r2Date:r2Fail.date||'',r2Passing:r2Trn.passing||70,r2Reason:r2Reason,assignmentReason:r2Record.reason||'',r2Video:r2Record.r2Video||'',r2YtId:r2YtId,r2Deadline:r2Record.r2Deadline||''});
     });
   });
   var h='<div class="section-header"><div class="section-title">Offline <span>Training</span></div></div>';
@@ -6945,28 +6979,42 @@ function renderOfflineTraining(){
   var totalEmps=new Set(rows.map(function(r){return r.empId;})).size;
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;"><div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalEmps+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Employees</div></div><div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalCases+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Failed Cases</div></div></div>';
   if(rows.length===0){h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Cases!</h3><p>All R2 trainings passed.</p></div>';el.innerHTML=h;return;}
-  h+='<div class="training-cards">';
+  rows.sort(function(a,b){return a.origTrnName.localeCompare(b.origTrnName)||a.empName.localeCompare(b.empName);});
+  var offlineGroupOpen=false,offlineGroupName='';
   rows.forEach(function(r){
+    if(offlineGroupName!==r.origTrnName){
+      if(offlineGroupOpen)h+='</div>';
+      offlineGroupName=r.origTrnName;offlineGroupOpen=true;
+      h+='<div style="margin:14px 0 8px;padding:9px 12px;border-left:4px solid #e74c3c;background:rgba(231,76,60,.06);border-radius:0 var(--r-sm) var(--r-sm) 0;"><div style="font-size:12px;font-weight:800;color:#e74c3c;">Failed Training: '+escAttr(r.origTrnName)+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Employees who failed the original test and Round 2 test</div></div><div class="training-cards">';
+    }
     var catInfo=CATEGORIES[r.origCat]||{color:'#ffb020',icon:'\uD83D\uDCDA'};
     h+='<div class="training-card" style="cursor:default;"><div class="training-thumb" style="background:linear-gradient(135deg,rgba(231,76,60,.15),rgba(231,76,60,.05))"><div class="overlay-grad"></div><span class="category-chip" style="background:rgba(231,76,60,.8);">'+escAttr(r.origCat)+'</span><span class="badge" style="position:absolute;top:8px;right:8px;background:rgba(231,76,60,.9);color:#fff;font-size:9px;padding:3px 8px;"><span class="mat-ico" style="font-size:10px;">emergency</span> 2x Failed</span><span style="font-size:48px;">'+catInfo.icon+'</span></div><div class="training-body">';
     h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="width:44px;height:44px;border-radius:50%;background:'+avatarColor(r.empName)+';display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;font-weight:700;flex-shrink:0;">'+avatarInitials(r.empName)+'</div><div style="min-width:0;"><div class="training-title" style="font-size:15px;margin-bottom:2px;">'+escAttr(r.empName)+'</div><div style="font-size:11px;color:var(--muted);">'+escAttr(r.dept)+(r.desig?' &bull; '+escAttr(r.desig):'')+'</div></div></div>';
     h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.15);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;">';
     h+='<div style="font-size:11px;font-weight:700;color:#e74c3c;margin-bottom:4px;"><span class="mat-ico" style="font-size:12px;">error</span> 1st Test: '+escAttr(r.origTrnName)+'</div>';
-    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);margin-bottom:4px;"><span>Score: <b style="color:#e74c3c;">'+r.origScore+'%</b></span><span>Tries: '+r.origTries+'</span><span>Best: '+r.origBest+'%</span></div>';
+    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);margin-bottom:4px;flex-wrap:wrap;"><span>Score: <b style="color:#e74c3c;">'+r.origScore+'%</b></span><span>Tries: '+r.origTries+'</span><span>Best: '+r.origBest+'%</span><span>Pass mark: '+r.origPassing+'%</span><span>Date: '+(r.origDate?formatDate(r.origDate):'—')+'</span></div>';
+    h+='<div style="font-size:10.5px;color:var(--muted);padding:6px 8px;background:rgba(232,72,58,.05);border-radius:5px;margin-top:5px;"><b style="color:#e74c3c;">Why first test failed:</b> '+escAttr(r.origReason)+'</div>';
     h+='<div style="height:1px;background:var(--bdr);margin:6px 0;"></div>';
     h+='<div style="font-size:11px;font-weight:700;color:var(--orange);margin-bottom:4px;"><span class="mat-ico" style="font-size:12px;">replay</span> R2 Test: '+escAttr(r.r2TrnName)+'</div>';
-    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);"><span>Score: <b style="color:var(--orange);">'+r.r2Score+'%</b></span><span>Tries: '+r.r2Tries+'</span><span>Best: '+r.r2Best+'%</span></div></div>';
+    h+='<div style="display:flex;gap:12px;font-size:10px;color:var(--muted);flex-wrap:wrap;"><span>Score: <b style="color:var(--orange);">'+r.r2Score+'%</b></span><span>Tries: '+r.r2Tries+'</span><span>Best: '+r.r2Best+'%</span><span>Pass mark: '+r.r2Passing+'%</span><span>Date: '+(r.r2Date?formatDate(r.r2Date):'—')+'</span></div>';
+    h+='<div style="font-size:10.5px;color:var(--muted);padding:6px 8px;background:rgba(240,136,62,.06);border-radius:5px;margin-top:5px;"><b style="color:var(--orange);">Why Round 2 failed:</b> '+escAttr(r.r2Reason)+'</div>'+(r.assignmentReason?'<div style="font-size:10.5px;color:var(--muted);padding:6px 8px;background:rgba(139,109,232,.06);border-radius:5px;margin-top:5px;"><b style="color:var(--purple);">Why Round 2 was assigned:</b> '+escAttr(r.assignmentReason)+'</div>':'')+'</div>';
     if(r.r2YtId){h+='<div style="margin-bottom:8px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r.r2YtId+'?rel=0" style="width:100%;height:140px;" allowfullscreen></iframe></div>';}
     h+='<button class="btn btn-sm" style="background:#e74c3c;color:#fff;font-size:11px;width:100%;justify-content:center;" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-o="'+escAttr(r.origTrnName)+'" data-r="'+escAttr(r.r2TrnName)+'" onclick="openOfflineMsg(this.dataset.e,this.dataset.n,this.dataset.o,this.dataset.r)"><span class="mat-ico" style="font-size:13px;">mail</span> Send Offline Training Message</button>';
     h+='</div></div>';
   });
-  h+='</div>';
+  if(offlineGroupOpen)h+='</div>';
   el.innerHTML=h;
 }
 
 function openOfflineMsg(empId,empName,origTrnName,r2TrnName){
   var sn=empName.replace(/"/g,'&quot;');
-  window._offlineMsgData={empId:empId,empName:empName};
+  var origTrn=DB.trainings.find(function(t){return t.name===origTrnName;});
+  var r2Trn=DB.trainings.find(function(t){return t.name===r2TrnName;});
+  var origFail=DB.testResults.filter(function(r){return !r.practice&&r.empId===empId&&r.training===origTrnName&&!r.pass;}).sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));}).pop();
+  var r2Fail=DB.testResults.filter(function(r){return !r.practice&&r.empId===empId&&r.training===r2TrnName&&!r.pass;}).sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));}).pop();
+  var origWhy=origFail?(origFail.failureReason||origFail.reason||('Score '+origFail.score+'% below '+(origTrn&&origTrn.passing||70)+'% pass mark')):'Original test failed';
+  var r2Why=r2Fail?(r2Fail.failureReason||r2Fail.reason||('Score '+r2Fail.score+'% below '+(r2Trn&&r2Trn.passing||70)+'% pass mark')):'Round 2 test failed';
+  window._offlineMsgData={empId:empId,empName:empName,origTrnName:origTrnName,r2TrnName:r2TrnName,origScore:origFail?origFail.score:'—',r2Score:r2Fail?r2Fail.score:'—',origWhy:origWhy,r2Why:r2Why};
   openModal(
     '<div class="modal-accent" style="background:linear-gradient(135deg,#e74c3c,#c0392b);"></div>'+
     '<div class="modal-head"><div class="modal-ico" style="background:rgba(231,76,60,.15)"><span class="mat-ico" style="color:#e74c3c;font-size:22px;">mail</span></div><h2>Offline Training Message</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>'+
@@ -6974,8 +7022,9 @@ function openOfflineMsg(empId,empName,origTrnName,r2TrnName){
     '<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">'+
     '<div style="display:flex;align-items:center;gap:8px;">'+
     '<div style="width:36px;height:36px;border-radius:50%;background:'+avatarColor(empName)+';display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:700;">'+avatarInitials(empName)+'</div>'+
-    '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:#e74c3c;">Failed 2x: '+escAttr(origTrnName)+' &rarr; '+escAttr(r2TrnName)+'</span></div>'+
-    '</div></div>'+
+    '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:#e74c3c;">Failed 2x: '+escAttr(origTrnName)+' &rarr; '+escAttr(r2TrnName)+'</span></div></div>'+ 
+    '<div style="margin-top:10px;padding:9px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:10.5px;color:var(--muted);"><b style="color:#e74c3c;">1st test:</b> '+window._offlineMsgData.origScore+'% — '+escAttr(window._offlineMsgData.origWhy)+'<br/><b style="color:var(--orange);">Round 2 test:</b> '+window._offlineMsgData.r2Score+'% — '+escAttr(window._offlineMsgData.r2Why)+'</div>'+ 
+    '</div>'+
     '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Message <span style="color:var(--red);">*</span></label>'+
     '<textarea class="form-control-sm" id="offlineMsgText" rows="4" placeholder="Schedule offline/in-person training session..." style="font-size:13px;"></textarea></div>'+
     '</div>'+
@@ -6986,7 +7035,7 @@ function sendOfflineMsg(){
   var d=window._offlineMsgData;if(!d){toast('Error','error');return;}
   var msg=(document.getElementById('offlineMsgText').value||'').trim();
   if(!msg){toast('Enter a message','error');return;}
-  DB.notifications.unshift({id:genId('N'),msg:'[Offline Training Required] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId});
+  DB.notifications.unshift({id:genId('N'),msg:'[Offline Training Required — '+d.origTrnName+' → '+d.r2TrnName+'] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId});
   closeModal();saveDB();updateBadges();
   toast('Offline training message sent to '+d.empName,'success');
 }
@@ -6998,20 +7047,20 @@ function openCreateR2TrainingModal(){
     if(t._isR2Training)return;
     var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet.indexOf(eid)>=0;});
     if(!enrolled.length)return;
-    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var trnRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
     enrolled.forEach(function(eid){
       var emp=DB.employees.find(function(e){return e.id===eid;});
       if(!emp)return;
       var att=eMap[eid]||[];if(!att.length)return;
-      var hasPass=att.some(function(r){return r.pass;});if(hasPass)return;
-      var hasCert=DB.certificates.find(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
+      var hasPass=att.some(function(r){return isOfficialResultPass(r);});if(hasPass)return;
+      var hasCert=getOfficialTrainingCertificates().some(function(c){return c.empId===eid&&c.training===t.name;});if(hasCert)return;
       var isOffline=(t.offlineTrained||[]).includes(eid);if(isOffline)return;
       var r2Rec=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
       var r2TrnId=r2Rec?r2Rec.r2TrnId:'';
       var r2TrnObj=r2TrnId?DB.trainings.find(function(rt){return rt.id===r2TrnId;}):null;
-      var r2Att=r2TrnObj?DB.testResults.filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
-      var r2HasPass=r2Att.some(function(r){return r.pass;});if(r2HasPass)return;
+      var r2Att=r2TrnObj?DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===r2TrnObj.name&&r.empId===eid;}):[];
+      var r2HasPass=r2Att.some(function(r){return isOfficialResultPass(r);});if(r2HasPass)return;
       failedList.push({empId:eid,empName:emp.name,dept:emp.dept,trnName:t.name,trnId:t.id,trnCat:t.cat,score:att[0].score,hasR2:!!r2Rec});
     });
   });
@@ -7055,7 +7104,7 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
   var deptOpts='<option>All</option>'+DEPARTMENTS.map(function(d){return '<option'+(d===(failedTrn.dept||'All')?' selected':'')+'>'+d+'</option>';}).join('');
   var r2DefaultName='R2: '+failedTrnName;
   var firstScore='--';
-  var empResults=DB.testResults.filter(function(r){return r.training===failedTrnName&&r.empId===empId;});
+  var empResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===failedTrnName&&r.empId===empId;});
   if(empResults.length){empResults.sort(function(a,b){return a.date.localeCompare(b.date);});firstScore=empResults[0].score;}
   openModal(
     '<div class="modal-accent" style="background:linear-gradient(135deg,var(--amber),var(--orange));"></div>'+
@@ -7086,7 +7135,7 @@ function openAssignR2Modal(failedTrnId,empId,empName,failedTrnName){
     '<div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Paste YouTube URL here</label><input class="form-control-sm" id="r2AssignVideo" placeholder="https://youtube.com/watch?v=..." oninput="previewR2Video(this.value)" onfocus="this.select()"></div>'+
     '<div id="r2VideoPreview" style="display:none;margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px;"><span class="mat-ico" style="font-size:13px;">check_circle</span> Video detected! Preview:</div><div style="border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);max-height:180px;"><iframe id="r2VideoFrame" src="" style="width:100%;height:160px;" allowfullscreen></iframe></div></div>'+
     '<div style="margin-top:8px;padding:8px 12px;background:rgba(255,176,32,.06);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;font-size:11px;color:var(--amber);">'+
-    '<span class="mat-ico" style="font-size:13px;">info</span> Employee must watch <b>90% of this video</b> before the test unlocks. Forwarding/skipping is NOT counted.</div>'+
+    '<span class="mat-ico" style="font-size:13px;">info</span> Employee must watch <b>95% of this video</b> before the test unlocks. Forwarding/skipping is NOT counted.</div>'+
     '</div>'+
     '<div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
@@ -7264,7 +7313,7 @@ function exportR2Report(){
   var empIdSet=DB.employees.map(function(e){return e.id;});
   var rows=[];
   DB.trainings.forEach(function(t){
-    var trnRes=DB.testResults.filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
+    var trnRes=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.training===t.name&&empIdSet.indexOf(r.empId)>=0;});
     var eMap={};trnRes.forEach(function(r){if(!eMap[r.empId])eMap[r.empId]=[];eMap[r.empId].push(r);});
     Object.keys(eMap).forEach(function(eid){
       var att=eMap[eid].sort(function(a,b){return a.date.localeCompare(b.date);});
@@ -7273,7 +7322,7 @@ function exportR2Report(){
       if(!emp)return;
       var hasPass=att.some(function(r){return r.pass;});
       var best=0;att.forEach(function(r){if(r.score>best)best=r.score;});
-      var r2Record=(t.retrainingRecords||[]).find(function(r){return r.empId===eid&&r.r2TrnId;});
+      var r2Record=findR2Assignment(t,eid);
       var r2Name=r2Record?r2Record.r2TrnName:'';
       var r2Deadline=r2Record?r2Record.r2Deadline:'';
       var r2Reason=r2Record?r2Record.reason:'';
@@ -7340,7 +7389,7 @@ function renderCorrectiveActions(){
       var ytBtn='';
       if(matchingTrn&&matchingTrn.youtubeLink){ytBtn=' <a href="'+matchingTrn.youtubeLink+'" target="_blank" rel="noopener" style="color:var(--red);font-size:10px;margin-left:2px;" title="Watch training video"><span class="mat-ico" style="font-size:11px;">smart_display</span>YouTube</a>';}
       // Build attempt history from actual test results
-      var allResults=DB.testResults.filter(function(r){return r.empId===a.empId&&r.training===trnName;}).sort(function(x,y){return x.date.localeCompare(y.date);});
+      var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===a.empId&&r.training===trnName;}).sort(function(x,y){return x.date.localeCompare(y.date);});
       var attemptHtml='<div style="display:flex;flex-direction:column;gap:3px;">';
       if(allResults.length===0){
         attemptHtml+='<div style="font-size:11px;color:var(--muted);"><span class="mat-ico" style="font-size:11px;">info</span> No test taken yet</div>';
@@ -7369,7 +7418,7 @@ function renderCorrectiveActions(){
     });
     h+='</tbody></table></div>';
   }else{
-    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No Corrective Actions Yet</h3><p>Corrective actions are auto-created when an employee fails a training test.<br/>1st fail = Auto-retraining, 2nd fail = Warning, 3rd fail = Offline training + NCR.</p><p style="margin-top:8px;">Total test results: '+DB.testResults.length+' | Failures: '+DB.testResults.filter(function(r){return !r.pass;}).length+'</p></div>';
+    h+='<div class="empty-state"><span class="mat-ico">check_circle</span><h3>No Corrective Actions Yet</h3><p>Corrective actions are auto-created when an employee fails a training test.<br/>1st fail = Auto-retraining, 2nd fail = Warning, 3rd fail = Offline training + NCR.</p><p style="margin-top:8px;">Total test results: '+DB.testResults.length+' | Failures: '+DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return !r.pass;}).length+'</p></div>';
   }
   el.innerHTML=h;
 }
@@ -7620,34 +7669,25 @@ function renderSettings(){
           <span style="font-size:11px;color:var(--muted);margin-left:auto;">${DB.settings.sheetAutoSync!==false?'<span style=\'color:var(--green);\'>ON</span> — Data auto-updates on every change':'<span style=\'color:var(--red);\'>OFF</span> — Only manual sync'}  </span>
         </div>
         <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.7;overflow-x:auto;max-height:260px;overflow-y:auto;">
-          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script) — <b>UPDATED with append mode support:</b></div>
+          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script):</div>
 function doPost(e){<br>
 &nbsp;&nbsp;try{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var body=JSON.parse(e.parameter.json);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var body=JSON.parse(e.postData.contents);<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var sheetName=body.sheet||"Data";<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var action=body.action||"replace";<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var data=body.data||[];<br>
 &nbsp;&nbsp;&nbsp;&nbsp;if(!Array.isArray(data)||data.length===0)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
 &nbsp;&nbsp;&nbsp;&nbsp;if(!sheet) sheet=ss.insertSheet(sheetName);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;// Clear old data and rewrite (keeps sheet in sync with app)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()>0) sheet.deleteRows(1,sheet.getLastRow());<br>
 &nbsp;&nbsp;&nbsp;&nbsp;var headers=Object.keys(data[0]);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;if(action==="append"){<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// APPEND MODE: add new rows without clearing existing data<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()===0) sheet.appendRow(headers);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for(var i=0;i&lt;data.length;i++){<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return data[i][k]||"";}));<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
-&nbsp;&nbsp;&nbsp;&nbsp;}else{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// REPLACE MODE: clear old data and rewrite all<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()&gt;0) sheet.deleteRows(1,sheet.getLastRow());<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for(var i=0;i&lt;data.length;i++){<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return data[i][k]||"";}));<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
-&nbsp;&nbsp;&nbsp;&nbsp;}<br>
-&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length,action:action})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return r[k]||"";}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;});<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
 &nbsp;&nbsp;}catch(err){<br>
 &nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"error",msg:err.toString()}));<br>
 &nbsp;&nbsp;}<br>
@@ -7661,7 +7701,7 @@ function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API i
           <button class="btn btn-outline" onclick="testSheetConnection()"><span class="mat-ico">wifi_tethering</span> Test</button>
         </div>
         <div id="syncStatus" style="margin-top:8px;font-size:11px;color:var(--muted);"></div>
-        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (full test results with employee, trainer, manager, cert details), <b>Employees</b> (master list with stats), <b>Trainings</b> (all trainings + enrolled/completed employees), <b>Certificates</b> (all issued certs with trainer & validity), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback</b> (IMSP 29 F05 responses with scores). Full sync replaces sheet data. Individual submissions (feedback) use append mode to add rows without clearing. All sheets include Company name for audit trail. <b style="color:var(--amber);">Update your Apps Script to support action:"append" — see code hint below.</b></div>
+        <div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.5;">Sheets created: <b>Training Data</b> (full test results with employee, trainer, manager, cert details), <b>Employees</b> (master list with stats), <b>Trainings</b> (all trainings + enrolled/completed employees), <b>Certificates</b> (all issued certs with trainer & validity), <b>Equipment</b> (checklist items), <b>SOPs</b> (safety procedures), <b>Feedback</b> (IMSP 29 F05 responses with scores). Each sync replaces the sheet data to stay in sync. All sheets include Company name for audit trail.</div>
       </div>
       <div class="form-section" style="border:1px solid ${_driveTested?(_driveConnected?'rgba(62,207,142,.35)':'rgba(232,72,58,.35)'):'rgba(62,207,142,.15)'};background:${_driveTested?(_driveConnected?'rgba(62,207,142,.04)':'rgba(232,72,58,.04)'):'rgba(62,207,142,.02)'};">
         <div class="form-section-title" style="color:var(--green);display:flex;align-items:center;gap:8px;"><span class="mat-ico" style="color:var(--green);">cloud_upload</span> Google Drive Connection <span id="driveStatusDot" style="width:12px;height:12px;border-radius:50%;display:inline-block;background:${_driveTested?(_driveConnected?'var(--green)':'var(--red)'):'var(--muted)'};" title="${_driveTested?(_driveConnected?'Drive Connected':'Drive Not Connected'):'Not tested yet'}"></span> <span id="driveStatusLabel" style="font-size:11px;font-weight:400;color:${_driveTested?(_driveConnected?'var(--green)':'var(--red)'):'var(--muted)'};">${_driveTested?(_driveConnected?'Connected':'Not Connected'):'Not tested'}</span></div>
@@ -7829,7 +7869,7 @@ function restoreData(input){
 ============================================================ */
 function buildSyncPayload(){
   var company=DB.settings.companyName||"PTS SAFETY";
-  return DB.testResults.map(r=>{
+  return DB.testResults.filter(r=>!r.practice).map(r=>{
     const trn=DB.trainings.find(t=>t.name===r.training);
     const cert=DB.certificates.find(c=>c.empId===r.empId&&c.training===r.training);
     const emp=DB.employees.find(e=>e.id===r.empId);
@@ -7839,9 +7879,9 @@ function buildSyncPayload(){
 function buildEmployeePayload(){
   var company=DB.settings.companyName||"PTS SAFETY";
   return DB.employees.map(e=>{
-    var testCount=DB.testResults.filter(r=>r.empId===e.id).length;
-    var passCount=DB.testResults.filter(r=>r.empId===e.id&&r.pass).length;
-    var certCount=DB.certificates.filter(c=>c.empId===e.id).length;
+    var testCount=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id).length;
+    var passCount=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id&&r.pass).length;
+    var certCount=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
     var assignedTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(e.id)).length;
     var completedTrns=DB.trainings.filter(t=>(t.completed||[]).includes(e.id)).length;
     return{Company:company,EmployeeID:e.id,FullName:e.name,Department:e.dept||"",Designation:e.desig||"",Mobile:e.mobile||e.phone||"",Email:e.email||"",Shift:e.shift||"",Status:e.status||"active",Location:e.location||"",JoiningDate:e.joining||"",TestsTaken:testCount,TestsPassed:passCount,Certificates:certCount,TrainingsAssigned:assignedTrns,TrainingsCompleted:completedTrns,Company:e.company||company};
@@ -7851,7 +7891,7 @@ function buildTrainingPayload(){
   var company=DB.settings.companyName||"PTS SAFETY";
   return DB.trainings.filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined';}).map(t=>{
     var enrolled=(t.enrolled||[]).length;
-    var passResults=new Set(DB.testResults.filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
+    var passResults=new Set(DB.testResults.filter(r=>!r.practice).filter(r=>r.pass&&r.training===t.name).map(r=>r.empId));
     var completed=Math.max((t.completed||[]).length,passResults.size);
     var enrolledNames=(t.enrolled||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
     var completedNames=(t.completed||[]).map(function(eid){var e=DB.employees.find(function(x){return x.id===eid;});return e?e.name:eid;}).join(', ');
@@ -7910,7 +7950,7 @@ function buildFeedbackPayload(){
 }
 async function pushToSheet(url,payload,sheetName){
   if(!payload.length)return {sent:0};
-  var json=JSON.stringify({sheet:sheetName,action:"replace",data:payload});
+  var json=JSON.stringify({sheet:sheetName,data:payload});
   // Form POST — only method that works with Google Apps Script
   return new Promise(function(resolve){
     var fname='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
@@ -7934,33 +7974,6 @@ async function pushToSheet(url,payload,sheetName){
     form.submit();
   });
 }
-// Append a SINGLE row to a Google Sheet (does NOT clear existing data)
-// Use for individual submissions (feedback, test results) to add rows without overwriting
-async function appendRowToSheet(url, row, sheetName){
-  var json=JSON.stringify({sheet:sheetName, action:"append", data:[row]});
-  return new Promise(function(resolve){
-    var fname='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
-    var iframe=document.createElement('iframe');
-    iframe.name=fname;iframe.style.display='none';
-    document.body.appendChild(iframe);
-    var form=document.createElement('form');
-    form.method='POST';form.action=url;form.target=fname;
-    var input=document.createElement('input');
-    input.type='hidden';input.name='json';input.value=json;
-    form.appendChild(input);document.body.appendChild(form);
-    var done=false;
-    function cleanup(){
-      if(done)return;done=true;
-      try{document.body.removeChild(iframe);}catch(e){}
-      try{document.body.removeChild(form);}catch(e){}
-      resolve({appended:true});
-    }
-    iframe.onload=cleanup;
-    setTimeout(cleanup,6000);
-    form.submit();
-  });
-}
-
 async function syncToGoogleSheet(){
   const url=(document.getElementById("st_sheeturl")?.value||DB.settings.sheetUrl||"").trim();
   if(!url){toast("Paste your Google Apps Script URL in Settings first","error");return;}
@@ -8167,15 +8180,15 @@ function renderTrainStatus(){
   DB.trainings.forEach(trn=>{
     (trn.enrolled||[]).forEach(empId=>{
       const emp=DB.employees.find(e=>e.id===empId);if(!emp)return;
-      const passResult=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+      const passResult=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===trn.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
       const done=!!passResult||(trn.completed||[]).includes(empId);
       const completedDate=passResult?passResult.date:((trn.completedDates||{})[empId]||"");
-      const result=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
+      const result=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
       const cert=DB.certificates.find(c=>c.empId===empId&&c.training===trn.name)||null;
-      rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:""});
+      rows.push({empId,empName:emp.name,dept:emp.dept,desig:emp.desig,trnId:trn.id,trnName:trn.name,trnCat:trn.cat,certRequired:trn.cert,passing:trn.passing,score:result?result.score:null,correct:result?result.correct:null,wrong:result?result.wrong:null,totalQ:result?result.total:null,attempts:DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===trn.name).length,pass:result?result.pass:null,done,completedDate,certNo:cert?cert.num:"",certExpiry:cert?cert.expiry:""});
     });
   });
-  DB.testResults.forEach(r=>{
+  DB.testResults.filter(r=>!r.practice).forEach(r=>{
     const alreadyIn=rows.find(x=>x.empId===r.empId&&x.trnName===r.training);
     if(alreadyIn)return;
     const emp=DB.employees.find(e=>e.id===r.empId);
@@ -8296,15 +8309,15 @@ function exportFullStatusReport(){
   DB.trainings.forEach(trn=>{
     (trn.enrolled||[]).forEach(empId=>{
       const emp=DB.employees.find(e=>e.id===empId);if(!emp)return;
-      const passResult=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
+      const passResult=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===trn.name&&r.pass).sort((a,b)=>b.score-a.score)[0];
       const done=!!passResult||(trn.completed||[]).includes(empId);
       const completedDate=passResult?passResult.date:((trn.completedDates||{})[empId]||"");
-      const result=DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
+      const result=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===trn.name).sort((a,b)=>b.score-a.score)[0]||null;
       const cert=DB.certificates.find(c=>c.empId===empId&&c.training===trn.name)||null;
-      rows.push({"Employee ID":empId,"Employee Name":emp.name,"Department":emp.dept,"Designation":emp.desig||"","Training Name":trn.name,"Category":trn.cat,"Cert Required":trn.cert?"Yes":"No","Pass Mark (%)":trn.passing||70,"Score (%)":result?result.score:"Not Taken","Correct":result?result.correct:"","Wrong":result?result.wrong:"","Total Questions":result?result.total:"","Attempts":DB.testResults.filter(r=>r.empId===empId&&r.training===trn.name).length,"Result":result?(result.pass?"PASS":"FAIL"):"Pending","Completion Date":completedDate||"","Certificate No":cert?cert.num:"","Certificate Issued":cert?cert.issued:"","Certificate Expiry":cert?cert.expiry:""});
+      rows.push({"Employee ID":empId,"Employee Name":emp.name,"Department":emp.dept,"Designation":emp.desig||"","Training Name":trn.name,"Category":trn.cat,"Cert Required":trn.cert?"Yes":"No","Pass Mark (%)":trn.passing||70,"Score (%)":result?result.score:"Not Taken","Correct":result?result.correct:"","Wrong":result?result.wrong:"","Total Questions":result?result.total:"","Attempts":DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===trn.name).length,"Result":result?(result.pass?"PASS":"FAIL"):"Pending","Completion Date":completedDate||"","Certificate No":cert?cert.num:"","Certificate Issued":cert?cert.issued:"","Certificate Expiry":cert?cert.expiry:""});
     });
   });
-  DB.testResults.forEach(r=>{
+  DB.testResults.filter(r=>!r.practice).forEach(r=>{
     const alreadyIn=rows.find(x=>x["Employee ID"]===r.empId&&x["Training Name"]===r.training);
     if(!alreadyIn){
       const emp=DB.employees.find(e=>e.id===r.empId);const trn=DB.trainings.find(t=>t.name===r.training);const cert=DB.certificates.find(c=>c.empId===r.empId&&c.training===r.training)||null;
@@ -8377,7 +8390,7 @@ async function loadTombstonesFromCloud(){
     const existingEmpIds=new Set(DB.employees.map(e=>e.id));
     const existingTrnIds=new Set(DB.trainings.map(t=>t.id));
     const existingSopIds=new Set(DB.sops.map(s=>s.id));
-    const existingTestIds=new Set(DB.testResults.map(r=>r.id));
+    const existingTestIds=new Set(DB.testResults.filter(r=>!r.practice).map(r=>r.id));
     const existingCertNums=new Set(DB.certificates.map(c=>c.num));
     snap.docs.forEach(d=>{
       const data=d.data();
@@ -8406,7 +8419,7 @@ function applyTombstones(){
   if(_deletedIds.trainings?.length){const before=DB.trainings.length;DB.trainings=DB.trainings.filter(t=>!_deletedIds.trainings.includes(t.id));removed+=before-DB.trainings.length;}
   if(_deletedIds.employees?.length){const before=DB.employees.length;DB.employees=DB.employees.filter(e=>!_deletedIds.employees.includes(e.id));removed+=before-DB.employees.length;}
   if(_deletedIds.sops?.length){const before=DB.sops.length;DB.sops=DB.sops.filter(s=>!_deletedIds.sops.includes(s.id));removed+=before-DB.sops.length;}
-  if(_deletedIds.testResults?.length){const before=DB.testResults.length;DB.testResults=DB.testResults.filter(r=>!_deletedIds.testResults.includes(r.id));removed+=before-DB.testResults.length;}
+  if(_deletedIds.testResults?.length){const before=DB.testResults.length;DB.testResults=DB.testResults.filter(r=>!r.practice).filter(r=>!_deletedIds.testResults.includes(r.id));removed+=before-DB.testResults.length;}
   if(_deletedIds.certificates?.length){const before=DB.certificates.length;DB.certificates=DB.certificates.filter(c=>!_deletedIds.certificates.includes(c.num));removed+=before-DB.certificates.length;}
   // CRITICAL: Also clean training enrolled/completed for tombstoned employees
   // Firebase training docs may still contain deleted employee IDs in enrolled[]
@@ -8414,7 +8427,7 @@ function applyTombstones(){
     var tombEmpSet=new Set(_deletedIds.employees);
     // Also filter test results & certificates for tombstoned employees (safety net)
     var beforeTR=DB.testResults.length;
-    DB.testResults=DB.testResults.filter(function(r){return !tombEmpSet.has(r.empId);});
+    DB.testResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return !tombEmpSet.has(r.empId);});
     if(DB.testResults.length!==beforeTR)removed+=beforeTR-DB.testResults.length;
     var beforeCert=DB.certificates.length;
     DB.certificates=DB.certificates.filter(function(c){return !tombEmpSet.has(c.empId);});
@@ -8499,7 +8512,7 @@ function saveDB(){
     var cleanEmployees=_deletedIds.employees?.length?DB.employees.filter(function(e){return !_deletedIds.employees.includes(e.id);}):DB.employees;
     var cleanTrainings=_deletedIds.trainings?.length?DB.trainings.filter(function(t){return !_deletedIds.trainings.includes(t.id);}):DB.trainings;
     var cleanSops=_deletedIds.sops?.length?DB.sops.filter(function(s){return !_deletedIds.sops.includes(s.id);}):DB.sops;
-    var cleanTestResults=_deletedIds.testResults?.length?DB.testResults.filter(function(r){return !_deletedIds.testResults.includes(r.id);}):DB.testResults;
+    var cleanTestResults=_deletedIds.testResults?.length?DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return !_deletedIds.testResults.includes(r.id);}):DB.testResults;
     var cleanCerts=_deletedIds.certificates?.length?DB.certificates.filter(function(c){return !_deletedIds.certificates.includes(c.num);}):DB.certificates;
     // WARN if clean count differs from DB count (means tombstones are filtering active items)
     if(cleanEmployees.length!==DB.employees.length){
@@ -8608,7 +8621,7 @@ function reconcileTrainingsFromResults(){
     if(!trn.completed)trn.completed=[];
     if(!trn.completedDates)trn.completedDates={};
     // Find ALL passing test results for this training (excluding tombstoned employees)
-    const passResults=DB.testResults.filter(r=>r.pass&&r.training===trn.name&&(!tombEmpSet||!tombEmpSet.has(r.empId)));
+    const passResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.pass&&r.training===trn.name&&(!tombEmpSet||!tombEmpSet.has(r.empId)));
     passResults.forEach(r=>{
       if(!trn.completed.includes(r.empId)){
         trn.completed.push(r.empId);
@@ -8697,7 +8710,7 @@ async function loadDBFromFirestore(){
     // DEDUP: Remove duplicate test results (same emp+training+date+score)
     var dupCount=0;
     var seenTestKeys=new Set();
-    DB.testResults=DB.testResults.filter(function(r){
+    DB.testResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){
       var key=r.empId+'|'+r.training+'|'+r.date+'|'+r.score;
       if(seenTestKeys.has(key)){dupCount++;return false;}
       seenTestKeys.add(key);return true;
@@ -8753,7 +8766,7 @@ async function loadDBFromFirestore(){
     var validTrnNames=new Set(DB.trainings.map(function(t){return t.name;}));
     if(validTrnNames.size>0){
       var beforeTR=DB.testResults.length;
-      DB.testResults=DB.testResults.filter(function(r){return validTrnNames.has(r.training);});
+      DB.testResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return validTrnNames.has(r.training);});
       var beforeCert=DB.certificates.length;
       DB.certificates=DB.certificates.filter(function(c){return validTrnNames.has(c.training);});
       if(DB.testResults.length!==beforeTR||DB.certificates.length!==beforeCert){
@@ -8939,9 +8952,12 @@ async function freshStartSite(){
 /* ============================================================
    INIT
 ============================================================ */
-/* Clear stale login cache — no auto-login allowed */
+/* Force clear stale login cache to fix credential issues */
 (function(){
-  try{ localStorage.removeItem("mep_user"); }catch(e){}
+  try{
+    const old=localStorage.getItem("mep_user");
+    if(old){const p=JSON.parse(old);if(!p.type||(p.type!=="admin"&&p.type!=="employee")){localStorage.removeItem("mep_user");}}
+  }catch(e){localStorage.removeItem("mep_user");}
 })();
 
 async function initApp(){
@@ -8951,21 +8967,6 @@ async function initApp(){
   const loginBtn=document.getElementById('loginBtn');
   if(loadMsg)loadMsg.style.display='block';
   if(loginBtn){loginBtn.disabled=true;loginBtn.innerHTML='<span class=\'mat-ico\' style=\'animation:spin 1s linear infinite\'>sync</span> Loading data...';}
-
-  // SAFETY TIMEOUT: Force-enable login after 15s even if Firebase hangs
-  setTimeout(function(){
-    if(!_initDone){
-      console.warn('[initApp] Safety timeout (15s) — forcing login enabled with local data');
-      _initDone=true;
-      var btn=document.getElementById('loginBtn');
-      if(btn){btn.disabled=false;btn.textContent='PTS SAFETY SIGN IN';}
-      var lm=document.getElementById('fbLoadStatus');
-      if(lm)lm.style.display='none';
-      var sv=document.getElementById('loginSyncBtn');
-      if(sv)sv.style.display='inline-block';
-      toast('Cloud is slow — using local data. Click "Sync Data" to retry.','warning',5000);
-    }
-  },15000);
 
   // 1. Load from localStorage immediately (sync)
   loadDB();
@@ -9080,9 +9081,9 @@ async function initApp(){
     document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
     document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
     if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
-    // NO auto-login — user must always enter credentials manually
-    // Firebase auth persistence and localStorage session checks removed
-    // to prevent employee devices from auto-logging in as admin.
+    // Auth persistence + session check (needed for auto-login)
+    try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
+    var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
     return;
   }
   if(loadMsg)loadMsg.style.display='none';
@@ -9138,9 +9139,42 @@ async function initApp(){
   DB.settings.theme=t;
   document.getElementById("themeBtn").querySelector(".mat-ico").textContent=t==="dark"?"dark_mode":"light_mode";
 
-  // NO auto-login — always show login form
-  // Firebase auth persistence and localStorage session checks removed
-  // to prevent employee devices from auto-logging in as admin.
+  // Try Firebase Auth persistence first
+  try{
+    if(firebaseReady){
+      await new Promise(r=>{const unsub=fbAuth.onAuthStateChanged(r);setTimeout(unsub,3000);});
+      const fbUser=fbAuth.currentUser;
+      if(fbUser){
+        const uid=fbUser.email.split('@')[0].toUpperCase();
+        let found=false;
+        if(uid==='ADMIN'){
+          const admin=DB.admins.find(a=>a.username==='admin');
+          if(admin){currentUser={...admin,type:"admin"};isAdmin=true;found=true;}
+        }else{
+          const emp=DB.employees.find(e=>e.id===uid);
+          if(emp){currentUser={...emp,type:"employee"};isAdmin=false;found=true;}
+        }
+        if(found){startApp();return;}
+      }
+    }
+  }catch(e){console.warn('Auth persistence check error:',e);}
+
+  // Fallback: check localStorage session
+  const saved=localStorage.getItem("mep_user");
+  if(saved){
+    try{
+      const parsed=JSON.parse(saved);
+      let valid=false;
+      if(parsed.type==="admin"){
+        const match=DB.admins.find(a=>a.username===parsed.username);
+        if(match){currentUser={...match,type:"admin"};isAdmin=true;valid=true;}
+      }else if(parsed.type==="employee"){
+        const match=DB.employees.find(e=>e.id===parsed.id);
+        if(match){currentUser={...match,type:"employee"};isAdmin=false;valid=true;}
+      }
+      if(valid){startApp();}else{localStorage.removeItem("mep_user");}
+    }catch{localStorage.removeItem("mep_user");}
+  }
 }
 
 initApp();
