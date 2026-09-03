@@ -2635,6 +2635,19 @@ function getDashboardTrainingEmployees(t){
   }
   return (DB.employees||[]).filter(function(e){return (t.enrolled||[]).indexOf(e.id)>=0||(t.dept&&(t.dept==='All'||t.dept===e.dept));});
 }
+// Pending participants of ONE training = roster records with NO official test attempt yet
+// (person-keyed via the shared funnel). A person who tested — passed OR failed — is no longer
+// "awaiting training": their outcome already shows in the Tests Passed / Tests Failed cards.
+// This keeps the identity  Participants = Tested + Pending  (e.g. 24 = 6 tested + 18 pending)
+// consistent with the "X/Y tested" strip. Person keys (id+name) stop duplicate-ID people from
+// merging — the old empId-keyed "participants minus passed" formula deduped 4 passes sharing an
+// ID into 3 and showed Pending 21 instead of 18.
+function getDashboardPendingForTraining(t){
+  if(!t)return 0;
+  var tested={};
+  bestResultsByPersonTrn(getDashboardResultsForTraining(t)).forEach(function(r){tested[resultPersonKey(r)]=1;});
+  return getDashboardTrainingEmployees(t).filter(function(e){return !tested[resultPersonKey({empId:e.id,empName:e.name})];}).length;
+}
 // Every schedulable training on the dashboard — normal AND Round 2 (shown with its own name).
 function getDashboardTrainings(){
   return (DB.trainings||[]).filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined';});
@@ -2694,11 +2707,10 @@ function renderDashboard(){
   var completed=0,failed=0,totalAttempts=officialResults.length,scoreSum=0;
   outcomeResults.forEach(function(r){if(isOfficialResultPass(r))completed++;else failed++;scoreSum+=Number(r.score||0);});
   const avgScore=outcomeResults.length?Math.round(scoreSum/outcomeResults.length):0;
-  const pending=visibleTrainings.reduce(function(s,t){
-    const enrolled=getDashboardTrainingEmployees(t).map(function(e){return e.id;});
-    const passed=new Set(outcomeResults.filter(function(r){return isOfficialResultPass(r)&&resultTrnId(r)===t.id;}).map(function(r){return r.empId;}));
-    return s+enrolled.filter(function(eid){return !passed.has(eid);}).length;
-  },0);
+  // Pending = roster members who have NOT tested yet (per training, person-keyed) — NOT
+  // "participants minus passed", which wrongly kept failed testers in Pending and merged
+  // duplicate-ID passers (showed 21 instead of 18 for 24 participants / 6 tested).
+  const pending=visibleTrainings.reduce(function(s,t){return s+getDashboardPendingForTraining(t);},0);
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
   const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
   const el=document.getElementById("view-dashboard");
@@ -6509,13 +6521,15 @@ function getTrainingAnalyticsHTML(){
   html+='<div style="font-size:13px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:16px 0 10px;">Per-Training Breakdown</div>';
   html+='<div class="table-wrap"><table><thead><tr><th>Training</th><th>Category</th><th>Enrolled</th><th>Tested</th><th>Passed</th><th>Pass Rate</th><th>Avg Score</th><th>Certs Issued</th></tr></thead><tbody>';
   trns.forEach(function(t){
-    var tResults=results.filter(function(r){return r.training===t.name;});
-    var tPass=tResults.filter(isOfficialResultPass).length;
+    // Same funnel as the dashboard: loose name matching + best outcome per PERSON (id+name),
+    // so Tested/Passed/Pass Rate/Avg Score here agree with the dashboard cards and card strips.
+    var tBest=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+    var tPass=tBest.filter(isOfficialResultPass).length;
     var tCerts=certs.filter(function(c){return c.training===t.name;}).length;
-    var tAvg=tResults.length?Math.round(tResults.reduce(function(s,r){return s+r.score;},0)/tResults.length):0;
-    var tPassRate=tResults.length?Math.round(tPass/tResults.length*100):0;
+    var tAvg=tBest.length?Math.round(tBest.reduce(function(s,r){return s+Number(r.score||0);},0)/tBest.length):0;
+    var tPassRate=tBest.length?Math.round(tPass/tBest.length*100):0;
     var enrolled=(t.enrolled||[]).length;
-    var uniqueTested=new Set(tResults.map(function(r){return r.empId;})).size;
+    var uniqueTested=tBest.length;
     var rateColor=tPassRate>=75?'var(--green)':tPassRate>=50?'var(--amber)':'var(--red)';
     html+='<tr><td style="font-weight:600;font-size:12px;">'+t.name+'</td>';
     html+='<td><span class="badge badge-info" style="font-size:10px;">'+t.cat+'</span></td>';
