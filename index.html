@@ -4927,8 +4927,8 @@ function openTrainingDetail(id){
         ${t.youtubeLink?`<button class="btn btn-outline" style="border-color:var(--red);color:var(--red);" onclick="removeVideoFromTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">smart_display</span> Remove Video</button>`:""}
         <button class="btn btn-red" onclick="deleteTraining('${t.id}')"><span class="mat-ico">delete</span> Delete</button>
       </div>
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Assigned / Tested Employees (${enrolledEmps.length}) — Completion Status</div>
-      ${enrolledEmps.length?`<div class="table-wrap"><table>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);">Assigned / Tested Employees (${enrolledEmps.length}) — Completion Status</div>${enrolledEmps.length?`<div class="search-wrap" style="margin-left:auto;width:240px;"><span class="mat-ico">search</span><input class="search-bar" id="trainingEmployeeSearch" placeholder="Search Employee ID or Name..." oninput="filterTrainingEmployees(this.value)"></div>`:''}</div>
+      ${enrolledEmps.length?`<div class="table-wrap"><table id="trainingEmployeeTable">
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Assigned</th><th>Status</th><th>Attempts</th><th>Score</th><th>Result</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
           const bestByPersonRow=e._pseudo?bestByPerson[resultPersonKey(e)]:testerMatcher.best(e);
@@ -4961,7 +4961,7 @@ function openTrainingDetail(id){
           // FIX: Certificate column replaced by Pass/Fail result badge (same table position)
           var resultBadge=bestPass?'<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:800;letter-spacing:.04em;">PASS</span>':(attempts>0?'<span class="badge" style="background:rgba(232,72,58,.15);color:var(--red);font-weight:800;letter-spacing:.04em;">FAIL</span>':'<span style="color:var(--muted);">—</span>');
           var aiAssign=getAssignmentInfo(t,e.id);
-          return`<tr>
+          return`<tr data-employee-search="${String(e.id||'')+' '+String(e.name||'')}" data-employee-visible="1">
             <td class="mono" style="color:var(--amber);font-weight:700;">${e.id}</td>
             <td><b>${e.name}</b></td>
             <td><span class="badge badge-info">${e.dept}</span></td>
@@ -4979,6 +4979,13 @@ function openTrainingDetail(id){
         <tbody>${trnFeedbacks.map(function(fb){var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=fb.overallRating||0;var olColor=overallScore>=4?'var(--green)':overallScore>=3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
     </div>
   `,"900px");
+}
+function filterTrainingEmployees(query){
+  var q=String(query||'').trim().toLowerCase();
+  document.querySelectorAll('#trainingEmployeeTable tbody tr').forEach(function(row){
+    var text=(row.getAttribute('data-employee-search')||row.textContent||'').toLowerCase();
+    row.style.display=(!q||text.indexOf(q)>=0)?'':'none';
+  });
 }
 function showFeedbackDetail(fbId){var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});if(!fb){toast('Feedback not found','error');return;}var ratings=fb.ratings||{};var rows='';for(var i=1;i<=10;i++){var rk='q'+i;var r=ratings[rk];if(r){var color=r.score>=4?'var(--green)':r.score>=3?'var(--amber)':'var(--red)';rows+='<tr><td style="padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bdr);">'+i+'. '+r.text+'</td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);"><span style="color:'+color+';font-weight:700;">'+r.label+'</span></td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);">'+r.score+'/5</td></tr>';}}var olColor=(fb.overallRating||0)>=4?'var(--green)':(fb.overallRating||0)>=3?'var(--amber)':'var(--red)';openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Feedback Detail — '+fb.empName+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px;"><div><span style="color:var(--muted);">Employee</span><div><b>'+fb.empName+'</b> ('+fb.empId+')</div></div><div><span style="color:var(--muted);">Department</span><div><b>'+fb.dept+'</b></div></div><div><span style="color:var(--muted);">Designation</span><div><b>'+(fb.desig||'—')+'</b></div></div><div><span style="color:var(--muted);">Training</span><div><b>'+fb.training+'</b></div></div><div><span style="color:var(--muted);">Trainer</span><div><b>'+(fb.trainer||'—')+'</b></div></div><div><span style="color:var(--muted);">Date</span><div><b>'+fb.date+'</b></div></div></div><div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Responses</div><div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th style="text-align:left;">Statement</th><th>Rating</th><th>Score</th></tr></thead><tbody>'+rows+'</tbody></table></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;"><div><span style="font-size:12px;font-weight:700;color:var(--txt);">Overall Rating</span><div style="margin-top:4px;"><span class="badge" style="background:'+olColor+'20;color:'+olColor+';font-size:14px;padding:6px 14px;">'+fb.overallLabel+' ('+fb.overallRating+'/5)</span></div></div></div>'+(fb.enjoy?'<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:700;color:var(--txt);">What did you enjoy most?</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.enjoy+'</div></div>':'')+(fb.suggestions?'<div><span style="font-size:12px;font-weight:700;color:var(--txt);">Suggestions</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.suggestions+'</div></div>':'')+'</div>','700px');}
 function assignEmployees(trnId){
@@ -5072,21 +5079,47 @@ function confirmAssignAllDept(trnId){
   // Immediate Firebase save for training enrollment
   if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});var _origT=t._isR2Training?DB.trainings.find(function(x){return x.id===t._r2ForFailedTrnId;}):null;if(_origT)await fbDB.collection('trainings').doc(String(_origT.id)).set(JSON.parse(JSON.stringify(_origT)),{merge:true});}catch(e){console.warn('Firebase dept assign save error:',e);}})();}
 }
-function removeEmployeeFromTraining(trnId,empId,empName){
-  if(!confirm('Remove '+empName+' ('+empId+') from this training?'))return;
-  const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
-  if(!t.enrolled)t.enrolled=[];
-  t.enrolled=t.enrolled.filter(function(id){return id!==empId;});
-  // Also remove from completed/completedDates if present
-  if(t.completed)t.completed=t.completed.filter(function(id){return id!==empId;});
+async function removeEmployeeFromTraining(trnId,empId,empName){
+  const t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
+  if(!confirm('Remove '+empName+' ('+empId+') from this training?\n\nThis clears their assignment, video progress, test attempts, certificates and training records. If assigned again, they must complete the training again.'))return;
+  const trnName=t.name;
+  // Capture IDs before changing local data so cloud documents can also be removed.
+  const resultIds=DB.testResults.filter(function(r){return r.empId===empId&&r.training===trnName;}).map(function(r){return r.id;});
+  const certIds=DB.certificates.filter(function(c){return c.empId===empId&&c.training===trnName;}).map(function(c){return c.num;});
+  // Remove only this employee's data for this training; all other training history stays intact.
+  t.enrolled=(t.enrolled||[]).filter(function(id){return id!==empId;});
+  t.completed=(t.completed||[]).filter(function(id){return id!==empId;});
+  t.retrained=(t.retrained||[]).filter(function(id){return id!==empId;});
+  t.offlineTrained=(t.offlineTrained||[]).filter(function(id){return id!==empId;});
   if(t.completedDates)delete t.completedDates[empId];
-  toast(empName+' removed from "'+t.name+'"',"info");
+  if(t.videoProgress)delete t.videoProgress[empId];
+  if(t.assignmentLog)t.assignmentLog=(t.assignmentLog||[]).filter(function(a){return a.empId!==empId;});
+  if(t.assignmentHistory)t.assignmentHistory=(t.assignmentHistory||[]).filter(function(a){return a.empId!==empId;});
+  if(t.assignments)t.assignments=(t.assignments||[]).filter(function(a){return a.empId!==empId;});
+  t.retrainingRecords=(t.retrainingRecords||[]).filter(function(r){return r.empId!==empId;});
+  t.offlineRecords=(t.offlineRecords||[]).filter(function(r){return r.empId!==empId;});
+  DB.testResults=DB.testResults.filter(function(r){return !(r.empId===empId&&r.training===trnName);});
+  DB.certificates=DB.certificates.filter(function(c){return !(c.empId===empId&&c.training===trnName);});
+  DB.feedbackForms=(DB.feedbackForms||[]).filter(function(f){return !(f.empId===empId&&f.training===trnName);});
+  DB.correctiveActions=(DB.correctiveActions||[]).filter(function(c){return !(c.empId===empId&&(c.training===trnName||c.trnName===trnName));});
+  DB.notifications=(DB.notifications||[]).filter(function(n){return !(n.forEmp===empId&&n.msg&&n.msg.indexOf(trnName)>=0);});
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('Local save after training removal:',e);}
   updateBadges();saveDB();
-  // Immediate Firebase save
-  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});}catch(e){console.warn('Firebase remove save error:',e);}})();}
-  // Re-render the training detail modal
-  var trn=DB.trainings.find(function(x){return x.id===trnId;});
-  if(trn)openTrainingDetail(trn.id);
+  toast(empName+' removed from '+trnName+'. Training data cleared; reassignment will require a fresh completion.','success',5000);
+  // Delete linked cloud records and save the cleaned training document.
+  if(firebaseReady){
+    try{
+      var adminOk=await authAsAdmin();
+      if(adminOk){
+        for(const rid of resultIds){try{await fbDB.collection('testResults').doc(String(rid)).delete();}catch(e){}}
+        for(const cid of certIds){try{await fbDB.collection('certificates').doc(String(cid)).delete();}catch(e){}}
+        await fbDB.collection('trainings').doc(String(trnId)).set(sanitizeForFirestore(t),{merge:true});
+        await saveDB();
+      }
+    }catch(e){console.warn('Firebase remove training data error:',e);}
+  }
+  queueSheetSync(['Training Data','Trainings','Certificates']);
+  if(document.getElementById('modal')&&document.getElementById('modal').style.display!=='none')openTrainingDetail(trnId);
 }
 function retrainEmployee(trnId,empId,empName){
   var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
@@ -6143,27 +6176,18 @@ div.innerHTML=`
 <table style="width:100%;border-collapse:collapse;">
 <tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">${currentUser.name||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;font-size:10pt;">${currentUser.dept||'\u2014'}</span></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;width:36%;">Name: <b>${currentUser.name||'\u2014'}</b></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;width:28%;">Employee ID: <b>${currentUser.id||'\u2014'}</b></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;width:36%;">Department: <b>${currentUser.dept||'\u2014'}</b></td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.id||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;font-size:10pt;">${managerHtml}</span></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Job Title: <b>${currentUser.desig||'\u2014'}</b></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Date: <b>${today}</b></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Manager: <span style="font-weight:normal;font-size:10pt;">${managerHtml}</span></td>
 </tr>
 <tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${currentUser.desig||'\u2014'}</td>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;font-size:10pt;">${today}</span></td>
-</tr>
-<tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>
-  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>${quizState.training}</b></td>
-</tr>
-<tr>
-  <td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>
-  <td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</td>
+  <td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Training Course: <b>${quizState.training}</b></td>
+  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Trainer: <b>${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</b></td>
 </tr>
 </table>
 <!-- INSTRUCTION -->
@@ -6195,19 +6219,9 @@ ${likertRows}
 <!-- OPEN QUESTIONS -->
 <table style="width:100%;border-collapse:collapse;margin-top:6px;">
 <tr><td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>
-<tr><td colspan="2" style="border:1px solid #000;padding:0;"><textarea id="fb_enjoy" rows="2" placeholder="Share what you liked..." style="width:100%;padding:6px 8px;border:none;background:#fff;color:#000;font-size:10pt;resize:vertical;font-family:Calibri,Arial,sans-serif;outline:none;"></textarea></td></tr>
+<tr><td colspan="2" style="border:1px solid #000;padding:0;"><textarea id="fb_enjoy" rows="6" placeholder="Share what you liked..." style="width:100%;padding:6px 8px;border:none;background:#fff;color:#000;font-size:10pt;resize:vertical;font-family:Calibri,Arial,sans-serif;outline:none;"></textarea></td></tr>
 </table>
-<table style="width:100%;border-collapse:collapse;margin-top:4px;">
-<tr><td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">Suggestions for improvement:</td></tr>
-<tr><td colspan="2" style="border:1px solid #000;padding:0;"><textarea id="fb_suggest" rows="2" placeholder="Any suggestions..." style="width:100%;padding:6px 8px;border:none;background:#fff;color:#000;font-size:10pt;resize:vertical;font-family:Calibri,Arial,sans-serif;outline:none;"></textarea></td></tr>
-</table>
-<!-- SIGNATURES -->
-<table style="width:100%;border-collapse:collapse;margin-top:4px;">
-<tr>
-  <td style="border:1px solid #000;width:50%;padding:4px 10px 0 10px;"><div style="border-top:1px solid #000;margin-top:25px;font-size:8.5pt;text-align:center;color:#333;">Employee Signature &amp; Date</div></td>
-  <td style="border:1px solid #000;width:50%;padding:4px 10px 0 10px;"><div style="border-top:1px solid #000;margin-top:25px;font-size:8.5pt;text-align:center;color:#333;">Manager Signature &amp; Date</div></td>
-</tr>
-</table>
+<!-- REFERENCE FORM ENDS WITH THE LARGE COMMENT AREA -->
 <!-- FOOTER -->
 <div style="padding:4px 8px;font-size:8pt;color:#888;text-align:left;">Page 1 of 1</div>
 <!-- SUBMIT BUTTON -->
@@ -6275,30 +6289,10 @@ html+='<tr>';
 html+='<td style="border:1px solid #000;"></td>';
 html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>';
 html+='</tr>';
-html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:28%;">Name:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;width:36%;">'+(fb.empName||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;width:36%;">Department:<br/><span style="font-weight:normal;">'+(fb.dept||'')+'</span></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Employee ID:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.empId||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Manager:<br/><span style="font-weight:normal;">'+(fb.manager||'')+'</span></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Job Title:</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.desig||'')+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Date:<br/><span style="font-weight:normal;">'+fmtDate+'</span></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Training Course:</td>';
-html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;"><b>'+(fb.training||'')+'</b></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:4px 6px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;vertical-align:middle;">Trainer:</td>';
-html+='<td colspan="2" style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(fb.trainer||'')+'</td>';
-html+='</tr>';
+html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:left;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
+html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Name: <b>'+(fb.empName||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Employee ID: <b>'+(fb.empId||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Department: <b>'+(fb.dept||'')+'</b></td></tr>';
+html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Job Title: <b>'+(fb.desig||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Date: <b>'+fmtDate+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Manager: <b>'+(fb.manager||'')+'</b></td></tr>';
+html+='<tr><td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Training Course: <b>'+(fb.training||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Trainer: <b>'+(fb.trainer||'')+'</b></td></tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
@@ -6319,10 +6313,7 @@ html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font
 html+='</tr>';
 html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'</tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:35px;">'+(fb.enjoy||'')+'</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">Suggestions for improvement:</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:35px;">'+(fb.suggestions||'')+'</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:8px 10px 0 10px;"><table style="width:100%;border:none;"><tr><td style="border:none;width:50%;padding:0;"><div style="border-top:1px solid #000;margin-top:30px;font-size:8pt;text-align:center;color:#333;">Employee Signature &amp; Date</div></td><td style="border:none;width:50%;padding:0;"><div style="border-top:1px solid #000;margin-top:30px;font-size:8pt;text-align:center;color:#333;">Manager Signature &amp; Date</div></td></tr></table></td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:170px;">'+(fb.enjoy||'')+'</td></tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;border-top:1px solid #ccc;padding:4px 6px;font-size:7pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
 html+='</table>';
 html+='</body></html>';
@@ -6427,7 +6418,7 @@ for(var qi=0;qi<FB_QUESTIONS.length;qi++){if(!_fbRatings[qi]){toast('Please answ
 if(!_fbOverall){toast('Please rate the training overall','error');return;}
 var enjoyEl=document.getElementById('fb_enjoy');var suggestEl=document.getElementById('fb_suggest');
 var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
-var fbManagerEl=document.getElementById('fb_manager');var fbManagerVal=fbManagerEl?(fbManagerEl.value||'').trim():'';var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',desig:currentUser.desig||'',manager:fbManagerVal||trnMatch?(trnMatch.manager||''):(DB.settings.defaultManager||''),training:quizState.training,trainer:trnMatch?trnMatch.trainer||'':'',category:quizState.category,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),
+var fbManagerEl=document.getElementById('fb_manager');var fbManagerVal=fbManagerEl?(fbManagerEl.value||'').trim():'';var fb={id:genId('FB'),empId:currentUser.id||currentUser.username||'ADMIN',empName:currentUser.name||currentUser.username||'Admin',dept:currentUser.dept||'Admin',desig:currentUser.desig||'',manager:fbManagerVal||(trnMatch?(trnMatch.manager||''):(DB.settings.defaultManager||'')),training:quizState.training,trainer:trnMatch?trnMatch.trainer||'':'',category:quizState.category,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),
   ratings:{} ,overallRating:_fbOverall,overallLabel:FB_OVERALL[_fbOverall-1]||'',enjoy:enjoyEl?enjoyEl.value.trim():'',suggestions:suggestEl?suggestEl.value.trim():''};
 FB_QUESTIONS.forEach(function(q,i){fb.ratings['q'+(i+1)]={text:q,score:_fbRatings[i],label:FB_SCALE[_fbRatings[i]-1]||''};});
 DB.feedbackForms.push(fb);
