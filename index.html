@@ -1121,6 +1121,46 @@ let DB={
       }
     }
 
+    // 7) FIX: Deduplicate certificates per employee+training (keep the LATEST issued).
+    //    Passing retakes used to push a new certificate each time, inflating the list.
+    if (db.certificates && db.certificates.length > 1) {
+      var certKeyMap = {};
+      db.certificates.forEach(function(c) {
+        var key = (c.empId||'') + '|' + (c.training||'');
+        var prev = certKeyMap[key];
+        if (!prev) { certKeyMap[key] = c; return; }
+        var dPrev = String(prev.completedDate || prev.issued || '');
+        var dCur = String(c.completedDate || c.issued || '');
+        if (dCur > dPrev || (dCur === dPrev && String(c.num||'') > String(prev.num||''))) certKeyMap[key] = c;
+      });
+      var beforeEmpDupC = db.certificates.length;
+      var dedupedCerts = Object.keys(certKeyMap).map(function(k){ return certKeyMap[k]; });
+      if (dedupedCerts.length !== beforeEmpDupC) {
+        db.certificates = dedupedCerts;
+        console.log('[SELF-CLEAN] Deduplicated ' + (beforeEmpDupC - dedupedCerts.length) + ' duplicate employee certificate(s)');
+        changed = true;
+      }
+    }
+
+    // 8) FIX: Remove STALE certificates — employee has NO passing official result for that
+    //    training (and is not marked offline-trained). Keeps certificates consistent with
+    //    the PASS/FAIL views: a failed employee can never show a certificate.
+    if (db.certificates && db.certificates.length && db.testResults) {
+      var beforeStaleC = db.certificates.length;
+      var offlineCertOk = {};
+      (db.trainings||[]).forEach(function(t){ (t.offlineTrained||[]).forEach(function(eid){ offlineCertOk[eid+'|'+t.name] = true; }); });
+      db.certificates = db.certificates.filter(function(c) {
+        if (offlineCertOk[(c.empId||'')+'|'+(c.training||'')]) return true; // offline completion path
+        var trn = (db.trainings||[]).find(function(t){ return t.name === c.training; });
+        var passing = trn ? (trn.passing||70) : 70;
+        return db.testResults.some(function(r){ return !r.practice && r.empId===c.empId && r.training===c.training && Number(r.score||0)>=passing; });
+      });
+      if (db.certificates.length !== beforeStaleC) {
+        console.log('[SELF-CLEAN] Removed ' + (beforeStaleC - db.certificates.length) + ' stale certificate(s) (no passing result)');
+        changed = true;
+      }
+    }
+
     if (changed) {
       localStorage.setItem('pts_safety_db', JSON.stringify(db));
       console.log('[SELF-CLEAN] localStorage cleaned successfully');
@@ -2526,38 +2566,114 @@ function onGlobalSearch(q){
 ============================================================ */
 // Dashboard filter: ALL keeps the overall view; selecting a training scopes every metric.
 let dashboardTrainingFilter='ALL';
-// A dashboard result must belong to a real scheduled normal training and a real employee.
-// Results are retained even when legacy enrollment data is incomplete, because the
-// completed official assessment is the source of truth for pass/fail totals.
-// Category-only quiz attempts, R2 attempts, and practice attempts are excluded.
+// ---------- Dashboard funnel helpers (single source of truth for ALL dashboard/chart counts) ----------
+// Training-name matching is LOOSE (trim + case + multi-space-insensitive) so a result recorded as
+// "fire fighting " or "Fire  Fighting" still attaches to the scheduled "Fire Fighting" training
+// instead of silently disappearing from counts and charts.
+function normalizeTrnName(n){return String(n||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function findTrainingLoose(name){
+  var q=normalizeTrnName(name);if(!q)return null;
+  var list=DB.trainings||[];
+  return list.find(function(t){return t&&t.name&&normalizeTrnName(t.name)===q;})||null;
+}
+// A PERSON is identified by id + name (two different people sharing an ID by data-entry mistake
+// must never merge into one "tested" slot — this is what made "5 persons tested" show as 4).
+function resultPersonKey(r){return String((r&&r.empId)||'')+'|'+String((r&&r.empName)||'').trim().toLowerCase();}
+// Resolve the training a result belongs to. Falls back to the normalized name when the result's
+// training does not match any scheduled training (e.g. category quizzes "Fire Safety Test") so the
+// attempt still counts in overall totals instead of vanishing.
+function resultTrnId(r){
+  if(!r)return '';
+  var t=findTrainingLoose(r.training);
+  return t?t.id:('name:'+normalizeTrnName(r.training));
+}
+// A dashboard result = any official (non-practice) attempt by an identifiable person.
+// FIX: results are the source of truth — retained even when the employee record or enrollment
+// data is missing (deleted employee, ID-case mismatch, admin tester). Round 2 (R2) attempts are
+// INCLUDED so Round 2 training data shows on the dashboard with its own name.
 function isDashboardOfficialResult(r){
   if(!r||r.practice)return false;
-  var trn=DB.trainings.find(function(t){return t.name===r.training;});
-  if(!trn||trn._isR2Training)return false;
-  return !!DB.employees.find(function(e){return e.id===r.empId;});
+  return !!(r.empId||r.empName);
 }
 function getDashboardOfficialResults(){
   return (DB.testResults||[]).filter(isDashboardOfficialResult);
 }
-function getDashboardTrainingEmployees(t){
-  if(!t||t._isR2Training)return [];
-  return DB.employees.filter(function(e){return (t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));});
+// All official attempts for ONE training (loose-matched by resolved training id). R2-safe.
+function getDashboardResultsForTraining(t){
+  if(!t)return [];
+  return getDashboardOfficialResults().filter(function(r){return resultTrnId(r)===t.id;});
 }
+// Best attempt per PERSON per TRAINING (retakes collapse to the highest score; a person who
+// failed then passed counts once as passed). Used by stat cards, card counters and charts.
+function bestResultsByPersonTrn(list){
+  var best={};
+  (list||[]).forEach(function(r){
+    var k=resultPersonKey(r)+'|'+resultTrnId(r);
+    var prev=best[k];
+    if(!prev){best[k]=r;return;}
+    var sNew=Number(r.score||0),sOld=Number(prev.score||0);
+    if(sNew>sOld||(sNew===sOld&&String(r.date||'')>String(prev.date||'')))best[k]=r;
+  });
+  return Object.keys(best).map(function(k){return best[k];});
+}
+// Participants of a training = the people the dashboard counts as its denominator.
+// Normal training: explicitly enrolled + department-matched employees.
+// Round 2 training: explicitly enrolled + employees linked via retrainingRecords + anyone who
+// already has an official result for this R2 training (dept matching is intentionally NOT
+// applied to R2 — its dept field is usually "All" and would wrongly include everyone).
+function getDashboardTrainingEmployees(t){
+  if(!t)return [];
+  if(t._isR2Training){
+    var out=[],seen={};
+    var pushEmp=function(e){if(e&&e.id&&!seen[e.id]){seen[e.id]=1;out.push(e);}};
+    (DB.employees||[]).forEach(function(e){if((t.enrolled||[]).indexOf(e.id)>=0)pushEmp(e);});
+    (DB.trainings||[]).forEach(function(tr){(tr.retrainingRecords||[]).forEach(function(rec){
+      if(rec&&(rec.r2TrnId===t.id||rec.r2TrnName===t.name)){pushEmp(DB.employees.find(function(x){return x.id===rec.empId;}));}
+    });});
+    getDashboardResultsForTraining(t).forEach(function(r){pushEmp(DB.employees.find(function(x){return x.id===r.empId;}));});
+    return out;
+  }
+  return (DB.employees||[]).filter(function(e){return (t.enrolled||[]).indexOf(e.id)>=0||(t.dept&&(t.dept==='All'||t.dept===e.dept));});
+}
+// Every schedulable training on the dashboard — normal AND Round 2 (shown with its own name).
 function getDashboardTrainings(){
-  return (DB.trainings||[]).filter(function(t){return t&&!t._isR2Training;});
+  return (DB.trainings||[]).filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined';});
 }
 function isOfficialTrainingCertificate(c){
   if(!c||c.practice||c.isPractice||c.practiceCertificate||String(c.num||'').indexOf('PRA-')===0)return false;
-  var trn=DB.trainings.find(function(t){return t.name===c.training;});
+  var trn=findTrainingLoose(c.training);
   return !!trn&&!trn._isR2Training;
 }
 function getOfficialTrainingCertificates(){
-  return (DB.certificates||[]).filter(isOfficialTrainingCertificate);
+  // FIX: a certificate only counts while the employee CURRENTLY passes the training (passing
+  // official result) or completed it via offline training. This keeps the Certificates page,
+  // exports, dashboards and reports consistent with the PASS/FAIL views — a failed employee
+  // can never show a certificate (fixes "2 passed but 5 certificates showing" mismatch).
+  // Also dedupes per employee+training (keep latest) so retake duplicates never display.
+  var offMap={};
+  (DB.trainings||[]).forEach(function(t){(t.offlineTrained||[]).forEach(function(eid){offMap[eid+'|'+t.name]=true;});});
+  var list=(DB.certificates||[]).filter(function(c){
+    if(!isOfficialTrainingCertificate(c))return false;
+    if(offMap[(c.empId||'')+'|'+(c.training||'')])return true;
+    var trn=DB.trainings.find(function(t){return t.name===c.training;});
+    var passing=trn?(trn.passing||70):70;
+    return (DB.testResults||[]).some(function(r){return !r.practice&&r.empId===c.empId&&r.training===c.training&&Number(r.score||0)>=passing;});
+  });
+  var certMap={};
+  list.forEach(function(c){
+    var key=(c.empId||'')+'|'+(c.training||'');
+    var prev=certMap[key];
+    if(!prev){certMap[key]=c;return;}
+    var dPrev=String(prev.completedDate||prev.issued||'');
+    var dCur=String(c.completedDate||c.issued||'');
+    if(dCur>dPrev||(dCur===dPrev&&String(c.num||'')>String(prev.num||'')))certMap[key]=c;
+  });
+  return Object.keys(certMap).map(function(k){return certMap[k];});
 }
 function isOfficialResultPass(r){
   if(!r||r.practice)return false;
-  var trn=DB.trainings.find(function(t){return t.name===r.training;});
-  return Number(r.score||0)>=(trn&&trn.passing||70);
+  var trn=findTrainingLoose(r.training);
+  return Number(r.score||0)>=((trn&&trn.passing)||70);
 }
 function renderDashboard(){
   if(!isAdmin){renderEmpDashboard();return;}
@@ -2568,22 +2684,23 @@ function renderDashboard(){
   var scopedParticipants=selectedTraining?getDashboardTrainingEmployees(selectedTraining).map(function(e){return e.id;}):null;
   const total=scopedParticipants?scopedParticipants.length:DB.employees.length;
   const totalTrn=visibleTrainings.length;
-  // Count unique (employee, training) pairs based on BEST attempt
-  // An employee+training is "passed" if their highest score meets the passing threshold
-  // An employee+training is "failed" only if their best score is STILL below passing
-  const bestByEmpTrn={};// key: "empId|training" → best valid official result
-  var officialResults=getDashboardOfficialResults().filter(function(r){return !selectedTraining||r.training===selectedTraining.name;});
-  officialResults.forEach(function(r){var k=r.empId+'|'+r.training;if(!bestByEmpTrn[k]||r.score>bestByEmpTrn[k].score)bestByEmpTrn[k]=r;});
+  // Count unique (PERSON, training) pairs based on BEST attempt
+  // A person+training is "passed" if their highest score meets the passing threshold
+  // A person+training is "failed" only if their best score is STILL below passing
+  // Persons are keyed by id+name and trainings by RESOLVED training id (loose name matching),
+  // so retakes, name variants and duplicate-ID data-entry mistakes can never lose a tester.
+  var officialResults=selectedTraining?getDashboardResultsForTraining(selectedTraining):getDashboardOfficialResults();
+  const outcomeResults=bestResultsByPersonTrn(officialResults);
   var completed=0,failed=0,totalAttempts=officialResults.length,scoreSum=0;
-  Object.values(bestByEmpTrn).forEach(function(r){if(isOfficialResultPass(r))completed++;else failed++;scoreSum+=Number(r.score||0);});
-  const avgScore=Object.keys(bestByEmpTrn).length?Math.round(scoreSum/Object.keys(bestByEmpTrn).length):0;
+  outcomeResults.forEach(function(r){if(isOfficialResultPass(r))completed++;else failed++;scoreSum+=Number(r.score||0);});
+  const avgScore=outcomeResults.length?Math.round(scoreSum/outcomeResults.length):0;
   const pending=visibleTrainings.reduce(function(s,t){
     const enrolled=getDashboardTrainingEmployees(t).map(function(e){return e.id;});
-    const passed=new Set(Object.values(bestByEmpTrn).filter(function(r){return isOfficialResultPass(r)&&r.training===t.name;}).map(function(r){return r.empId;}));
+    const passed=new Set(outcomeResults.filter(function(r){return isOfficialResultPass(r)&&resultTrnId(r)===t.id;}).map(function(r){return r.empId;}));
     return s+enrolled.filter(function(eid){return !passed.has(eid);}).length;
   },0);
-  const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||c.training===selectedTraining.name;}).length;
-  const compPct=Object.keys(bestByEmpTrn).length?Math.round(completed/Object.keys(bestByEmpTrn).length*100):0;
+  const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
+  const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
@@ -2592,13 +2709,13 @@ function renderDashboard(){
       <span class="mat-ico" style="color:var(--purple);font-size:20px;">filter_alt</span><label for="dashboardTrainingFilter" style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);">Show dashboard data for training:</label>
       <select id="dashboardTrainingFilter" class="form-control-sm" style="min-width:240px" onchange="dashboardTrainingFilter=this.value;renderDashboard()">
         <option value="ALL" ${!selectedTraining?'selected':''}>All Trainings</option>
-        ${officialTrainings.map(function(t){return '<option value="'+String(t.name).replace(/"/g,'&quot;')+'" '+(selectedTraining&&selectedTraining.name===t.name?'selected':'')+'>'+t.name+'</option>';}).join('')}
+        ${officialTrainings.map(function(t){return '<option value="'+String(t.name).replace(/"/g,'&quot;')+'" '+(selectedTraining&&selectedTraining.name===t.name?'selected':'')+'>'+String(t.name).replace(/</g,'&lt;')+(t._isR2Training?' \u2014 Round 2':'')+'</option>';}).join('')}
       </select>
-      <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name:'Showing all scheduled trainings'}</span>
+      <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name+(selectedTraining._isR2Training?' (Round 2)':''):'Showing all trainings (incl. Round 2)'}</span>
     </div>
     <div class="stat-grid" style="margin-bottom:18px;">
       ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments")}
-      ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled")}
+      ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2")}
       ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count")}
       ${statCard("pending","Pending",pending,"#f0883e","Awaiting training")}
       ${statCard("cancel","Tests Failed",failed,"#e8483a","Official training fail count")}
@@ -2658,7 +2775,7 @@ function renderDashboard(){
       <div class="table-wrap" style="margin-top:8px;">
         <table><thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Training</th><th>Score</th><th>Result</th><th>Completion Date</th><th>Certificate</th></tr></thead>
         <tbody>
-          ${officialResults.filter(isOfficialResultPass).slice(-10).reverse().map(r=>`<tr>
+          ${outcomeResults.filter(isOfficialResultPass).slice(-10).reverse().map(r=>`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${r.empId}</td>
             <td><b>${r.empName}</b></td>
             <td><span class="badge badge-info">${r.dept}</span></td>
@@ -2668,7 +2785,7 @@ function renderDashboard(){
             <td style="font-weight:600;">${formatDate(r.date)}</td>
             <td>${r.cert?`<button class="btn btn-sm btn-amber" onclick="downloadCertificate('${r.cert}')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> PDF</button>`:""}</td>
           </tr>`).join("")}
-          ${!officialResults.filter(isOfficialResultPass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
+          ${!outcomeResults.filter(isOfficialResultPass).length?`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No completed trainings yet</td></tr>`:""}
         </tbody></table>
       </div>
     </div>
@@ -2692,7 +2809,7 @@ function renderEmpDashboard(){
   const myCerts=getOfficialTrainingCertificates().filter(c=>c.empId===empId).length;
   const myAvg=myResults.length?Math.round(myResults.reduce((s,r)=>s+r.score,0)/myResults.length):0;
   const myPending=myTrns.filter(t=>{
-    const hasPass=getDashboardOfficialResults().find(function(r){return r.empId===empId&&r.training===t.name&&isOfficialResultPass(r);});
+    const hasPass=getDashboardResultsForTraining(t).find(function(r){return r.empId===empId&&isOfficialResultPass(r);});
     return !hasPass;
   }).length;
   var dashR2Map={};
@@ -2730,9 +2847,9 @@ function renderEmpDashboard(){
       <div class="chart-card-title" style="margin-bottom:10px;font-family:'Oswald',sans-serif;font-size:16px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>📋 Trainings Assigned to You (${assignedTrns.length})</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
         ${assignedTrns.map(t=>{
-          const myPassResult=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===t.name&&isOfficialResultPass(r)).sort((a,b)=>b.score-a.score)[0];
+          const myPassResult=getDashboardResultsForTraining(t).filter(r=>r.empId===empId&&isOfficialResultPass(r)).sort((a,b)=>b.score-a.score)[0];
           const done=!!myPassResult||(t.completed||[]).includes(empId);
-          const myResult=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===empId&&r.training===t.name).sort((a,b)=>b.score-a.score)[0];
+          const myResult=getDashboardResultsForTraining(t).filter(r=>r.empId===empId).sort((a,b)=>b.score-a.score)[0];
           var retrainedFlag=(t.retrained||[]).includes(currentUser.id);
           var offlineFlag=(t.offlineTrained||[]).includes(currentUser.id);
           var statusBadge2=done?'✅ Done':offlineFlag?'📧 Offline Training':retrainedFlag?'🔄 Retraining':'⏳ Pending';
@@ -2781,13 +2898,14 @@ function statCard(icon,label,val,color,sub){
   </div>`;
 }
 function drawCharts(dashPassed,dashFailed,selectedTrainingName){
-  var chartResults=getDashboardOfficialResults().filter(function(r){return !selectedTrainingName||selectedTrainingName==='ALL'||r.training===selectedTrainingName;});
-  var chartBestByEmpTrn={};
-  chartResults.forEach(function(r){var k=r.empId+'|'+r.training;if(!chartBestByEmpTrn[k]||r.score>chartBestByEmpTrn[k].score)chartBestByEmpTrn[k]=r;});
-  var chartOutcomeResults=Object.values(chartBestByEmpTrn);
-  var chartTrainings=selectedTrainingName&&selectedTrainingName!=='ALL'?getDashboardTrainings().filter(function(t){return t.name===selectedTrainingName;}):getDashboardTrainings();
-  if(dashPassed===undefined)dashPassed=chartResults.filter(isOfficialResultPass).length;
-  if(dashFailed===undefined)dashFailed=chartResults.filter(function(r){return !isOfficialResultPass(r);}).length;
+  // Scope by RESOLVED training id (loose name matching) so name variants and Round 2 trainings
+  // are never silently dropped. 'ALL' includes every official attempt (normal + Round 2).
+  var selectedTrn=(selectedTrainingName&&selectedTrainingName!=='ALL')?findTrainingLoose(selectedTrainingName):null;
+  var chartResults=selectedTrn?getDashboardResultsForTraining(selectedTrn):getDashboardOfficialResults();
+  var chartOutcomeResults=bestResultsByPersonTrn(chartResults);
+  var chartTrainings=selectedTrn?[selectedTrn]:getDashboardTrainings();
+  if(dashPassed===undefined)dashPassed=chartOutcomeResults.filter(isOfficialResultPass).length;
+  if(dashFailed===undefined)dashFailed=chartOutcomeResults.filter(function(r){return !isOfficialResultPass(r);}).length;
 
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
@@ -2812,13 +2930,21 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   var mCtx=document.getElementById("chartMonthly");
   if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
   // === DEPARTMENT CHART — REAL DATA ===
+  // Dept of a result = the employee's CURRENT department (lookup by empId, fallback to the dept
+  // recorded on the result). Dept list is dynamic: every dept that actually has employees or
+  // results shows up — custom departments missing from the fixed DEPARTMENTS list included.
   destroyChart("chartDept");
   var dCtx=document.getElementById("chartDept");
   if(dCtx){
-    var activeDepts=DEPARTMENTS.filter(function(d){return (selectedTrainingName&&selectedTrainingName!=='ALL'?getDashboardTrainingEmployees(chartTrainings[0]).some(function(e){return e.dept===d;}):DB.employees.some(function(e){return e.dept===d;}));});
-    var deptTotal=activeDepts.map(function(d){return selectedTrainingName&&selectedTrainingName!=='ALL'?getDashboardTrainingEmployees(chartTrainings[0]).filter(function(e){return e.dept===d;}).length:DB.employees.filter(function(e){return e.dept===d;}).length;});
-    var deptPassed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return isOfficialResultPass(r)&&r.dept===d;}).length;});
-    var deptFailed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return !isOfficialResultPass(r)&&r.dept===d;}).length;});
+    var scopeEmps=selectedTrn?getDashboardTrainingEmployees(selectedTrn):DB.employees;
+    var deptOfResult=function(r){var e=(DB.employees||[]).find(function(x){return x.id===r.empId;});return (e&&e.dept)||r.dept||"Unknown";};
+    var deptSet={};
+    scopeEmps.forEach(function(e){deptSet[e.dept||"Unknown"]=1;});
+    chartOutcomeResults.forEach(function(r){deptSet[deptOfResult(r)]=1;});
+    var activeDepts=DEPARTMENTS.filter(function(d){return deptSet[d];}).concat(Object.keys(deptSet).filter(function(d){return DEPARTMENTS.indexOf(d)<0;}).sort());
+    var deptTotal=activeDepts.map(function(d){return scopeEmps.filter(function(e){return (e.dept||"Unknown")===d;}).length;});
+    var deptPassed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;});
+    var deptFailed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return !isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;});
     charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
   }
   // === PASS/FAIL DOUGHNUT ===
@@ -2826,19 +2952,21 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   var pfCtx=document.getElementById("chartPassFail");
   if(pfCtx){charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[dashPassed||0,dashFailed||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
   // === TRAINING-WISE COMPLETION GROUPED BAR ===
+  // Shows every training that actually has participants or results (normal + Round 2),
+  // so the chart mirrors the real data instead of a wall of empty zeros.
   destroyChart("chartTrnCompletion");
   var tcCtx=document.getElementById("chartTrnCompletion");
-  if(tcCtx&&chartTrainings.length){
-    var trnNames=chartTrainings.map(function(t){return t.name.length>20?t.name.slice(0,20)+'...':t.name;});
-    var trnEnrolled=chartTrainings.map(function(t){return getDashboardTrainingEmployees(t).length;});
-    var trnCompleted=chartTrainings.map(function(t){
-      var passedIds=new Set(chartOutcomeResults.filter(function(r){return r.training===t.name&&isOfficialResultPass(r);}).map(function(r){return r.empId;}));
-      return passedIds.size;
-    });
-    var trnPending=chartTrainings.map(function(t){
-      var passedIds=new Set(chartOutcomeResults.filter(function(r){return r.training===t.name&&isOfficialResultPass(r);}).map(function(r){return r.empId;}));
-      var trainingEmployees=getDashboardTrainingEmployees(t);
-      return trainingEmployees.filter(function(e){return !passedIds.has(e.id);}).length;
+  var trnChartList=chartTrainings.filter(function(t){return getDashboardTrainingEmployees(t).length>0||getDashboardResultsForTraining(t).length>0;});
+  if(selectedTrn&&!trnChartList.length)trnChartList=chartTrainings.slice(0,1);
+  if(trnChartList.length>14)trnChartList=trnChartList.slice(0,14);
+  if(tcCtx&&trnChartList.length){
+    var trnBest=trnChartList.map(function(t){return bestResultsByPersonTrn(getDashboardResultsForTraining(t));});
+    var trnNames=trnChartList.map(function(t){var nm=t.name.length>20?t.name.slice(0,20)+'...':t.name;return t._isR2Training?'R2\u00b7'+nm:nm;});
+    var trnEnrolled=trnChartList.map(function(t){return getDashboardTrainingEmployees(t).length;});
+    var trnCompleted=trnBest.map(function(best){return best.filter(isOfficialResultPass).length;});
+    var trnPending=trnChartList.map(function(t,i){
+      var passedIds=new Set(trnBest[i].filter(isOfficialResultPass).map(function(r){return r.empId;}));
+      return getDashboardTrainingEmployees(t).filter(function(e){return !passedIds.has(e.id);}).length;
     });
     charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});
   }
@@ -2850,7 +2978,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
     var rangeColors=["#e8483a","#f0883e","#ffb020","#3ea0e8","#3ecf8e","#8b6de8"];
     var rangeCounts=ranges.map(function(rng){
       var parts=rng.replace('%','').split('-').map(Number);
-      return chartResults.filter(function(r){return r.score>=parts[0]&&r.score<=parts[1];}).length;
+      return chartOutcomeResults.filter(function(r){return Number(r.score)>=parts[0]&&Number(r.score)<=parts[1];}).length;
     });
     charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,stepSize:1},beginAtZero:true}}}});
   }
@@ -2887,7 +3015,7 @@ function renderEmployees(){
       <table>
         <thead><tr><th>Employee</th><th>Dept</th><th>Designation</th><th>Shift</th><th>Mobile</th><th>Status</th><th>Tests Passed</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(e=>{
-          const passed=new Set(getDashboardOfficialResults().filter(function(r){return r.empId===e.id&&isOfficialResultPass(r);}).map(function(r){return r.training;})).size;
+          const passed=new Set(getDashboardOfficialResults().filter(function(r){return r.empId===e.id&&isOfficialResultPass(r);}).map(function(r){return resultTrnId(r);})).size;
           const certs=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
           return`<tr>
             <td><div style="display:flex;align-items:center;gap:8px;">
@@ -3947,7 +4075,7 @@ function exportMasterAuditExcel(){
       {Item:'Total Employees',Value:DB.employees.length},
       {Item:'Total Trainings',Value:DB.trainings.length},
       {Item:'Total Test Results',Value:DB.testResults.length},
-      {Item:'Total Certificates',Value:DB.certificates.length},
+      {Item:'Total Certificates',Value:getOfficialTrainingCertificates().length},
       {Item:'Total SOPs',Value:DB.sops.length},
       {Item:'Corrective Actions',Value:(DB.correctiveActions||[]).length},
       {Item:'Admin Accounts',Value:DB.admins.length},
@@ -4227,10 +4355,12 @@ function renderTrainings(){
         const eligibleEmployees=getDashboardTrainingEmployees(t);
         const enrolledCount=eligibleEmployees.length;
         const eligibleIds=new Set(eligibleEmployees.map(function(e){return e.id;}));
-        const resultBest={};
-        getDashboardOfficialResults().filter(function(r){return r.training===t.name;}).forEach(function(r){if(!resultBest[r.empId]||r.score>resultBest[r.empId].score)resultBest[r.empId]=r;});
-        const testedEmps=new Set(Object.keys(resultBest));
-        const passedEmps=new Set(Object.values(resultBest).filter(function(r){return r.score>=(t.passing||70);}).map(function(r){return r.empId;}));
+        // SAME funnel as the dashboard/charts: all official attempts for THIS training (loose
+        // name matching), best attempt per PERSON (id+name) so no tester is ever merged away —
+        // the card counter, the detail modal and the dashboard always agree.
+        const cardBest=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+        const testedEmps=new Set(cardBest.map(function(r){return resultPersonKey(r);}));
+        const passedEmps=new Set(cardBest.filter(function(r){return isOfficialResultPass(r);}).map(function(r){return resultPersonKey(r);}));
         const failedEmpCount=Array.from(testedEmps).filter(function(eid){return !passedEmps.has(eid);}).length;
         const completedCount=testedEmps.size;
         const passedCount=passedEmps.size;
@@ -4512,7 +4642,20 @@ async function saveTraining(){
 }
 function openTrainingDetail(id){
   const t=DB.trainings.find(x=>x.id===id);if(!t)return;
-  const enrolledEmps=DB.employees.filter(e=>(t.enrolled||[]).includes(e.id));
+  // SAME funnel as the dashboard & card counter: participants = enrolled + dept-matched (+ for R2:
+  // retraining-linked), plus a synthesized row for any tester whose result exists but whose employee
+  // record is missing — so the modal can never show fewer testers than actually completed the test.
+  const detailAll=getDashboardResultsForTraining(t);
+  const detailBest=bestResultsByPersonTrn(detailAll);
+  const rowsByPerson={};
+  detailAll.forEach(function(r){var k=resultPersonKey(r);if(!rowsByPerson[k])rowsByPerson[k]=[];rowsByPerson[k].push(r);});
+  const bestByPerson={};
+  detailBest.forEach(function(r){bestByPerson[resultPersonKey(r)]=r;});
+  var participantEmps=getDashboardTrainingEmployees(t).slice();
+  var seenP={};
+  participantEmps.forEach(function(e){seenP[String(e.id||'')+'|'+String(e.name||'').trim().toLowerCase()]=1;});
+  detailBest.forEach(function(r){var k=resultPersonKey(r);if(!seenP[k]){participantEmps.push({id:r.empId||'—',name:r.empName||'Unknown',dept:r.dept||'',_pseudo:true});seenP[k]=1;}});
+  const enrolledEmps=participantEmps;
   const trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===t.name;});
   const ytLinkId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
   openModal(`
@@ -4544,12 +4687,14 @@ function openTrainingDetail(id){
         ${t.youtubeLink?`<button class="btn btn-outline" style="border-color:var(--red);color:var(--red);" onclick="removeVideoFromTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">smart_display</span> Remove Video</button>`:""}
         <button class="btn btn-red" onclick="deleteTraining('${t.id}')"><span class="mat-ico">delete</span> Delete</button>
       </div>
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrolled Employees (${enrolledEmps.length}) — Completion Status</div>
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Assigned / Tested Employees (${enrolledEmps.length}) — Completion Status</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table>
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Attempts</th><th>Score</th><th>Result</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
-          const bestPass=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id&&r.training===t.name&&isOfficialResultPass(r)).sort((a,b)=>b.score-a.score)[0];
-          let allResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id&&r.training===t.name).sort((a,b)=>b.score-a.score);
+          const key=(String(e.id||'')+'|'+String(e.name||'').trim().toLowerCase());
+          const bestByPersonRow=bestByPerson[key];
+          const bestPass=(bestByPersonRow&&isOfficialResultPass(bestByPersonRow))?bestByPersonRow:null;
+          let allResults=(rowsByPerson[key]||[]).slice().sort((a,b)=>b.score-a.score);
           // Dedup: keep only one result per date (remove same-day duplicates)
           const seenDates=new Set();allResults=allResults.filter(r=>{if(seenDates.has(r.date))return false;seenDates.add(r.date);return true;});
           const doneFromResult=!!bestPass;
@@ -5518,7 +5663,13 @@ function submitQuiz(){
     const expiry=new Date();
     const validityYears=trnMatch?.validity?.includes("2")?2:trnMatch?.validity?.includes("6")?0.5:1;
     expiry.setFullYear(expiry.getFullYear()+Math.floor(validityYears));
-    DB.certificates.push({num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",manager:trnMatch?.manager||DB.settings.defaultManager||"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today});
+    // FIX: ONE certificate per employee+training — a passing retake now UPDATES the existing
+    // certificate instead of pushing a duplicate (retakes were inflating the Certificates list,
+    // causing "2 passed but 5 certificates" mismatches).
+    var certPayload={num:certNum,empId,empName,training:quizState.training,score,dept,trainer:trnMatch?.trainer||"Trainer",manager:trnMatch?.manager||DB.settings.defaultManager||"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:today};
+    var existingCert=DB.certificates.find(c=>c.empId===empId&&c.training===quizState.training);
+    if(existingCert){Object.assign(existingCert,certPayload);}
+    else{DB.certificates.push(certPayload);}
     DB.notifications.unshift({id:genId("N"),msg:`Certificate ${certNum} auto-generated for ${empName} — ${quizState.training} (Score: ${score}%)`,time:"Just now",read:false,icon:"workspace_premium"});
   }
   if(trnMatch){
@@ -5537,7 +5688,8 @@ function submitQuiz(){
         const r=DB.testResults[DB.testResults.length-1];
         if(r) await fbDB.collection('testResults').doc(String(r.id)).set(sanitizeForFirestore(r),{merge:true});
         if(certNum){
-          const c=DB.certificates[DB.certificates.length-1];
+          // FIX: look up the certificate by employee+training (not array tail) — issuance may have updated an existing cert
+          const c=DB.certificates.find(cc=>cc.empId===r.empId&&cc.training===r.training);
           if(c) await fbDB.collection('certificates').doc(String(c.num)).set(sanitizeForFirestore(c),{merge:true});
         }
         console.log('Quiz result saved to Firebase immediately');
@@ -6288,8 +6440,10 @@ function renderReports(){
     const ctx=document.getElementById("reportChart");
     if(!ctx)return;
     const catData=TRAINING_CATS.slice(0,8);
-    const enrolled=catData.map(c=>DB.trainings.filter(t=>t.cat===c).reduce((s,t)=>(t.enrolled||[]).length+s,0));
-    const passed=catData.map(c=>DB.testResults.filter(r=>!r.practice).filter(r=>r.pass&&(r.cat===c||r.training?.toLowerCase().includes(c.toLowerCase()))).length);
+    // Consistent with the dashboard: best outcome per PERSON per training, scheduled trainings only.
+    var catOutcomes=bestResultsByPersonTrn((DB.testResults||[]).filter(r=>!r.practice)).filter(function(r){var trn=findTrainingLoose(r.training);return trn&&!trn._isR2Training;});
+    const enrolled=catData.map(c=>DB.trainings.filter(t=>t.cat===c&&!t._isR2Training).reduce((s,t)=>(t.enrolled||[]).length+s,0));
+    const passed=catData.map(c=>catOutcomes.filter(r=>isOfficialResultPass(r)&&((findTrainingLoose(r.training)||{}).cat===c||r.cat===c||(r.training||'').toLowerCase().includes(c.toLowerCase()))).length);
     const isDark=document.documentElement.getAttribute("data-theme")==="dark";
     const textColor=isDark?"#7d8590":"#656d76";
     new Chart(ctx,{type:"bar",data:{labels:catData,datasets:[{label:"Enrolled",data:enrolled,backgroundColor:"rgba(62,160,232,.7)",borderRadius:4},{label:"Passed",data:passed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxRotation:45}},y:{ticks:{color:textColor}}}}});
@@ -6438,7 +6592,9 @@ function exportFailReport(){
 function exportPendingReport(){
   const pending=[];
   DB.trainings.forEach(t=>(t.enrolled||[]).forEach(eid=>{
-    const hasPass=DB.testResults.filter(r=>!r.practice).find(r=>r.empId===eid&&r.training===t.name&&r.pass);
+    // Loose matching + official funnel: a pass under a name variant (or R2 pass resolved to this
+    // training) clears the employee exactly like the dashboard does.
+    const hasPass=getDashboardResultsForTraining(t).find(r=>r.empId===eid&&isOfficialResultPass(r));
     if(!hasPass&&!(t.completed||[]).includes(eid)){const e=DB.employees.find(x=>x.id===eid);if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});}
   }));
   const ws=XLSX.utils.json_to_sheet(pending.length?pending:[{"Note":"No pending trainings"}]);
@@ -7804,7 +7960,7 @@ function doGet(e) { return ContentService.createTextOutput('PTS Safety Drive API
           <div>Employees: <b style="color:var(--txt);">${DB.employees.length}</b></div>
           <div>Trainings: <b style="color:var(--txt);">${DB.trainings.length}</b></div>
           <div>Test Results: <b style="color:var(--txt);">${DB.testResults.length}</b></div>
-          <div>Certificates: <b style="color:var(--txt);">${DB.certificates.length}</b></div>
+          <div>Certificates: <b style="color:var(--txt);">${getOfficialTrainingCertificates().length}</b></div>
 
           <div>SOPs: <b style="color:var(--txt);">${DB.sops.length}</b></div>
           <div>Equipment: <b style="color:var(--txt);">${EQUIPMENT_DATA.length}</b></div>
