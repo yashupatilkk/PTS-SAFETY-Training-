@@ -2578,7 +2578,10 @@ function findTrainingLoose(name){
 }
 // A PERSON is identified by id + name (two different people sharing an ID by data-entry mistake
 // must never merge into one "tested" slot — this is what made "5 persons tested" show as 4).
-function resultPersonKey(r){return String((r&&r.empId)||'')+'|'+String((r&&r.empName)||'').trim().toLowerCase();}
+// Normalize a person field (id OR name): trim, lowercase, collapse internal whitespace — so
+// "EMP005 " vs "EMP005", "pts01" vs "PTS01" or "Mohammed  Ali" vs "Mohammed Ali" stay ONE person.
+function normPersonField(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function resultPersonKey(r){return normPersonField(r&&r.empId)+'|'+normPersonField(r&&r.empName);}
 // Resolve the training a result belongs to. Falls back to the normalized name when the result's
 // training does not match any scheduled training (e.g. category quizzes "Fire Safety Test") so the
 // attempt still counts in overall totals instead of vanishing.
@@ -2642,11 +2645,58 @@ function getDashboardTrainingEmployees(t){
 // consistent with the "X/Y tested" strip. Person keys (id+name) stop duplicate-ID people from
 // merging — the old empId-keyed "participants minus passed" formula deduped 4 passes sharing an
 // ID into 3 and showed Pending 21 instead of 18.
+// Forgiving result↔roster matcher for ONE training. Real-world test results often record the
+// tester's id/name slightly differently from the employee roster (case, extra spaces, spelling,
+// different id format) — that made a tested person stay Pending forever (dashboard showed Pending
+// 19 instead of 18 for 24 attending / 6 tested, and the number "kept changing" between loads).
+// Cascade — first hit wins; steps 2-3 only fire when that field is UNAMBIGUOUS in the roster, so
+// duplicate-ID / duplicate-name people can never cross-match:
+//   1. normalized id + normalized name equal               (exact person)
+//   2. id equal AND this id occurs ONCE in the roster      (lone id → same person, name forgiven)
+//   3. name equal AND this name occurs ONCE in the roster  (lone name → same person, id forgiven)
+function makeRosterTesterMatcher(t){
+  var roster=getDashboardTrainingEmployees(t);
+  var attempts=getDashboardResultsForTraining(t);
+  var best=bestResultsByPersonTrn(attempts);
+  var rosterIdCount={},rosterNameCount={};
+  roster.forEach(function(e){
+    var id=normPersonField(e.id),nm=normPersonField(e.name);
+    if(id)rosterIdCount[id]=(rosterIdCount[id]||0)+1;
+    if(nm)rosterNameCount[nm]=(rosterNameCount[nm]||0)+1;
+  });
+  var resByKey={},resById={},resByName={},rowsById={},rowsByName={};
+  best.forEach(function(r){
+    var k=resultPersonKey(r);(resByKey[k]=resByKey[k]||[]).push(r);
+    var id=normPersonField(r.empId);if(id)(resById[id]=resById[id]||[]).push(r);
+    var nm=normPersonField(r.empName);if(nm)(resByName[nm]=resByName[nm]||[]).push(r);
+  });
+  attempts.forEach(function(r){
+    var id=normPersonField(r.empId);if(id)(rowsById[id]=rowsById[id]||[]).push(r);
+    var nm=normPersonField(r.empName);if(nm)(rowsByName[nm]=rowsByName[nm]||[]).push(r);
+  });
+  function rowsFor(emp){
+    var id=normPersonField(emp&&emp.id),nm=normPersonField(emp&&emp.name);
+    var out=(resByKey[id+'|'+nm]||[]).slice();
+    if(!out.length&&id&&rosterIdCount[id]===1&&rowsById[id])out=rowsById[id].slice();
+    if(!out.length&&nm&&rosterNameCount[nm]===1&&rowsByName[nm])out=rowsByName[nm].slice();
+    return out;
+  }
+  return {
+    tested:function(emp){return rowsFor(emp).length>0;},
+    rows:rowsFor,
+    best:function(emp){
+      var rs=rowsFor(emp);if(!rs.length)return null;
+      var b=rs[0];
+      rs.forEach(function(r){var s1=Number(r.score||0),s0=Number(b.score||0);
+        if(s1>s0||(s1===s0&&String(r.date||'')>String(b.date||'')))b=r;});
+      return b;
+    }
+  };
+}
 function getDashboardPendingForTraining(t){
   if(!t)return 0;
-  var tested={};
-  bestResultsByPersonTrn(getDashboardResultsForTraining(t)).forEach(function(r){tested[resultPersonKey(r)]=1;});
-  return getDashboardTrainingEmployees(t).filter(function(e){return !tested[resultPersonKey({empId:e.id,empName:e.name})];}).length;
+  var m=makeRosterTesterMatcher(t);
+  return getDashboardTrainingEmployees(t).filter(function(e){return !m.tested(e);}).length;
 }
 // Every schedulable training on the dashboard — normal AND Round 2 (shown with its own name).
 function getDashboardTrainings(){
@@ -4663,10 +4713,17 @@ function openTrainingDetail(id){
   detailAll.forEach(function(r){var k=resultPersonKey(r);if(!rowsByPerson[k])rowsByPerson[k]=[];rowsByPerson[k].push(r);});
   const bestByPerson={};
   detailBest.forEach(function(r){bestByPerson[resultPersonKey(r)]=r;});
+  // Forgiving tester matcher: roster rows resolve their attempts via the same cascade as the
+  // dashboard Pending card, so an id/name variant can never show a tested person as "Pending",
+  // and a variant tester no longer appears TWICE (roster row + pseudo row) in this table.
+  const testerMatcher=makeRosterTesterMatcher(t);
   var participantEmps=getDashboardTrainingEmployees(t).slice();
-  var seenP={};
-  participantEmps.forEach(function(e){seenP[String(e.id||'')+'|'+String(e.name||'').trim().toLowerCase()]=1;});
-  detailBest.forEach(function(r){var k=resultPersonKey(r);if(!seenP[k]){participantEmps.push({id:r.empId||'—',name:r.empName||'Unknown',dept:r.dept||'',_pseudo:true});seenP[k]=1;}});
+  var seenP={},matchedKeys={};
+  participantEmps.forEach(function(e){
+    seenP[String(e.id||'')+'|'+String(e.name||'').trim().toLowerCase()]=1;
+    var b=testerMatcher.best(e);if(b)matchedKeys[resultPersonKey(b)]=1;
+  });
+  detailBest.forEach(function(r){var k=resultPersonKey(r);if(!seenP[k]&&!matchedKeys[k]){participantEmps.push({id:r.empId||'—',name:r.empName||'Unknown',dept:r.dept||'',_pseudo:true});seenP[k]=1;}});
   const enrolledEmps=participantEmps;
   const trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===t.name;});
   const ytLinkId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
@@ -4703,10 +4760,9 @@ function openTrainingDetail(id){
       ${enrolledEmps.length?`<div class="table-wrap"><table>
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Attempts</th><th>Score</th><th>Result</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
-          const key=(String(e.id||'')+'|'+String(e.name||'').trim().toLowerCase());
-          const bestByPersonRow=bestByPerson[key];
+          const bestByPersonRow=e._pseudo?bestByPerson[resultPersonKey(e)]:testerMatcher.best(e);
           const bestPass=(bestByPersonRow&&isOfficialResultPass(bestByPersonRow))?bestByPersonRow:null;
-          let allResults=(rowsByPerson[key]||[]).slice().sort((a,b)=>b.score-a.score);
+          let allResults=(e._pseudo?(rowsByPerson[resultPersonKey(e)]||[]):testerMatcher.rows(e)).slice().sort((a,b)=>b.score-a.score);
           // Dedup: keep only one result per date (remove same-day duplicates)
           const seenDates=new Set();allResults=allResults.filter(r=>{if(seenDates.has(r.date))return false;seenDates.add(r.date);return true;});
           const doneFromResult=!!bestPass;
@@ -6605,12 +6661,17 @@ function exportFailReport(){
 }
 function exportPendingReport(){
   const pending=[];
-  DB.trainings.forEach(t=>(t.enrolled||[]).forEach(eid=>{
-    // Loose matching + official funnel: a pass under a name variant (or R2 pass resolved to this
-    // training) clears the employee exactly like the dashboard does.
-    const hasPass=getDashboardResultsForTraining(t).find(r=>r.empId===eid&&isOfficialResultPass(r));
-    if(!hasPass&&!(t.completed||[]).includes(eid)){const e=DB.employees.find(x=>x.id===eid);if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});}
-  }));
+  DB.trainings.forEach(t=>{
+    // Same forgiving matcher as the dashboard Pending card: an id/name variant in a test result
+    // can no longer list a tested employee as Pending, and the export now equals the dashboard.
+    const m=makeRosterTesterMatcher(t);
+    (t.enrolled||[]).forEach(eid=>{
+      const e=DB.employees.find(x=>x.id===eid)||DB.employees.find(x=>normPersonField(x.id)===normPersonField(eid));
+      if(!m.tested({id:eid,name:e?e.name:''})&&!(t.completed||[]).includes(eid)){
+        if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});
+      }
+    });
+  });
   const ws=XLSX.utils.json_to_sheet(pending.length?pending:[{"Note":"No pending trainings"}]);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Pending");
   XLSX.writeFile(wb,"pending_report.xlsx");toast("Pending report exported","success");
