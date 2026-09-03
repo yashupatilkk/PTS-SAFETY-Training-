@@ -4514,7 +4514,7 @@ async function deleteEmp(id){
 
   // === STEP 6: Mark deletion time ===
   _lastDeleteTime=Date.now();
-  toast("Employee \""+empName+"\" ("+id+") deleted permanently","warning");
+  toast("Employee \""+empName+"\" ("+id+") deleted","warning");
   // Auto-sync to Google Sheet (all related sheets)
   queueSheetSync(["Employees","Training Data","Certificates"]);
 }
@@ -4745,6 +4745,33 @@ function openAddTrnModal(){
 }
 let customQCount=0;
 function previewTrnVideo(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById('trnVideoPreview');const frame=document.getElementById('trnVideoFrame');if(ytId&&wrap&&frame){wrap.style.display='block';frame.src='https://www.youtube.com/embed/'+ytId+'?rel=0';}else if(wrap){wrap.style.display='none';}}
+function refreshOptionSelect(prefix,qid,selected){
+  var sel=document.getElementById(prefix+'_a_'+qid);if(!sel)return;
+  var opts=[...document.querySelectorAll('[data-option-prefix="'+prefix+'"][data-option-qid="'+qid+'"]')];
+  var old=selected!==undefined?selected:parseInt(sel.value||'0');
+  sel.innerHTML=opts.map(function(input,i){return '<option value="'+i+'">Option '+String.fromCharCode(65+i)+'</option>';}).join('');
+  sel.value=String(Math.min(Math.max(old,0),Math.max(opts.length-1,0)));
+}
+function addQuestionOption(prefix,qid){
+  var list=document.getElementById(prefix+'_opts_'+qid);if(!list)return;
+  var n=list.querySelectorAll('[data-option-prefix="'+prefix+'"]').length;
+  var input=document.createElement('div');input.style.cssText='display:flex;gap:5px;align-items:center;';
+  input.setAttribute('data-option-row','1');
+  input.innerHTML='<input class="form-control-sm" data-option-prefix="'+prefix+'" data-option-qid="'+qid+'" id="'+prefix+'_o'+n+'_'+qid+'" placeholder="Option '+String.fromCharCode(65+n)+'" style="flex:1;"><button type="button" class="btn btn-sm btn-outline" style="padding:3px 7px;color:var(--red);border-color:var(--red);" onclick="removeQuestionOption(\''+prefix+'\','+qid+','+n+')" title="Delete option"><span class="mat-ico" style="font-size:12px;">delete</span></button>';
+  list.appendChild(input);refreshOptionSelect(prefix,qid);
+}
+function removeQuestionOption(prefix,qid,index){
+  var list=document.getElementById(prefix+'_opts_'+qid);if(!list)return;
+  var rows=[...list.querySelectorAll('[data-option-row]')];
+  if(rows.length<=2){toast('A question needs at least two options','warning');return;}
+  if(index<0||index>=rows.length)return;
+  var selected=parseInt((document.getElementById(prefix+'_a_'+qid)||{}).value||'0');
+  rows[index].remove();
+  [...list.querySelectorAll('[data-option-prefix="'+prefix+'"][data-option-qid="'+qid+'"]').entries()].forEach(function(pair){var i=pair[0],el=pair[1];el.id=prefix+'_o'+i+'_'+qid;el.placeholder='Option '+String.fromCharCode(65+i);var btn=el.parentElement.querySelector('button');if(btn)btn.setAttribute('onclick',"removeQuestionOption('"+prefix+"',"+qid+","+i+")");});
+  refreshOptionSelect(prefix,qid,selected>index?selected-1:selected===index?0:selected);
+}
+function getQuestionOptions(prefix,qid){return [...document.querySelectorAll('[data-option-prefix="'+prefix+'"][data-option-qid="'+qid+'"]').values()].map(function(x){return (x.value||'').trim();});}
+
 function addCustomQuestion(){
   const n=customQCount++;
   const container=document.getElementById('customQuestionsList');
@@ -4757,13 +4784,12 @@ function addCustomQuestion(){
       <button class="btn btn-sm" style="padding:2px 8px;border:1px solid var(--red);color:var(--red);background:rgba(232,72,58,.08);font-size:10px;" onclick="document.getElementById('cq_${n}').remove()"><span class="mat-ico" style="font-size:11px;">close</span></button>
     </div>
     <input class="form-control-sm" id="cq_q_${n}" placeholder="Enter question text..." style="width:100%;margin-bottom:6px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-      <input class="form-control-sm cq_opt" id="cq_o0_${n}" placeholder="Option A">
-      <input class="form-control-sm cq_opt" id="cq_o1_${n}" placeholder="Option B">
-      <input class="form-control-sm cq_opt" id="cq_o2_${n}" placeholder="Option C">
-      <input class="form-control-sm cq_opt" id="cq_o3_${n}" placeholder="Option D">
+    <div id="cq_opts_${n}" style="display:flex;flex-direction:column;gap:6px;">
+      <div data-option-row="1" style="display:flex;gap:5px;align-items:center;"><input class="form-control-sm cq_opt" data-option-prefix="cq" data-option-qid="${n}" id="cq_o0_${n}" placeholder="Option A" style="flex:1;"><button type="button" class="btn btn-sm btn-outline" style="padding:3px 7px;color:var(--red);border-color:var(--red);" onclick="removeQuestionOption('cq',${n},0)" title="Delete option"><span class="mat-ico" style="font-size:12px;">delete</span></button></div>
+      <div data-option-row="1" style="display:flex;gap:5px;align-items:center;"><input class="form-control-sm cq_opt" data-option-prefix="cq" data-option-qid="${n}" id="cq_o1_${n}" placeholder="Option B" style="flex:1;"><button type="button" class="btn btn-sm btn-outline" style="padding:3px 7px;color:var(--red);border-color:var(--red);" onclick="removeQuestionOption('cq',${n},1)" title="Delete option"><span class="mat-ico" style="font-size:12px;">delete</span></button></div>
     </div>
-    <div style="margin-top:6px;font-size:10px;color:var(--muted);">Correct Answer: <select id="cq_a_${n}"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select></div>
+    <button type="button" class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="addQuestionOption('cq',${n})"><span class="mat-ico" style="font-size:11px;">add</span> Add Option</button>
+    <div style="margin-top:6px;font-size:10px;color:var(--muted);">Correct Answer: <select id="cq_a_${n}"><option value="0">Option A</option><option value="1">Option B</option></select></div>
   `;
   container.appendChild(div);
 }
@@ -4773,15 +4799,9 @@ function getCustomQuestions(){
     const el=document.getElementById('cq_'+i);
     if(!el)continue;
     const q=document.getElementById('cq_q_'+i)?.value.trim();
-    const o0=document.getElementById('cq_o0_'+i)?.value.trim();
-    const o1=document.getElementById('cq_o1_'+i)?.value.trim();
-    const o2=document.getElementById('cq_o2_'+i)?.value.trim();
-    const o3=document.getElementById('cq_o3_'+i)?.value.trim();
+    const opts=getQuestionOptions('cq',i);
     const a=parseInt(document.getElementById('cq_a_'+i)?.value||'0');
-    if(q&&o0&&o1){
-      const opts=[o0,o1,o2||"N/A",o3||"N/A"].filter(x=>x);
-      qs.push({q,o:opts,a:Math.min(a,opts.length-1)});
-    }
+    if(q&&opts.length>=2&&opts[0]&&opts[1])qs.push({q,o:opts,a:Math.min(a,opts.length-1)});
   }
   return qs;
 }
@@ -5166,7 +5186,7 @@ function uploadOfflineNCR_ToDrive(rec,trn,emp){
   }catch(e){console.warn('NCR PDF error:',e);}
 }
 async function deleteTraining(id){
-  if(!confirm("Delete this training PERMANENTLY? Linked video, test results, and certificates will also be removed."))return;
+  if(!confirm("Delete this training? Linked video, test results, and certificates will also be removed."))return;
   var trn=DB.trainings.find(function(t){return t.id===id;});
   if(!trn)return;
   var trnName=trn.name||id;
@@ -5176,8 +5196,11 @@ async function deleteTraining(id){
 
   // === STEP 1: Clean ALL local data IMMEDIATELY ===
   DB.trainings=DB.trainings.filter(function(t){return t.id!==id;});
-  linkedTestIds.forEach(function(tid){DB.testResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.id!==tid;});});
-  linkedCertNums.forEach(function(cnum){DB.certificates=DB.certificates.filter(function(c){return c.num!==cnum;});});
+  DB.testResults=DB.testResults.filter(function(r){return r.practice||linkedTestIds.indexOf(r.id)<0;});
+  DB.certificates=DB.certificates.filter(function(c){return linkedCertNums.indexOf(c.num)<0;});
+  DB.customQuestions=(DB.customQuestions||[]).filter(function(q){return q.trainingName!==trnName&&q.customFor!==trnName;});
+  DB.feedbackForms=(DB.feedbackForms||[]).filter(function(f){return f.training!==trnName;});
+  DB.notifications=(DB.notifications||[]).filter(function(n){return !(n.msg&&n.msg.indexOf(trnName)>=0);});
   // CRITICAL: Save to localStorage IMMEDIATELY so delete persists even if Firebase fails
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('localStorage save after delete error:',e);}
   // Re-render immediately so UI reflects deletion
@@ -5202,7 +5225,7 @@ async function deleteTraining(id){
 
   // === STEP 5: Mark deletion time ===
   _lastDeleteTime=Date.now();
-  toast('Training "'+trnName+'" deleted permanently','warning');
+  toast('Training "'+trnName+'" deleted','warning');
 }
 async function removeVideoFromTraining(trnId){
   var trn=DB.trainings.find(function(t){return t.id===trnId;});
@@ -5615,7 +5638,7 @@ function saveSOP(){
   closeModal();renderSOP();saveDB();toast("SOP added","success");
 }
 async function deleteSOP(id){
-  if(!confirm("Delete this SOP PERMANENTLY?"))return;
+  if(!confirm("Delete this SOP?"))return;
   DB.sops=DB.sops.filter(s=>s.id!==id);
   // AWAIT tombstone cloud write so other devices know immediately
   await addToTombstone('sops',id);
@@ -5624,7 +5647,7 @@ async function deleteSOP(id){
   // Then save cleaned data
   await new Promise(r=>{saveDB();setTimeout(r,1500);});
   _lastDeleteTime=Date.now();
-  renderSOP();updateBadges();toast("SOP PERMANENTLY deleted","warning");
+  renderSOP();updateBadges();toast("SOP deleted","warning");
 }
 
 /* ============================================================
@@ -6864,7 +6887,7 @@ function recalcPassFail(){
 }
 function clearAllTestResults(){
   if(!confirm("DELETE all "+DB.testResults.length+" test results and "+DB.certificates.length+" certificates? This cannot be undone!"))return;
-  if(!confirm("Are you ABSOLUTELY sure? All test history and certificates will be permanently deleted."))return;
+  if(!confirm("Are you ABSOLUTELY sure? All test history and certificates will be deleted."))return;
   DB.testResults=[];DB.certificates=[];
   // Also clear completed status from trainings
   DB.trainings.forEach(t=>{t.completed=[];t.completedDates={};});
@@ -7601,13 +7624,12 @@ function addR2CustomQuestion(){
     '<button class="btn btn-sm" style="padding:2px 8px;border:1px solid var(--red);color:var(--red);background:rgba(232,72,58,.08);font-size:10px;" onclick="document.getElementById(\'r2cq_'+n+'\').remove()"><span class="mat-ico" style="font-size:11px;">close</span></button>'+
     '</div>'+
     '<input class="form-control-sm" id="r2cq_q_'+n+'" placeholder="Enter question text..." style="width:100%;margin-bottom:6px;">'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">'+
-    '<input class="form-control-sm" id="r2cq_o0_'+n+'" placeholder="Option A">'+
-    '<input class="form-control-sm" id="r2cq_o1_'+n+'" placeholder="Option B">'+
-    '<input class="form-control-sm" id="r2cq_o2_'+n+'" placeholder="Option C">'+
-    '<input class="form-control-sm" id="r2cq_o3_'+n+'" placeholder="Option D">'+
+    '<div id="r2cq_opts_'+n+'" style="display:flex;flex-direction:column;gap:6px;">'+
+    '<div data-option-row="1" style="display:flex;gap:5px;align-items:center;"><input class="form-control-sm" data-option-prefix="r2cq" data-option-qid="'+n+'" id="r2cq_o0_'+n+'" placeholder="Option A" style="flex:1;"><button type="button" class="btn btn-sm btn-outline" style="padding:3px 7px;color:var(--red);border-color:var(--red);" onclick="removeQuestionOption(\'r2cq\','+n+',0)" title="Delete option"><span class="mat-ico" style="font-size:12px;">delete</span></button></div>'+
+    '<div data-option-row="1" style="display:flex;gap:5px;align-items:center;"><input class="form-control-sm" data-option-prefix="r2cq" data-option-qid="'+n+'" id="r2cq_o1_'+n+'" placeholder="Option B" style="flex:1;"><button type="button" class="btn btn-sm btn-outline" style="padding:3px 7px;color:var(--red);border-color:var(--red);" onclick="removeQuestionOption(\'r2cq\','+n+',1)" title="Delete option"><span class="mat-ico" style="font-size:12px;">delete</span></button></div>'+
     '</div>'+
-    '<div style="margin-top:6px;font-size:10px;color:var(--muted);">Correct Answer: <select id="r2cq_a_'+n+'"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select></div>';
+    '<button type="button" class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="addQuestionOption(\'r2cq\','+n+')"><span class="mat-ico" style="font-size:11px;">add</span> Add Option</button>'+
+    '<div style="margin-top:6px;font-size:10px;color:var(--muted);">Correct Answer: <select id="r2cq_a_'+n+'"><option value="0">Option A</option><option value="1">Option B</option></select></div>';
   container.appendChild(div);
 }
 
@@ -7617,12 +7639,9 @@ function getR2CustomQuestions(){
   for(var i=0;i<count;i++){
     var el=document.getElementById('r2cq_'+i);if(!el)continue;
     var q=((document.getElementById('r2cq_q_'+i)||{}).value||'').trim();
-    var o0=((document.getElementById('r2cq_o0_'+i)||{}).value||'').trim();
-    var o1=((document.getElementById('r2cq_o1_'+i)||{}).value||'').trim();
-    var o2=((document.getElementById('r2cq_o2_'+i)||{}).value||'').trim();
-    var o3=((document.getElementById('r2cq_o3_'+i)||{}).value||'').trim();
+    var opts=getQuestionOptions('r2cq',i);
     var a=parseInt((document.getElementById('r2cq_a_'+i)||{}).value||'0');
-    if(q&&o0&&o1){var opts=[o0,o1,o2||'N/A',o3||'N/A'].filter(function(x){return x;});qs.push({q:q,o:opts,a:Math.min(a,opts.length-1)});}
+    if(q&&opts.length>=2&&opts[0]&&opts[1])qs.push({q:q,o:opts,a:Math.min(a,opts.length-1)});
   }
   return qs;
 }
