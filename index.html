@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PTS SAFETY — Training Management System v2.8</title>
+<title>PTS SAFETY — Training Management System v5.1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -996,7 +996,8 @@ TRAINING_CATS.forEach(cat=>{
 /* ============================================================
    DATABASE
 ============================================================ */
-console.log('[PTS SAFETY] v2.8 loaded — CA dedup + Create New Training with 10 questions + Clean Duplicates');
+var APP_VERSION='5.1.0',APP_BUILD='2026-09-03';
+console.log('[PTS SAFETY] v'+APP_VERSION+' (build '+APP_BUILD+') — ONE result funnel everywhere (best result per person+training), assignment-gated visibility, monthly drill-down. Two browsers showing different numbers? Compare Settings → System Info → Version on BOTH, then hard-refresh (Ctrl+Shift+R) the older one.');
 let DB={
   employees:[],
   trainings:[],
@@ -2619,6 +2620,41 @@ function bestResultsByPersonTrn(list){
   });
   return Object.keys(best).map(function(k){return best[k];});
 }
+// ---------- EMPLOYEE-side result matching (same forgiving cascade, company-wide) ----------
+// Employee-facing views (own dashboard, My Profile, employee table) used a STRICT
+// r.empId===emp.id filter and counted every passing ATTEMPT — so retakes inflated the employee's
+// "Tests Passed" card (e.g. 11 passing attempts across trainings/retakes) while the admin
+// dashboard counted each PERSON+TRAINING once, and a result recorded under a slightly different
+// id/name never showed up for the employee at all. getEmpOfficialResults resolves one employee's
+// attempts with the same 3-step cascade as makeRosterTesterMatcher, but against the WHOLE
+// employee roster:
+//   1. normalized id + normalized name equal      (exact person)
+//   2. id equal AND unique among all employees    (lone id — name forgiven)
+//   3. name equal AND unique among all employees  (lone name — id forgiven)
+// Steps 2-3 only fire when that field is unambiguous company-wide, so duplicate-ID /
+// duplicate-name colleagues can never cross-match. getEmpTrainingOutcomes collapses the attempts
+// to ONE best outcome per training — the same counting rule the admin dashboard uses.
+function getEmpOfficialResults(emp){
+  if(!emp)return [];
+  var id=normPersonField(emp.id),nm=normPersonField(emp.name);
+  if(!id&&!nm)return [];
+  var idCount={},nameCount={};
+  (DB.employees||[]).forEach(function(e){
+    var eid=normPersonField(e&&e.id),enm=normPersonField(e&&e.name);
+    if(eid)idCount[eid]=(idCount[eid]||0)+1;
+    if(enm)nameCount[enm]=(nameCount[enm]||0)+1;
+  });
+  return getDashboardOfficialResults().filter(function(r){
+    var rid=normPersonField(r.empId),rnm=normPersonField(r.empName);
+    if(id&&rid===id&&nm&&rnm===nm)return true;
+    if(id&&rid===id&&idCount[id]===1)return true;
+    if(nm&&rnm===nm&&nameCount[nm]===1)return true;
+    return false;
+  });
+}
+function getEmpTrainingOutcomes(emp){
+  return bestResultsByPersonTrn(getEmpOfficialResults(emp));
+}
 // Participants of a training = the people the dashboard counts as its denominator.
 // Normal training: explicitly enrolled + department-matched employees.
 // Round 2 training: explicitly enrolled + employees linked via retrainingRecords + anyone who
@@ -2915,14 +2951,18 @@ function renderEmpDashboard(){
   const r2Map={};
   DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){r2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason,r2Trainer:r.r2Trainer||''};}});});
   const r2TrnIds=new Set(Object.keys(r2Map));
-  const myResults=getDashboardOfficialResults().filter(r=>r.empId===empId);
-  const myPassed=myResults.filter(isOfficialResultPass).length;
-  const myFailed=myResults.filter(function(r){return !isOfficialResultPass(r);}).length;
+  // EMPLOYEE STATS ON ONE FUNNEL (fixes the "Tests Passed 11" mismatch): attempts are matched to
+  // this employee with the same forgiving id/name cascade the admin dashboard uses, then collapsed
+  // to ONE best outcome per training — retakes no longer inflate "Tests Passed" (11 passing
+  // attempts ≠ 11 passed trainings) and a result recorded under a variant id/name still counts.
+  const myResults=getEmpOfficialResults(currentUser);
+  const myOutcomes=bestResultsByPersonTrn(myResults);
+  const myPassed=myOutcomes.filter(isOfficialResultPass).length;
+  const myFailed=myOutcomes.filter(function(r){return !isOfficialResultPass(r);}).length;
   const myCerts=getOfficialTrainingCertificates().filter(c=>c.empId===empId).length;
-  const myAvg=myResults.length?Math.round(myResults.reduce((s,r)=>s+r.score,0)/myResults.length):0;
+  const myAvg=myOutcomes.length?Math.round(myOutcomes.reduce((s,r)=>s+Number(r.score||0),0)/myOutcomes.length):0;
   const myPending=myTrns.filter(t=>{
-    const hasPass=getDashboardResultsForTraining(t).find(function(r){return r.empId===empId&&isOfficialResultPass(r);});
-    return !hasPass;
+    return !myOutcomes.some(function(o){return resultTrnId(o)===t.id&&isOfficialResultPass(o);});
   }).length;
   var dashR2Map={};
   DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){dashR2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason};}});});
@@ -2959,9 +2999,10 @@ function renderEmpDashboard(){
       <div class="chart-card-title" style="margin-bottom:10px;font-family:'Oswald',sans-serif;font-size:16px;"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;"></span>📋 Trainings Assigned to You (${assignedTrns.length})</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
         ${assignedTrns.map(t=>{
-          const myPassResult=getDashboardResultsForTraining(t).filter(r=>r.empId===empId&&isOfficialResultPass(r)).sort((a,b)=>b.score-a.score)[0];
+          const trnRows=myResults.filter(r=>resultTrnId(r)===t.id);
+          const myPassResult=trnRows.filter(isOfficialResultPass).sort((a,b)=>b.score-a.score)[0];
           const done=!!myPassResult||(t.completed||[]).includes(empId);
-          const myResult=getDashboardResultsForTraining(t).filter(r=>r.empId===empId).sort((a,b)=>b.score-a.score)[0];
+          const myResult=trnRows.slice().sort((a,b)=>b.score-a.score)[0];
           var retrainedFlag=(t.retrained||[]).includes(currentUser.id);
           var offlineFlag=(t.offlineTrained||[]).includes(currentUser.id);
           var statusBadge2=done?'✅ Done':offlineFlag?'📧 Offline Training':retrainedFlag?'🔄 Retraining':'⏳ Pending';
@@ -2974,7 +3015,7 @@ function renderEmpDashboard(){
             </div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${(t.duration&&t.duration!=='--')?t.duration:'Not set'} · Pass: ${t.passing}%${myResults.length>1?' · Attempts: '+myResults.length:''}</div>
             ${(function(){var ai=getAssignmentInfo(t,empId);return ai?'<div style="font-size:10.5px;color:var(--blue);margin-bottom:6px;">📌 Assigned on '+formatDate(ai.date)+(ai.by?' by '+_escDrill(ai.by):'')+'</div>':'<div style="font-size:10.5px;color:var(--muted);margin-bottom:6px;">📌 Assigned to you</div>';})()}
-            ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
+            ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${isOfficialResultPass(myResult)?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
             ${offlineFlag?'<div style="font-size:11px;color:var(--blue);margin-bottom:6px;">📞 Contact your manager for offline/face-to-face training schedule.</div>':''}
             ${!done&&!offlineFlag?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> ${retrainedFlag?'Retake Test':'Take Test'}</button>`:done?'<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>':''}
           </div>`;
@@ -3180,7 +3221,7 @@ function renderEmployees(){
       <table>
         <thead><tr><th>Employee</th><th>Dept</th><th>Designation</th><th>Shift</th><th>Mobile</th><th>Status</th><th>Tests Passed</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(e=>{
-          const passed=new Set(getDashboardOfficialResults().filter(function(r){return r.empId===e.id&&isOfficialResultPass(r);}).map(function(r){return resultTrnId(r);})).size;
+          const passed=new Set(bestResultsByPersonTrn(getEmpOfficialResults(e)).filter(isOfficialResultPass).map(function(r){return resultTrnId(r);})).size;
           const certs=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
           return`<tr>
             <td><div style="display:flex;align-items:center;gap:8px;">
@@ -3210,7 +3251,7 @@ function renderEmployees(){
 function renderEmpEmployee(){
   const e=DB.employees.find(x=>x.id===currentUser.id);
   if(!e){document.getElementById("view-employees").innerHTML="<div class='empty-state'><span class='mat-ico'>person</span><h3>Profile not found</h3></div>";return;}
-  const myResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.empId===e.id);
+  const myResults=getEmpOfficialResults(e);
   const myCerts=DB.certificates.filter(c=>c.empId===e.id);
   document.getElementById("view-employees").innerHTML=`
     <div class="section-header"><div class="section-title">My <span>Profile</span></div></div>
@@ -3229,7 +3270,7 @@ function renderEmpEmployee(){
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         ${statCard("school","Tests Taken",myResults.length,"#3ea0e8","")}
-        ${statCard("check_circle","Passed",myResults.filter(r=>r.pass).length,"#3ecf8e","")}
+        ${statCard("check_circle","Passed",bestResultsByPersonTrn(myResults).filter(isOfficialResultPass).length,"#3ecf8e","")}
         ${statCard("workspace_premium","Certificates",myCerts.length,"#c084fc","")}
       </div>
     </div>
@@ -3500,17 +3541,19 @@ function openEmpCardDetail(empId){
   var e=DB.employees.find(function(x){return x.id===empId;});if(!e)return;
   var photo=e.photo||'';
   var avatarHTML=photo?'<img src="'+photo+'" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:72px;height:72px;font-size:26px;background:'+avatarColor(e.name)+';">'+avatarInitials(e.name)+'</div>';
-  // Stats
-  var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId;});
-  var passCount=allResults.filter(function(r){return r.pass;}).length;
-  var failCount=allResults.filter(function(r){return !r.pass;}).length;
+  // Stats — ONE funnel: cascade-matched attempts, ONE best outcome per training (retakes counted
+  // once, variant-id results still land on this employee — same rule as the admin dashboard).
+  var allResults=getEmpOfficialResults(e);
+  var empOutcomes=bestResultsByPersonTrn(allResults);
+  var passCount=empOutcomes.filter(isOfficialResultPass).length;
+  var failCount=empOutcomes.filter(function(r){return !isOfficialResultPass(r);}).length;
   var certCount=getOfficialTrainingCertificates().filter(function(c){return c.empId===empId;}).length;
-  var avgScore=allResults.length?Math.round(allResults.reduce(function(s,r){return s+r.score;},0)/allResults.length):0;
+  var avgScore=empOutcomes.length?Math.round(empOutcomes.reduce(function(s,r){return s+Number(r.score||0);},0)/empOutcomes.length):0;
   // Training-wise breakdown
   var trnGroups={};
   allResults.forEach(function(r){
     if(!trnGroups[r.training])trnGroups[r.training]={pass:0,fail:0,best:0,results:[],cat:r.cat||''};
-    if(r.pass)trnGroups[r.training].pass++;else trnGroups[r.training].fail++;
+    if(isOfficialResultPass(r))trnGroups[r.training].pass++;else trnGroups[r.training].fail++;
     if(r.score>trnGroups[r.training].best)trnGroups[r.training].best=r.score;
     trnGroups[r.training].results.push(r);
   });
@@ -3519,7 +3562,7 @@ function openEmpCardDetail(empId){
   var empTrnGroups={};
   allResults.forEach(function(r){
     if(!empTrnGroups[r.training])empTrnGroups[r.training]={hasPass:false,hasFail:false};
-    if(r.pass)empTrnGroups[r.training].hasPass=true;
+    if(isOfficialResultPass(r))empTrnGroups[r.training].hasPass=true;
     else empTrnGroups[r.training].hasFail=true;
   });
   Object.keys(empTrnGroups).forEach(function(trnName){
@@ -3680,17 +3723,20 @@ function renderMyProfile(){
   if(!emp){document.getElementById('view-myprofile').innerHTML='<div class="empty-state"><span class="mat-ico">error</span><h3>Profile Not Found</h3><p>Your employee record was not found. Contact admin.</p></div>';return;}
   var photo=emp.photo||'';
   var avatarHTML=photo?'<img src="'+photo+'" style="width:90px;height:90px;border-radius:50%;object-fit:cover;">':'<div class="avatar" style="width:90px;height:90px;font-size:30px;background:'+avatarColor(emp.name)+';">'+avatarInitials(emp.name)+'</div>';
-  var allResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId;});
-  var passCount=allResults.filter(function(r){return r.pass;}).length;
-  var failCount=allResults.filter(function(r){return !r.pass;}).length;
+  // ONE funnel (same as the admin dashboard): cascade-matched attempts → ONE best outcome per
+  // training. Retakes no longer inflate Tests Passed; variant-id results still count for me.
+  var allResults=getEmpOfficialResults(emp);
+  var myOutcomes=bestResultsByPersonTrn(allResults);
+  var passCount=myOutcomes.filter(isOfficialResultPass).length;
+  var failCount=myOutcomes.filter(function(r){return !isOfficialResultPass(r);}).length;
   var certCount=getOfficialTrainingCertificates().filter(function(c){return c.empId===empId;}).length;
-  var avgScore=allResults.length?Math.round(allResults.reduce(function(s,r){return s+r.score;},0)/allResults.length):0;
+  var avgScore=myOutcomes.length?Math.round(myOutcomes.reduce(function(s,r){return s+Number(r.score||0);},0)/myOutcomes.length):0;
   // Retraining count — only trainings where employee failed and hasn't passed yet (unresolved)
   var retrainCount=0;
   var empTrnGroups={};
   allResults.forEach(function(r){
     if(!empTrnGroups[r.training])empTrnGroups[r.training]={hasPass:false,hasFail:false};
-    if(r.pass)empTrnGroups[r.training].hasPass=true;
+    if(isOfficialResultPass(r))empTrnGroups[r.training].hasPass=true;
     else empTrnGroups[r.training].hasFail=true;
   });
   Object.keys(empTrnGroups).forEach(function(trnName){
@@ -3703,7 +3749,7 @@ function renderMyProfile(){
   var trnGroups={};
   allResults.forEach(function(r){
     if(!trnGroups[r.training])trnGroups[r.training]={pass:0,fail:0,best:0,results:[],cat:r.cat||''};
-    if(r.pass)trnGroups[r.training].pass++;else trnGroups[r.training].fail++;
+    if(isOfficialResultPass(r))trnGroups[r.training].pass++;else trnGroups[r.training].fail++;
     if(r.score>trnGroups[r.training].best)trnGroups[r.training].best=r.score;
     trnGroups[r.training].results.push(r);
   });
@@ -8150,7 +8196,7 @@ function doGet(e) { return ContentService.createTextOutput('PTS Safety Drive API
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">info</span> System Info</div>
         <div style="font-size:12px;color:var(--muted);line-height:2;">
-          <div>Version: <b style="color:var(--txt);">5.0.0</b></div>
+          <div>Version: <b style="color:var(--txt);">${APP_VERSION}</b> <span style="color:var(--muted);">(build ${APP_BUILD})</span> — must match on every browser/device</div>
           <div>Employees: <b style="color:var(--txt);">${DB.employees.length}</b></div>
           <div>Trainings: <b style="color:var(--txt);">${DB.trainings.length}</b></div>
           <div>Test Results: <b style="color:var(--txt);">${DB.testResults.length}</b></div>
