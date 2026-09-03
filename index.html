@@ -2805,7 +2805,7 @@ function renderDashboard(){
     </div>
     <!-- GROUPED BAR CHARTS -->
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Monthly Training Activity (Real Data)</div><canvas id="chartMonthly" height="200"></canvas></div>
+      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><canvas id="chartMonthly" height="200"></canvas><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar (or "View tests") to see exactly which tests are counted.</div></div>
       <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><canvas id="chartDept" height="200"></canvas></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
@@ -2959,6 +2959,66 @@ function statCard(icon,label,val,color,sub){
     <div class="stat-sub">${sub}</div>
   </div>`;
 }
+// Drill-down data for the Monthly Training Activity chart: which tests are behind each bar.
+// Buckets mirror the chart's last-6-months window; rebuilt on every dashboard render.
+function buildMonthlyDrillBuckets(chartResults){
+  var monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var now=new Date();
+  var buckets=[];
+  for(var mi=5;mi>=0;mi--){
+    var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
+    var mKey=md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0');
+    buckets.push({label:monthNames[md.getMonth()]+' '+String(md.getFullYear()).slice(2),mKey:mKey,
+      results:chartResults.filter(function(r){return r.date&&r.date.startsWith(mKey);})});
+  }
+  return buckets;
+}
+// Attempt number per test in a drill-down list (oldest first), keyed by the result object.
+// A person who retook shows "Attempt #2" — this is why "Total Tests 7" can coexist with
+// 4 passed + 2 failed PERSONS (7 attempts, one of them a retake; cards count best outcome).
+function computeAttemptNumbers(list){
+  var attCount={},attOf=new Map();
+  list.slice().sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));}).forEach(function(r){
+    var k=resultPersonKey(r)+'|'+resultTrnId(r);
+    attCount[k]=(attCount[k]||0)+1;attOf.set(r,attCount[k]);
+  });
+  return attOf;
+}
+function _escDrill(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// Modal listing the tests behind the Monthly Training Activity chart. idx = month bucket index,
+// or -1 for all visible months.
+function openMonthlyTestDetails(idx){
+  if(!window._monthlyDrillData){window._monthlyDrillData={buckets:buildMonthlyDrillBuckets(getDashboardOfficialResults()),scope:'All official results'};}
+  var D=window._monthlyDrillData,buckets=D.buckets||[],list=[],title;
+  if(idx>=0&&buckets[idx]){list=buckets[idx].results.slice();title='Tests — '+buckets[idx].label;}
+  else{buckets.forEach(function(b){list=list.concat(b.results);});title='Tests — Last 6 Months';}
+  list.sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''));});
+  var passed=list.filter(isOfficialResultPass).length,failed=list.length-passed;
+  var attOf=computeAttemptNumbers(list);
+  var rowsHtml=list.map(function(r){
+    var pass=isOfficialResultPass(r),att=attOf.get(r)||1;
+    return '<tr>'+
+      '<td style="font-weight:600;white-space:nowrap;">'+formatDate(r.date)+'</td>'+
+      '<td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(r.empId)+'</td>'+
+      '<td><b>'+_escDrill(r.empName)+'</b>'+(att>1?' <span class="badge badge-info" style="font-size:9px;">Attempt #'+att+'</span>':'')+'</td>'+
+      '<td>'+_escDrill(r.training)+'</td>'+
+      '<td style="font-weight:700;color:'+(pass?'var(--green)':'var(--red)')+';">'+Number(r.score||0)+'%</td>'+
+      '<td><span class="badge badge-'+(pass?'active':'danger')+'">'+(pass?'PASS':'FAIL')+'</span></td>'+
+    '</tr>';
+  }).join('');
+  var body=list.length?
+    '<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Date</th><th>Employee ID</th><th>Name</th><th>Training</th><th>Score</th><th>Result</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'
+    :'<p style="color:var(--muted);text-align:center;padding:24px;">No tests recorded for this period.</p>';
+  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>'+title+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-amber">Total Tests: '+list.length+'</span>'+
+      '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Passed: '+passed+'</span>'+
+      '<span class="badge badge-danger">Failed: '+failed+'</span>'+
+      '<span class="badge badge-info" style="margin-left:auto;">'+_escDrill(D.scope)+'</span>'+
+    '</div>'+body+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">This list counts every official test attempt (retakes included, shown as "Attempt #2" etc.). The dashboard Tests Passed / Tests Failed cards count each person once by best score — that is why Total Tests can be higher than Passed + Failed.</div>'+
+  '</div>','860px');
+}
 function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   // Scope by RESOLVED training id (loose name matching) so name variants and Round 2 trainings
   // are never silently dropped. 'ALL' includes every official attempt (normal + Round 2).
@@ -2973,24 +3033,16 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
   const textColor=isDark?"#7d8590":"#656d76";
   // === MONTHLY CHART — REAL DATA from testResults ===
-  var monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  var now=new Date();
-  var monthLabels=[];
-  var monthTestData=[];
-  var monthPassedData=[];
-  var monthFailedData=[];
-  for(var mi=5;mi>=0;mi--){
-    var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
-    var mKey=md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0');
-    monthLabels.push(monthNames[md.getMonth()]+' '+String(md.getFullYear()).slice(2));
-    var monthResults=chartResults.filter(function(r){return r.date&&r.date.startsWith(mKey);});
-    monthTestData.push(monthResults.length);
-    monthPassedData.push(monthResults.filter(isOfficialResultPass).length);
-    monthFailedData.push(monthResults.filter(function(r){return !isOfficialResultPass(r);}).length);
-  }
+  // Buckets double as drill-down data: clicking a bar opens the list of THAT month's tests.
+  var monthlyDrillBuckets=buildMonthlyDrillBuckets(chartResults);
+  window._monthlyDrillData={buckets:monthlyDrillBuckets,scope:selectedTrn?('Training: '+selectedTrn.name):'All Trainings (incl. Round 2)'};
+  var monthLabels=monthlyDrillBuckets.map(function(b){return b.label;});
+  var monthTestData=monthlyDrillBuckets.map(function(b){return b.results.length;});
+  var monthPassedData=monthlyDrillBuckets.map(function(b){return b.results.filter(isOfficialResultPass).length;});
+  var monthFailedData=monthlyDrillBuckets.map(function(b){return b.results.filter(function(r){return !isOfficialResultPass(r);}).length;});
   destroyChart("chartMonthly");
   var mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index);}},onHover:function(evt,els){if(evt.native)evt.native.target.style.cursor=els.length?"pointer":"default";},plugins:{legend:{labels:{color:textColor,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see which tests';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
   // === DEPARTMENT CHART — REAL DATA ===
   // Dept of a result = the employee's CURRENT department (lookup by empId, fallback to the dept
   // recorded on the result). Dept list is dynamic: every dept that actually has employees or
