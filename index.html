@@ -2355,7 +2355,7 @@ function updateBadges(){
   document.getElementById("nb-employees").textContent=DB.employees.length;
   document.getElementById("nb-trainings").textContent=(DB.trainings||[]).filter(function(t){return !t._isR2Training;}).length;
   document.getElementById("nb-equipment").textContent=EQUIPMENT_DATA.length;
-  var myNotifsForBadge=(typeof isAdmin!=='undefined'&&isAdmin)?DB.notifications:(typeof currentUser!=='undefined'&&currentUser)?DB.notifications.filter(function(n){return !n.forEmp||n.forEmp===currentUser.id;}):DB.notifications;
+  var myNotifsForBadge=(typeof isAdmin!=='undefined'&&isAdmin)?DB.notifications:(typeof currentUser!=='undefined'&&currentUser)?DB.notifications.filter(function(n){return !n.adminOnly&&(!n.forEmp||n.forEmp===currentUser.id);}):DB.notifications;
   const unread=myNotifsForBadge.filter(n=>!n.read).length;
   document.getElementById("nb-notif").textContent=unread;
   var caCount=(DB.correctiveActions||[]).length;
@@ -2479,7 +2479,7 @@ document.addEventListener("click",e=>{if(!e.target.closest("#notifPanel")&&!e.ta
 function getMyNotifications(){
   if(typeof currentUser==='undefined'||!currentUser)return DB.notifications;
   if(isAdmin)return DB.notifications;
-  return DB.notifications.filter(n=>!n.forEmp||n.forEmp===currentUser.id);
+  return DB.notifications.filter(n=>!n.adminOnly&&(!n.forEmp||n.forEmp===currentUser.id));
 }
 function renderNotifPanel(){
   const list=document.getElementById("notifList");
@@ -2636,7 +2636,55 @@ function getDashboardTrainingEmployees(t){
     getDashboardResultsForTraining(t).forEach(function(r){pushEmp(DB.employees.find(function(x){return x.id===r.empId;}));});
     return out;
   }
-  return (DB.employees||[]).filter(function(e){return (t.enrolled||[]).indexOf(e.id)>=0||(t.dept&&(t.dept==='All'||t.dept===e.dept));});
+  // ASSIGNMENT-GATED ROSTER (user request: "in which person i assign that training i need show
+  // that employee only, not all employees"). Department auto-matching is REMOVED — a fresh
+  // training with nobody assigned has NO participants and is invisible to every employee login
+  // until the admin assigns people. Roster = explicitly assigned employees + anyone who already
+  // has an official result for this training (a tester always counts as a participant even if
+  // the enrollment was forgotten — the detail modal still lists them as a synthesized row).
+  var out=[],seen={};
+  // Dedupe by id+name (NOT id alone): two people sharing one ID (duplicate-ID roster records)
+  // must BOTH stay in the roster — the forgiving tester matcher disables its id-forgiving
+  // cascade steps exactly when an id occurs twice, so one tested twin can never clear the other.
+  var pushEmp=function(e){if(!e||!e.id)return;var k=e.id+'|'+String(e.name||'').trim().toLowerCase();if(seen[k])return;seen[k]=1;out.push(e);};
+  (DB.employees||[]).forEach(function(e){if((t.enrolled||[]).indexOf(e.id)>=0)pushEmp(e);});
+  getDashboardResultsForTraining(t).forEach(function(r){(DB.employees||[]).forEach(function(x){if(x&&x.id===r.empId)pushEmp(x);});});
+  return out;
+}
+// ---------- Assignment log: WHO was assigned to a training, WHEN, and BY WHOM ----------
+// Written by recordAssignments() on every Assign action (manual / by-department). Legacy
+// assignments made before this log existed simply have no record — the UI shows them as
+// "Assigned" without a date instead of guessing.
+function getAssignmentInfo(t,empId){
+  if(!t||!empId||!t.assignments)return null;
+  return t.assignments.find(function(a){return a&&a.empId===empId;})||null;
+}
+function recordAssignments(t,empIds,method){
+  if(!t)return;
+  if(!t.assignments)t.assignments=[];
+  var today=new Date().toISOString().split('T')[0];
+  var by=(typeof currentUser!=='undefined'&&currentUser&&(currentUser.name||currentUser.username))||'Admin';
+  (empIds||[]).forEach(function(eid){
+    if(!eid)return;
+    var emp=(DB.employees||[]).find(function(e){return e.id===eid;});
+    t.assignments=t.assignments.filter(function(a){return a&&a.empId!==eid;});
+    t.assignments.push({empId:eid,empName:emp?emp.name:eid,date:today,by:by,method:method||'manual'});
+  });
+}
+// Single source of truth for EMPLOYEE-SIDE training visibility: an employee sees a training
+// ONLY if the admin assigned them to it (t.enrolled) — or it is a Round 2 training linked to
+// them through a retrainingRecords entry. A training with nobody assigned is visible to NO
+// employee (it stays admin-only until people are assigned to it).
+function isEmployeeAssignedToTraining(t,empId){
+  if(!t||!empId)return false;
+  if((t.enrolled||[]).indexOf(empId)>=0)return true;
+  return (DB.trainings||[]).some(function(tr){return (tr.retrainingRecords||[]).some(function(r){return r&&r.empId===empId&&(r.r2TrnId===t.id||r.r2TrnName===t.name);});});
+}
+// All ASSIGNED trainings for one employee (Round 2 excluded — it renders on its own page and
+// dashboard section via retrainingRecords).
+function getEmployeeTrainings(emp){
+  if(!emp)return [];
+  return (DB.trainings||[]).filter(function(t){return isEmployeeAssignedToTraining(t,emp.id);}).filter(function(t){return !t._isR2Training;});
 }
 // Pending participants of ONE training = roster records with NO official test attempt yet
 // (person-keyed via the shared funnel). A person who tested — passed OR failed — is no longer
@@ -2861,7 +2909,9 @@ function renderDashboard(){
 }
 function renderEmpDashboard(){
   const empId=currentUser.id;
-  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept))).filter(function(t){return !t._isR2Training;});
+  // ASSIGNMENT-GATED VISIBILITY: only trainings the admin explicitly assigned to this employee
+  // (dept auto-matching removed — a new training must NOT appear before anyone is assigned).
+  const myTrns=getEmployeeTrainings(currentUser);
   const r2Map={};
   DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){r2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason,r2Trainer:r.r2Trainer||''};}});});
   const r2TrnIds=new Set(Object.keys(r2Map));
@@ -2877,7 +2927,7 @@ function renderEmpDashboard(){
   var dashR2Map={};
   DB.trainings.forEach(function(t){(t.retrainingRecords||[]).forEach(function(r){if(r.empId===empId&&r.r2TrnId){dashR2Map[r.r2TrnId]={origName:r.training,origId:r.trnId,r2Name:r.r2TrnName,r2Video:r.r2Video,r2Deadline:r.r2Deadline,reason:r.reason};}});});
   var dashR2Ids=new Set(Object.keys(dashR2Map));
-  const assignedTrns=myTrns.filter(t=>(t.enrolled||[]).includes(empId));
+  const assignedTrns=myTrns; // myTrns is already assigned-only (see getEmployeeTrainings)
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"").split(" ")[0]}</span></h2>
@@ -2923,6 +2973,7 @@ function renderEmpDashboard(){
               <span class="badge badge-${statusBadgeCls}" style="margin-left:auto;">${statusBadge2}</span>
             </div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">📅 ${formatDate(t.date)} · ⏱ ${(t.duration&&t.duration!=='--')?t.duration:'Not set'} · Pass: ${t.passing}%${myResults.length>1?' · Attempts: '+myResults.length:''}</div>
+            ${(function(){var ai=getAssignmentInfo(t,empId);return ai?'<div style="font-size:10.5px;color:var(--blue);margin-bottom:6px;">📌 Assigned on '+formatDate(ai.date)+(ai.by?' by '+_escDrill(ai.by):'')+'</div>':'<div style="font-size:10.5px;color:var(--muted);margin-bottom:6px;">📌 Assigned to you</div>';})()}
             ${myResult?`<div style="font-size:11px;margin-bottom:6px;">Best score: <b style="color:${myResult.pass?"var(--green)":"var(--red)"}">${myResult.score}%</b></div>`:""}
             ${offlineFlag?'<div style="font-size:11px;color:var(--blue);margin-bottom:6px;">📞 Contact your manager for offline/face-to-face training schedule.</div>':''}
             ${!done&&!offlineFlag?`<button class="btn btn-amber btn-sm" onclick="startQuizForTrn('${t.id}')"><span class="mat-ico" style="font-size:11px;">quiz</span> ${retrainedFlag?'Retake Test':'Take Test'}</button>`:done?'<span style="font-size:11px;color:var(--green);">✔ Completed — check Certificates</span>':''}
@@ -4518,7 +4569,8 @@ function renderEmpTrainings(){
   var _mig=false;DB.trainings.forEach(function(t){if(_r2Ids[t.id]&&!t._isR2Training){t._isR2Training=true;_mig=true;}});
   if(_mig){try{saveDB();}catch(e){}}
   // R2 trainings show in Round 2 Training page, not here
-  const myTrns=DB.trainings.filter(t=>(t.enrolled||[]).includes(empId)||(t.dept&&(t.dept==="All"||t.dept===currentUser.dept))).filter(t=>!t._isR2Training);
+  // ASSIGNMENT-GATED VISIBILITY: only trainings explicitly assigned to this employee appear here.
+  const myTrns=getEmployeeTrainings(currentUser);
   document.getElementById("view-trainings").innerHTML=`
     <div class="section-header"><div class="section-title">My <span>Trainings</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;">
@@ -4554,6 +4606,7 @@ function renderEmpTrainings(){
               <span><span class="mat-ico" style="font-size:12px;">calendar_month</span>${formatDate(t.date)}</span>
               <span><span class="mat-ico" style="font-size:12px;">timer</span>${(t.duration&&t.duration!=='--')?t.duration:'Not set'}</span>
             </div>
+            ${(function(){var ai=getAssignmentInfo(t,empId);return ai?'<div style="font-size:10.5px;color:var(--blue);margin-bottom:6px;">📌 Assigned on '+formatDate(ai.date)+(ai.by?' by '+_escDrill(ai.by):'')+'</div>':'<div style="font-size:10.5px;color:var(--muted);margin-bottom:6px;">📌 Assigned to you</div>';})()}
             ${hasVideo?`
             <div id="trnVidPlayer_${t.id}" style="margin:8px 0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);width:100%;height:200px;"></div>
             <div style="padding:8px 10px;background:var(--sur2);border-radius:0 0 var(--r-sm) var(--r-sm);border:1px solid var(--bdr);border-top:none;margin-top:-4px;">
@@ -4588,7 +4641,7 @@ function renderEmpTrainings(){
           </div>
         </div>`;
       }).join("")}
-      ${!myTrns.length?`<div class="empty-state"><span class="mat-ico">school</span><h3>No trainings assigned</h3><p>You have no trainings assigned yet</p></div>`:""}
+      ${!myTrns.length?`<div class="empty-state"><span class="mat-ico">school</span><h3>No trainings assigned</h3><p>Trainings appear here only after your admin assigns them to you</p></div>`:""}
     </div>
   `;
   // Initialize YouTube trackers for all training videos with progress tracking
@@ -4712,7 +4765,7 @@ async function saveTraining(){
 
   // 1. Add to local array
   DB.trainings.push(t);
-  DB.notifications.unshift({id:genId('N'),msg:'New training: '+name,read:false,time:'Just now',icon:'school'});
+  DB.notifications.unshift({id:genId('N'),msg:'New training: '+name,read:false,time:'Just now',icon:'school',adminOnly:true}); // admin-only: employees must not see a training before it is assigned to them
   // 2. ALWAYS remove tombstone for this ID (even if Firebase not ready)
   try{removeFromTombstone('trainings',t.id);}catch(e){}
   // 3. Save to localStorage IMMEDIATELY (guaranteed save)
@@ -4810,7 +4863,7 @@ function openTrainingDetail(id){
       </div>
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Assigned / Tested Employees (${enrolledEmps.length}) — Completion Status</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table>
-        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th><th>Attempts</th><th>Score</th><th>Result</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Assigned</th><th>Status</th><th>Attempts</th><th>Score</th><th>Result</th><th>Actions</th></tr></thead>
         <tbody>${enrolledEmps.map(e=>{
           const bestByPersonRow=e._pseudo?bestByPerson[resultPersonKey(e)]:testerMatcher.best(e);
           const bestPass=(bestByPersonRow&&isOfficialResultPass(bestByPersonRow))?bestByPersonRow:null;
@@ -4841,10 +4894,12 @@ function openTrainingDetail(id){
           }
           // FIX: Certificate column replaced by Pass/Fail result badge (same table position)
           var resultBadge=bestPass?'<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:800;letter-spacing:.04em;">PASS</span>':(attempts>0?'<span class="badge" style="background:rgba(232,72,58,.15);color:var(--red);font-weight:800;letter-spacing:.04em;">FAIL</span>':'<span style="color:var(--muted);">—</span>');
+          var aiAssign=getAssignmentInfo(t,e.id);
           return`<tr>
             <td class="mono" style="color:var(--amber);font-weight:700;">${e.id}</td>
             <td><b>${e.name}</b></td>
             <td><span class="badge badge-info">${e.dept}</span></td>
+            <td style="font-size:11px;white-space:nowrap;">${aiAssign?'📅 '+formatDate(aiAssign.date)+(aiAssign.by?'<div style="font-size:10px;color:var(--muted);">by '+_escDrill(aiAssign.by)+'</div>':''):'—'}</td>
             <td><span class="badge badge-${statusBadge}">${statusText}</span></td>
             <td style="font-weight:600;">${attempts>0?attempts:'—'}</td>
             <td>${result?`<b style="color:${result.pass?"var(--green)":"var(--red)"}">${result.score}%</b>`:"—"}</td>
@@ -4868,6 +4923,7 @@ function assignEmployees(trnId){
     <div class="modal-head"><h2>Assign Employees</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
     <div class="modal-body">
       <div style="margin-bottom:12px;font-size:13px;">Enroll employees in: <b>${t.name}</b></div>
+      ${(()=>{var _cur=(t.enrolled||[]).map(function(id){var e=DB.employees.find(function(x){return x.id===id;});return {id:id,name:e?e.name:id,ai:getAssignmentInfo(t,id)};});if(!_cur.length)return '<div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.3);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--red);"><b>Nobody assigned yet</b> — employees will see this training in their login only after you assign them.</div>';return '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px;">👥 Currently Assigned ('+_cur.length+')</div><div style="display:flex;flex-wrap:wrap;gap:6px;">'+_cur.map(function(c){return '<span class="badge badge-info" style="font-size:10.5px;">'+_escDrill(c.name)+(c.ai?' · '+formatDate(c.ai.date):'')+'</span>';}).join('')+'</div></div>';})()}
       <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px;">🎯 Quick Assign by Employee ID</div>
         <input class="form-control-sm" id="assignByIds" placeholder="EMP001, EMP002, EMP003..." style="width:100%;margin-bottom:6px;">
@@ -4917,12 +4973,17 @@ function confirmAssign(trnId){
   if(!selected.length){toast("Select at least one employee","error");return;}
   if(!t.enrolled)t.enrolled=[];
   t.enrolled=[...new Set([...t.enrolled,...selected])];
+  // Assignment log: record WHO was assigned, WHEN, by WHOM (shown in the detail modal,
+  // the Assign dialog and the employee's own dashboard/trainings cards).
+  recordAssignments(t,selected,'manual');
   // FIX: R2 parity — register retrainingRecords on the original failed training for every
   // employee assigned directly to a Round 2 training (keeps R2 page, badge & reports in sync).
   var _r2Added=registerR2Assignments(t,selected);
   if(_r2Added)toast(_r2Added+" R2 retraining record(s) registered","info");
   closeModal();toast(`✅ ${selected.length} employee(s) assigned to "${t.name}"`,"success");
-  DB.notifications.unshift({id:genId("N"),msg:`${selected.length} employee(s) assigned to "${t.name}". Date: ${formatDate(t.date)}`,time:"Just now",read:false,icon:"school"});
+  // Per-employee notification: ONLY the assigned people are told (the old global announcement
+  // showed every employee a training they were never assigned to).
+  selected.forEach(function(eid){DB.notifications.unshift({id:genId("N"),msg:'You have been assigned to "'+t.name+'". Date: '+formatDate(t.date),time:"Just now",read:false,icon:"school",forEmp:eid});});
   updateBadges();renderTrainings();saveDB();
   // Immediate Firebase save for training enrollment
   if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});var _origT=t._isR2Training?DB.trainings.find(function(x){return x.id===t._r2ForFailedTrnId;}):null;if(_origT)await fbDB.collection('trainings').doc(String(_origT.id)).set(JSON.parse(JSON.stringify(_origT)),{merge:true});}catch(e){console.warn('Firebase assign save error:',e);}})();}
@@ -4935,6 +4996,9 @@ function confirmAssignAllDept(trnId){
   if(!toAssign.length){toast(`No employees found in: ${dept}`,"error");return;}
   if(!t.enrolled)t.enrolled=[];
   t.enrolled=[...new Set([...t.enrolled,...toAssign.map(e=>e.id)])];
+  // Assignment log + per-employee notification (same assignment-gated visibility as manual assign).
+  recordAssignments(t,toAssign.map(e=>e.id),'dept');
+  toAssign.forEach(function(e){DB.notifications.unshift({id:genId("N"),msg:'You have been assigned to "'+t.name+'". Date: '+formatDate(t.date),time:"Just now",read:false,icon:"school",forEmp:e.id});});
   // FIX: R2 parity — register retrainingRecords for dept-assigned employees on an R2 training.
   registerR2Assignments(t,toAssign.map(e=>e.id));
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
@@ -5360,6 +5424,9 @@ function startQuizForTrn(trnId){
   if(!t){toast('Training not found','error');return;}
   // Check if already tested (BSC: allow retake if retrained)
   var empId=currentUser.id;
+  // ASSIGNMENT GATE: employees can only take tests for trainings actually assigned to them
+  // (Round 2 trainings linked via retrainingRecords are also allowed). Admins are unrestricted.
+  if(!isAdmin&&!isEmployeeAssignedToTraining(t,empId)){toast('This training has not been assigned to you.','error');return;}
   var isRetrained2=(t.retrained||[]).includes(empId);
   var existingResults=DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.empId===empId&&r.training===t.name;});
   if(existingResults.length>0&&!isRetrained2){toast('You already took this test (score: '+existingResults.sort(function(a,b){return b.score-a.score;})[0].score+'%). One attempt only. Contact admin for retraining.','error');return;}
@@ -6608,7 +6675,7 @@ function getTrainingAnalyticsHTML(){
     var empCerts=certs.filter(function(c){return c.empId===e.id;}).length;
     var empScore=empResults.length?Math.round(empResults.reduce(function(s,r){return s+r.score;},0)/empResults.length):0;
     var bestScore=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
-    var assigned=trns.filter(function(t){return(t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));}).length;
+    var assigned=trns.filter(function(t){return (t.enrolled||[]).indexOf(e.id)>=0;}).length; // assigned = explicitly enrolled (assignment-gated)
     var completed=new Set(empPass?empResults.filter(isOfficialResultPass).map(function(r){return r.training;}):[]).size;
     var passRate=empResults.length?Math.round(empPass/empResults.length*100):0;
     var lastDate=empResults.length?empResults.sort(function(a,b){return b.date.localeCompare(a.date);})[0].date:'—';
@@ -6659,7 +6726,7 @@ function exportAnalyticsExcel(){
     var empCerts=DB.certificates.filter(function(c){return c.empId===e.id;}).length;
     var empScore=empResults.length?Math.round(empResults.reduce(function(s,r){return s+r.score;},0)/empResults.length):0;
     var bestScore=empResults.length?Math.max.apply(null,empResults.map(function(r){return r.score;})):0;
-    var assigned=DB.trainings.filter(function(t){return(t.enrolled||[]).includes(e.id)||(t.dept&&(t.dept==='All'||t.dept===e.dept));}).length;
+    var assigned=DB.trainings.filter(function(t){return (t.enrolled||[]).indexOf(e.id)>=0;}).length; // assigned = explicitly enrolled (assignment-gated)
     var completed=new Set(empPass?empResults.filter(isOfficialResultPass).map(function(r){return r.training;}):[]).size;
     var passRate=empResults.length?Math.round(empPass/empResults.length*100):0;
     var lastDate=empResults.length?empResults.sort(function(a,b){return b.date.localeCompare(a.date);})[0].date:'—';
