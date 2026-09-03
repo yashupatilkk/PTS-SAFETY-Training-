@@ -4763,7 +4763,7 @@ function addQuestionOption(prefix,qid){
 function removeQuestionOption(prefix,qid,index){
   var list=document.getElementById(prefix+'_opts_'+qid);if(!list)return;
   var rows=[...list.querySelectorAll('[data-option-row]')];
-  if(rows.length<=2){toast('A question needs at least two options','warning');return;}
+  if(rows.length<=1){toast('A question needs at least one option','warning');return;}
   if(index<0||index>=rows.length)return;
   var selected=parseInt((document.getElementById(prefix+'_a_'+qid)||{}).value||'0');
   rows[index].remove();
