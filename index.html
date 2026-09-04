@@ -2823,16 +2823,18 @@ function isOfficialResultPass(r){
   return Number(r.score||0)>=((trn&&trn.passing)||70);
 }
 // ---------- NEW: "Training Attended" stat (dashboard card + Master Audit summary) ----------
-// Unique PERSONS who actually ATTENDED the given trainings. A person counts as attended when
-// EITHER holds:
-//   1. they have an official test attempt for that training (pass OR fail — the forgiving
-//      roster↔tester matcher is reused so id/name spelling variants still match), or
-//   2. they are marked offline-trained on that training (t.offlineTrained).
+// Total PERSONS involved in the given trainings — i.e. the dashboard identity
+//   Participants = Tests Passed + Pending + Tests Failed  (every roster member counts,
+//   passed OR failed OR still awaiting the test).
+// A person counts when they are in the training roster: explicitly assigned (t.enrolled),
+// linked through retrainingRecords (Round 2), already holding an official result (a tester
+// always counts as a participant), or marked offline-trained (t.offlineTrained).
 // Persons are deduped across the WHOLE requested scope with the same normalized id+name key the
-// roster uses — one person attending 3 trainings counts ONCE. Passing ALL trainings returns the
-// "all training attended persons" total; passing one training returns just that training's
-// attended persons. Employee records missing (deleted) but still holding results are kept via
-// the roster's synthesized participant rows, so the count never drops after a data cleanup.
+// roster uses — one person attending 3 trainings counts ONCE, duplicate-ID people stay separate.
+// Passing ALL trainings returns every person involved in ANY training; passing one training
+// returns just that training's total (the sum the Tests Passed / Pending / Tests Failed cards
+// show). The count is always computed from the CURRENT filter, so it changes on every
+// "Show dashboard data for training" switch.
 function getAttendedPersonsForTrainings(trainings){
   var seen={},out=[];
   var pushAttended=function(e){
@@ -2842,10 +2844,8 @@ function getAttendedPersonsForTrainings(trainings){
   };
   (trainings||[]).forEach(function(t){
     if(!t)return;
-    var matcher=makeRosterTesterMatcher(t);
-    var off={};(t.offlineTrained||[]).forEach(function(eid){if(eid)off[eid]=1;});
-    getDashboardTrainingEmployees(t).forEach(function(e){if(matcher.tested(e)||off[e.id])pushAttended(e);});
-    Object.keys(off).forEach(function(eid){
+    getDashboardTrainingEmployees(t).forEach(pushAttended);
+    (t.offlineTrained||[]).forEach(function(eid){
       var emp=(DB.employees||[]).find(function(x){return x&&x.id===eid;});
       if(emp)pushAttended(emp);
     });
@@ -2875,9 +2875,10 @@ function renderDashboard(){
   // "participants minus passed", which wrongly kept failed testers in Pending and merged
   // duplicate-ID passers (showed 21 instead of 18 for 24 participants / 6 tested).
   const pending=visibleTrainings.reduce(function(s,t){return s+getDashboardPendingForTraining(t);},0);
-  // NEW — "Training Attended" card: unique persons who attended the visible scope.
-  // ALL selected → every person who attended ANY training (counted once, no matter how many
-  // trainings); one training selected → that training's attended persons only.
+  // NEW — "Training Attended" card: total persons in the visible scope = Tests Passed +
+  // Pending + Tests Failed persons. ALL selected → every person involved in ANY training
+  // (counted once across trainings); one training selected → that training's total only,
+  // so the card ALWAYS changes with the "Show dashboard data for training" filter.
   const attendedCount=getAttendedPersonsForTrainings(visibleTrainings).length;
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
   const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
@@ -2894,7 +2895,7 @@ function renderDashboard(){
       <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name+(selectedTraining._isR2Training?' (Round 2)':''):'Showing all trainings (incl. Round 2)'}</span>
     </div>
     <div class="stat-grid" style="margin-bottom:18px;">
-      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",selectedTraining?"Selected training":"All trainings · unique persons")}
+      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",selectedTraining?"Selected training · passed+pending+failed":"All trainings · unique persons")}
       ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments")}
       ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2")}
       ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count")}
