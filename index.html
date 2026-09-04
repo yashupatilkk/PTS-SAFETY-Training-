@@ -353,6 +353,7 @@ select.form-control-sm{background:var(--sur2);}
 .chart-card{background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;}
 .chart-card-title{font-family:'Oswald',sans-serif;font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:6px;}
 .chart-card-title .dot{width:6px;height:6px;border-radius:50%;background:var(--amber);}
+.chart-box{position:relative;height:280px;}
 .quick-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}
 .quick-action{background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;align-items:flex-start;gap:6px;cursor:pointer;transition:all var(--trans);position:relative;overflow:hidden;}
 .quick-action::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
@@ -1024,7 +1025,7 @@ let DB={
     companyName:"PTS SAFETY Vault",companyLogo:"🛡️",
     sheetUrl:"https://script.google.com/macros/s/AKfycbwLyrt9-3dS7MroEH1BJ2kfwAbgqKF0IuzvaBGuOMTkPXVIMPJTt3r3ceyDqoP1VMVoIw/exec",sheetAutoSync:true,trainerList:["Safety Officer","EHS Manager","External Trainer","OEM Trainer","Safety Supervisor"],
     managerList:["Site Manager","Operations Manager","HSE Manager"],defaultManager:"",
-    theme:"dark",language:"English",minCertScore:70
+    theme:"dark",language:"English",minCertScore:75
   },
   customQuestions:[],  // persisted custom questions from admin
   feedbackForms:[],   // post-test feedback from employees
@@ -2913,20 +2914,41 @@ function isOfficialTrainingCertificate(c){
   var trn=findTrainingLoose(c.training);
   return !!trn&&!trn._isR2Training;
 }
+// Certificate holder ↔ outcome person match: same id (duplicate-ID twins disambiguated by
+// name) or an unambiguous name match — the same forgiving cascade the rosters/results use.
+function getEmployeeIdCounts(){
+  var idCount={};
+  (DB.employees||[]).forEach(function(e){var k=normPersonField(e&&e.id);if(k)idCount[k]=(idCount[k]||0)+1;});
+  return idCount;
+}
+function certPersonMatchesOutcome(c,r,idCount){
+  var cid=normPersonField(c.empId),rid=normPersonField(r.empId);
+  if(cid&&rid&&(r.empId===c.empId||cid===rid)){
+    var cnt=(idCount||{})[cid]||0;
+    if(cnt>1&&normPersonField(c.empName||"")&&normPersonField(r.empName||""))return normPersonField(r.empName)===normPersonField(c.empName);
+    return true;
+  }
+  return !!(c.empName&&r.empName&&normPersonField(r.empName)===normPersonField(c.empName));
+}
 function getOfficialTrainingCertificates(){
-  // FIX: a certificate only counts while the employee CURRENTLY passes the training (passing
-  // official result) or completed it via offline training. This keeps the Certificates page,
-  // exports, dashboards and reports consistent with the PASS/FAIL views — a failed employee
-  // can never show a certificate (fixes "2 passed but 5 certificates showing" mismatch).
+  // A certificate counts while its holder holds a qualifying result (best score >= certificate
+  // threshold — the 75% rule) for that training, or completed it via offline training. Matching
+  // is FORGIVING (loose training resolution + person cascade), so name-variant results and
+  // duplicate-ID twins can neither hide a real certificate nor borrow someone else's score.
   // Also dedupes per employee+training (keep latest) so retake duplicates never display.
   var offMap={};
   (DB.trainings||[]).forEach(function(t){(t.offlineTrained||[]).forEach(function(eid){offMap[eid+'|'+t.name]=true;});});
+  var minCert=Number(DB.settings.minCertScore)||75;
+  var outcomes=bestResultsByPersonTrn(getDashboardOfficialResults());
+  var idCount=getEmployeeIdCounts();
   var list=(DB.certificates||[]).filter(function(c){
     if(!isOfficialTrainingCertificate(c))return false;
     if(offMap[(c.empId||'')+'|'+(c.training||'')])return true;
-    var trn=DB.trainings.find(function(t){return t.name===c.training;});
-    var passing=trn?(trn.passing||70):70;
-    return (DB.testResults||[]).some(function(r){return !r.practice&&r.empId===c.empId&&r.training===c.training&&Number(r.score||0)>=passing;});
+    var trn=findTrainingLoose(c.training);
+    if(!trn)return false;
+    return outcomes.some(function(r){
+      return resultTrnId(r)===trn.id&&Number(r.score||0)>=minCert&&certPersonMatchesOutcome(c,r,idCount);
+    });
   });
   var certMap={};
   list.forEach(function(c){
@@ -2938,6 +2960,61 @@ function getOfficialTrainingCertificates(){
     if(dCur>dPrev||(dCur===dPrev&&String(c.num||'')>String(prev.num||'')))certMap[key]=c;
   });
   return Object.keys(certMap).map(function(k){return certMap[k];});
+}
+// ---------- NEW (Task 7): CERTIFICATE RULE — everyone scoring >= threshold gets a certificate ----------
+// The quiz submit flow issues a certificate only at the MOMENT someone submits a qualifying test.
+// Results that arrived any other way (recorded before the 75% rule, imported, admin-entered, or
+// missed by an earlier bug) never got one. autoIssueCertificates() scans the BEST official
+// outcome per person per training and creates every missing certificate — so "everyone who
+// scored 75 or above" always ends up with one. Runs on load, after cloud sync, and on demand
+// from the Certificates page. Idempotent: existing certificates are never duplicated.
+function makeUniqueCertNum(){
+  var base="CERT-"+Date.now().toString(36).toUpperCase(),num=base,n=0;
+  while((DB.certificates||[]).some(function(c){return c.num===num;})){n++;num=base+"-"+n;}
+  return num;
+}
+function autoIssueCertificates(){
+  var minCert=Number(DB.settings.minCertScore)||75;
+  var created=0,newCerts=[],idCount=getEmployeeIdCounts();
+  bestResultsByPersonTrn(getDashboardOfficialResults()).forEach(function(r){
+    var score=Number(r.score||0);
+    if(score<minCert)return;
+    var trn=findTrainingLoose(r.training);
+    if(!trn||trn._isR2Training)return;              // official scheduled trainings only (matches the certificate views)
+    // Canonical employee for the certificate: exact id+name record first, then any id match.
+    var emp=null,idq=normPersonField(r.empId),nmq=normPersonField(r.empName);
+    (DB.employees||[]).forEach(function(x){
+      if(!x||emp)return;
+      if(idq&&normPersonField(x.id)===idq){if(nmq&&normPersonField(x.name)===nmq){emp=x;}else if(!emp){emp=x;}}
+    });
+    if(!emp)emp=getEmployeeByAnyId(r.empId);
+    var certEmpId=emp?emp.id:r.empId;
+    var certEmpName=emp?emp.name:(r.empName||"");
+    var exists=(DB.certificates||[]).some(function(c){
+      var trnOk=c.training===r.training||c.training===trn.name||(findTrainingLoose(c.training)||{}).id===trn.id;
+      return trnOk&&certPersonMatchesOutcome(c,r,idCount);
+    });
+    if(exists)return;
+    var v=trn.validity?String(trn.validity):"";
+    var years=v.indexOf("2")>=0?2:(v.indexOf("6")>=0?0.5:1);
+    var expiry=new Date();expiry.setFullYear(expiry.getFullYear()+Math.floor(years));
+    var today=new Date().toISOString().split("T")[0];
+    var rec={num:makeUniqueCertNum(),empId:certEmpId,empName:certEmpName,training:trn.name,score:score,dept:r.dept||(emp?emp.dept:"")||"",trainer:trn.trainer||"Trainer",manager:trn.manager||DB.settings.defaultManager||"",issued:today,expiry:expiry.toISOString().split("T")[0],completedDate:String(r.date||today)};
+    DB.certificates.push(rec);newCerts.push(rec);created++;
+  });
+  if(created){
+    DB.notifications.unshift({id:"N"+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase(),msg:"Auto-issued "+created+" certificate"+(created>1?"s":"")+" — every score at or above "+minCert+"% now has a certificate",time:"Just now",read:false,icon:"workspace_premium"});
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    if(typeof firebaseReady!=="undefined"&&firebaseReady&&newCerts.length){
+      (async function(){
+        try{
+          if(typeof isAdmin!=="undefined"&&!isAdmin){try{await authAsAdmin();}catch(e){}}
+          for(var i=0;i<newCerts.length;i++){await fbDB.collection('certificates').doc(String(newCerts[i].num)).set(sanitizeForFirestore(newCerts[i]),{merge:true});}
+        }catch(e){console.warn('[autoIssueCertificates] cloud save skipped:',e);}
+      })();
+    }
+  }
+  return created;
 }
 function isOfficialResultPass(r){
   if(!r||r.practice)return false;
@@ -3107,15 +3184,15 @@ function renderDashboard(){
     </div>
     <!-- GROUPED BAR CHARTS -->
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><canvas id="chartMonthly" height="200"></canvas><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar (or "View tests") to see exactly which tests are counted.</div></div>
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><canvas id="chartDept" height="200"></canvas></div>
+      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><div class="chart-box"><canvas id="chartMonthly"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar (or "View tests") to see exactly which tests are counted.</div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><div class="chart-box"><canvas id="chartDept"></canvas></div></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Pass / Fail Distribution</div><canvas id="chartPassFail" height="200"></canvas></div>
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Training-wise Completion (Grouped)</div><canvas id="chartTrnCompletion" height="200"></canvas></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Pass / Fail Distribution</div><div class="chart-box"><canvas id="chartPassFail"></canvas></div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Training-wise Completion (Grouped)</div><div class="chart-box"><canvas id="chartTrnCompletion"></canvas></div></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><canvas id="chartScoreDist" height="200"></canvas></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><div class="chart-box"><canvas id="chartScoreDist"></canvas></div></div>
       <div class="chart-card">
         <div class="chart-card-title"><span class="dot"></span>Recent Test Activities</div>
         <div class="activity-list">
@@ -3352,7 +3429,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   var monthFailedData=monthlyDrillBuckets.map(function(b){return b.results.filter(function(r){return !isOfficialResultPass(r);}).length;});
   destroyChart("chartMonthly");
   var mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index);}},onHover:function(evt,els){if(evt.native)evt.native.target.style.cursor=els.length?"pointer":"default";},plugins:{legend:{labels:{color:textColor,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see which tests';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});}
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:30}},onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index);}},onHover:function(evt,els){if(evt.native)evt.native.target.style.cursor=els.length?"pointer":"default";},plugins:{legend:{labels:{color:textColor,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see which tests';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});}
   // === DEPARTMENT CHART — REAL DATA ===
   // Dept of a result = the employee's CURRENT department (lookup by empId, fallback to the dept
   // recorded on the result). Dept list is dynamic: every dept that actually has employees or
@@ -3369,12 +3446,12 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
     var deptTotal=activeDepts.map(function(d){return scopeEmps.filter(function(e){return (e.dept||"Unknown")===d;}).length;});
     var deptPassed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;});
     var deptFailed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return !isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;});
-    charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,indexAxis:"y",plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
+    charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",datasets:{bar:{maxBarThickness:16}},plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
   }
   // === PASS/FAIL DOUGHNUT ===
   destroyChart("chartPassFail");
   var pfCtx=document.getElementById("chartPassFail");
-  if(pfCtx){charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[dashPassed||0,dashFailed||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
+  if(pfCtx){charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[dashPassed||0,dashFailed||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
   // === TRAINING-WISE COMPLETION GROUPED BAR ===
   // Shows every training that actually has participants or results (normal + Round 2),
   // so the chart mirrors the real data instead of a wall of empty zeros.
@@ -3392,7 +3469,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
       var passedIds=new Set(trnBest[i].filter(isOfficialResultPass).map(function(r){return r.empId;}));
       return getDashboardTrainingEmployees(t).filter(function(e){return !passedIds.has(e.id);}).length;
     });
-    charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45}},y:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true}}}});
+    charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:24}},plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45,autoSkip:true}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});
   }
   // === SCORE DISTRIBUTION BAR CHART ===
   destroyChart("chartScoreDist");
@@ -3404,7 +3481,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
       var parts=rng.replace('%','').split('-').map(Number);
       return chartOutcomeResults.filter(function(r){return Number(r.score)>=parts[0]&&Number(r.score)<=parts[1];}).length;
     });
-    charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,stepSize:1},beginAtZero:true}}}});
+    charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:44}},plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});
   }
 }
 function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
@@ -4512,7 +4589,7 @@ function exportMasterAuditExcel(){
       {Item:'Admin Accounts',Value:DB.admins.length},
       {Item:'Notifications',Value:DB.notifications.length},
       {Item:'Pass Rate',Value:DB.testResults.length?Math.round(DB.testResults.filter(function(r){return !r.practice;}).filter(function(r){return r.pass;}).length/DB.testResults.length*100)+'%':'N/A'},
-      {Item:'Min Cert Score',Value:(DB.settings.minCertScore||70)+'%'},
+      {Item:'Min Cert Score',Value:(DB.settings.minCertScore||75)+'%'},
       {Item:'Firebase Connected',Value:firebaseReady?'Yes':'No'}
     ];
     var ws1=XLSX.utils.json_to_sheet(summaryData);
@@ -6046,7 +6123,7 @@ function renderQuizMenu(){
     <div class="section-header"><div class="section-title">Online <span>Tests</span></div></div>
     <div style="background:var(--amber-light);border:1px solid rgba(255,176,32,.3);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:16px;font-size:12.5px;display:flex;align-items:center;gap:10px;">
       <span class="mat-ico" style="color:var(--amber);font-size:20px;">info</span>
-      <div><b>Certificate Policy:</b> Score ≥ ${DB.settings.minCertScore||70}% earns a certificate. Questions are randomized every attempt.</div>
+      <div><b>Certificate Policy:</b> Score ≥ ${DB.settings.minCertScore||75}% earns a certificate. Questions are randomized every attempt.</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
       ${cats.map(cat=>{
@@ -6229,7 +6306,7 @@ function submitQuiz(){
   // Find matching training: 1) direct match from quizState, 2) exact name+cat, 3) category match (for Online Tests page quizzes)
   const trnMatch=quizState.trnMatch||DB.trainings.find(t=>t.name===quizState.training&&t.cat===quizState.category)||DB.trainings.find(t=>t.cat===quizState.category);
   const passing=trnMatch?.passing||70;
-  const minCertScore=DB.settings.minCertScore||70;
+  const minCertScore=DB.settings.minCertScore||75;
   const pass=score>=passing;
   const qualifiesForCert=score>=minCertScore&&(trnMatch?.cert!==false);
   const empId=currentUser.id||currentUser.username||"ADMIN";
@@ -6731,6 +6808,12 @@ submitQuiz();
 /* ============================================================
    CERTIFICATES
 ============================================================ */
+// Issue certificates for every qualifying score (>= threshold) that does not have one yet.
+function issueMissingCertsClick(){
+  var n=autoIssueCertificates();
+  if(n>0){saveDB();toast("Issued "+n+" missing certificate"+(n>1?"s":"")+" — every score at or above "+(Number(DB.settings.minCertScore)||75)+"% now has one","success");renderCertificates();}
+  else{toast("All certificates are up to date — every score at or above "+(Number(DB.settings.minCertScore)||75)+"% already has a certificate.","info");}
+}
 function renderCertificates(){
   const officialCerts=getOfficialTrainingCertificates();
   const certs=isAdmin?officialCerts:officialCerts.filter(c=>c.empId===currentUser.id);
@@ -6739,7 +6822,10 @@ function renderCertificates(){
   document.getElementById("view-certificates").innerHTML=`
     <div class="section-header">
       <div class="section-title">Certificates <span>Issued</span></div>
-      <div style="display:flex;gap:6px;"><button class="btn btn-outline" onclick="exportCertExcel()"><span class="mat-ico">download</span> Export Excel</button></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${isAdmin?'<button class="btn btn-outline" style="border-color:var(--green);color:var(--green);" onclick="issueMissingCertsClick()" title="Create certificates for every score at or above the certificate threshold that does not have one yet"><span class="mat-ico">new_releases</span> Issue missing certificates</button>':''}
+        <button class="btn btn-outline" onclick="exportCertExcel()"><span class="mat-ico">download</span> Export Excel</button>
+      </div>
     </div>
     ${expiring.length?`<div class="cert-banner"><span class="mat-ico" style="color:var(--amber);font-size:24px;">warning</span><div><b style="color:var(--amber);">${expiring.length} certificate(s) expiring within 30 days!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">${expiring.map(c=>c.empName+' — '+c.training).join(", ")}</div></div></div>`:""}
     <div class="table-wrap">
@@ -6783,122 +6869,109 @@ function downloadCertificate(certNum){
   const company=DB.settings.companyName||"PTS SAFETY";
   const logo=DB.settings.companyLogo||"";
   const managerName=cert.manager||trn?.manager||DB.settings.defaultManager||"Safety Manager";
+  const trainerName=cert.trainer||trn?.trainer||"Trainer";
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
   const W=297,H=210;
-  // === WHITE BACKGROUND (like Google Sheet) ===
+  const NAVY=[25,30,40],AMBER=[255,176,32],GOLD=[212,160,54],GREEN=[27,94,32],GRAY=[110,116,125];
+  // === BACKGROUND + CLASSIC DOUBLE BORDER ===
   doc.setFillColor(255,255,255);doc.rect(0,0,W,H,"F");
-  // === OUTER BORDER (thick black) ===
-  doc.setDrawColor(0,0,0);doc.setLineWidth(2);doc.rect(8,8,W-16,H-16,"S");
-  // === HEADER BAR: Dark background with company name + logo ===
-  doc.setFillColor(25,30,40);doc.rect(8,8,W-16,28,"F");
-  if(logo){doc.setFontSize(22);doc.setTextColor(255,255,255);doc.text(logo,22,27);}
-  doc.setFont("helvetica","bold");doc.setFontSize(18);doc.setTextColor(255,255,255);
-  doc.text(company.toUpperCase(),logo?45:W/2,22,{align:logo?"left":"center"});
-  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(180,185,190);
-  doc.text("TRAINING MANAGEMENT SYSTEM",logo?45:W/2,29,{align:logo?"left":"center"});
-  doc.setFont("helvetica","bold");doc.setFontSize(14);doc.setTextColor(255,176,32);
-  doc.text("CERTIFICATE",W-22,24,{align:"right"});
-  doc.setFontSize(7);doc.setTextColor(180,185,190);
-  doc.text("OF COMPLETION",W-22,29,{align:"right"});
-  // === AMBER ACCENT LINE below header ===
-  doc.setDrawColor(255,176,32);doc.setLineWidth(1.5);doc.line(8,36,W-8,36);
-  // === GREEN THIN LINE ===
-  doc.setDrawColor(62,207,142);doc.setLineWidth(0.5);doc.line(8,37.5,W-8,37.5);
-  // === CERTIFICATE TITLE ===
-  doc.setFont("helvetica","bold");doc.setTextColor(25,30,40);
-  doc.setFontSize(14);doc.text("CERTIFICATE OF COMPLETION",W/2,47,{align:"center"});
-  // === DATA TABLE (grid layout like Google Sheet) ===
-  var tableX=40,tableY=53,tableW=W-80,rowH=11;
-  doc.setDrawColor(60,65,75);doc.setLineWidth(0.8);doc.rect(tableX,tableY,tableW,5*rowH,"S");
-  var col1W=55,col2W=(tableW-col1W)/2,col3W=(tableW-col1W)/2;
-  doc.setDrawColor(180,185,190);doc.setLineWidth(0.3);
-  for(var ri=1;ri<5;ri++){doc.line(tableX,tableY+ri*rowH,tableX+tableW,tableY+ri*rowH);}
-  doc.line(tableX+col1W,tableY,tableX+col1W,tableY+5*rowH);
-  doc.line(tableX+col1W+col2W,tableY,tableX+col1W+col2W,tableY+5*rowH);
-  // Row 1: Employee Name
-  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,tableY+0.4,col1W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Employee Name",tableX+4,tableY+rowH/2+3);
-  doc.setFillColor(255,255,240);doc.rect(tableX+col1W+0.4,tableY+0.4,col2W+col3W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(12);doc.setTextColor(25,30,40);
-  doc.text((cert.empName||"").toUpperCase(),tableX+col1W+col2W/2+col3W/2,tableY+rowH/2+3,{align:"center"});
-  // Row 2: Employee ID | Department
-  var r2y=tableY+rowH;
-  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r2y+0.4,col1W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Employee ID",tableX+4,r2y+rowH/2+3);
-  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
-  doc.text(cert.empId||"",tableX+col1W+8,r2y+rowH/2+3);
-  doc.setFillColor(240,242,245);doc.rect(tableX+col1W+col2W+0.4,r2y+0.4,col3W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Department",tableX+col1W+col2W+4,r2y+rowH/2+3);
-  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
-  doc.text(emp?emp.desig?cert.dept+" / "+emp.desig:cert.dept:cert.dept||"",tableX+col1W+col2W+col3W/2+2,r2y+rowH/2+3,{align:"center"});
-  // Row 3: Training Name
-  var r3y=tableY+2*rowH;
-  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r3y+0.4,col1W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Training Program",tableX+4,r3y+rowH/2+3);
-  doc.setFillColor(232,245,233);doc.rect(tableX+col1W+0.4,r3y+0.4,col2W+col3W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(27,94,32);
-  doc.text((cert.training||"").toUpperCase(),tableX+col1W+col2W/2+col3W/2,r3y+rowH/2+3,{align:"center"});
-  // Row 4: Score | Completion Date
-  var r4y=tableY+3*rowH;
-  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r4y+0.4,col1W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Score Achieved",tableX+4,r4y+rowH/2+3);
-  var isPass=cert.score>=75;
-  doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(isPass?27:198,isPass?94:40,isPass?32:40);
-  doc.text((cert.score||0)+"%",tableX+col1W+8,r4y+rowH/2+3);
-  doc.setFillColor(240,242,245);doc.rect(tableX+col1W+col2W+0.4,r4y+0.4,col3W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Completion Date",tableX+col1W+col2W+4,r4y+rowH/2+3);
-  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
-  doc.text(formatDate(cert.completedDate||cert.issued)||"",tableX+col1W+col2W+col3W/2+2,r4y+rowH/2+3,{align:"center"});
-  // Row 5: Issued | Valid Until
-  var r5y=tableY+4*rowH;
-  doc.setFillColor(240,242,245);doc.rect(tableX+0.4,r5y+0.4,col1W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Certificate Issued",tableX+4,r5y+rowH/2+3);
-  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
-  doc.text(formatDate(cert.issued)||"",tableX+col1W+8,r5y+rowH/2+3);
-  doc.setFillColor(240,242,245);doc.rect(tableX+col1W+col2W+0.4,r5y+0.4,col3W-0.8,rowH-0.8,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-  doc.text("Valid Until",tableX+col1W+col2W+4,r5y+rowH/2+3);
-  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(25,30,40);
-  doc.text(formatDate(cert.expiry)||"",tableX+col1W+col2W+col3W/2+2,r5y+rowH/2+3,{align:"center"});
-  // === TRAINER + MANAGER INFO ROW ===
-  var infoY=tableY+5*rowH+8;
-  doc.setFillColor(240,242,245);doc.rect(tableX,infoY,col2W+10,10,"FD");
-  doc.setDrawColor(180,185,190);doc.setLineWidth(0.3);doc.rect(tableX,infoY,col2W+10,10,"S");
-  doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(60,65,75);
-  doc.text("Trainer: ",tableX+3,infoY+6.5);
-  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(25,30,40);
-  doc.text(cert.trainer||"N/A",tableX+18,infoY+6.5);
-  doc.setFillColor(240,242,245);doc.rect(tableX+col2W+14,infoY,col2W+10,10,"FD");
-  doc.setDrawColor(180,185,190);doc.rect(tableX+col2W+14,infoY,col2W+10,10,"S");
-  doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(60,65,75);
-  doc.text("Manager: ",tableX+col2W+17,infoY+6.5);
-  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(25,30,40);
-  doc.text(managerName,tableX+col2W+32,infoY+6.5);
-  // === SIGNATURE BLOCK (3 boxes) ===
-  var sigY=infoY+20;
-  var sigW=(tableW-20)/3;
-  var sigLabels=["Trainer",managerName,"Authorized Signatory"];
-  for(var si=0;si<3;si++){
-    var sx=tableX+si*(sigW+10);
-    doc.setDrawColor(60,65,75);doc.setLineWidth(0.5);doc.rect(sx,sigY,sigW,28,"S");
-    doc.setFillColor(250,250,252);doc.rect(sx+0.4,sigY+0.4,sigW-0.8,27.2,"F");
-    doc.setDrawColor(60,65,75);doc.setLineWidth(0.5);doc.line(sx+5,sigY+20,sx+sigW-5,sigY+20);
-    doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(60,65,75);
-    doc.text(sigLabels[si],sx+sigW/2,sigY+25,{align:"center"});
+  doc.setDrawColor(AMBER[0],AMBER[1],AMBER[2]);doc.setLineWidth(1.6);doc.rect(9,9,W-18,H-18,"S");
+  doc.setDrawColor(NAVY[0],NAVY[1],NAVY[2]);doc.setLineWidth(0.5);doc.rect(13,13,W-26,H-26,"S");
+  doc.setFillColor(AMBER[0],AMBER[1],AMBER[2]);
+  [[13,13],[W-13,13],[13,H-13],[W-13,H-13]].forEach(function(p){doc.circle(p[0],p[1],1.3,"F");});
+  // === HEADER: COMPANY ===
+  var hasTextLogo=/[A-Za-z]{2,}/.test(logo);
+  doc.setFont("helvetica","bold");doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]);
+  if(hasTextLogo){
+    doc.setFontSize(15);doc.text(company.toUpperCase(),W/2,30,{align:"center"});
+    doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text(logo,W/2,36.5,{align:"center"});
+    doc.setFontSize(7.5);doc.text("T R A I N I N G   M A N A G E M E N T   S Y S T E M",W/2,42.5,{align:"center"});
+  }else{
+    doc.setFontSize(20);doc.text(company.toUpperCase(),W/2,33,{align:"center"});
+    doc.setFont("helvetica","normal");doc.setFontSize(7.5);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text("T R A I N I N G   M A N A G E M E N T   S Y S T E M",W/2,40,{align:"center"});
   }
-  // === FOOTER BAR ===
-  doc.setFillColor(25,30,40);doc.rect(8,H-22,W-16,14,"F");
-  doc.setDrawColor(255,176,32);doc.setLineWidth(1);doc.line(8,H-22,W-8,H-22);
-  doc.setFont("helvetica","normal");doc.setFontSize(7);doc.setTextColor(180,185,190);
-  doc.text("Certificate No: "+cert.num+"   |   "+company+"   |   Printed: "+new Date().toISOString().split("T")[0],W/2,H-14,{align:"center"});
+  // === TITLE ===
+  doc.setFont("helvetica","bold");doc.setFontSize(30);doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]);
+  doc.text("C E R T I F I C A T E",W/2,58,{align:"center"});
+  doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+  doc.text("O F   C O M P L E T I O N",W/2,66,{align:"center"});
+  // === ORNAMENT DIVIDER ===
+  doc.setDrawColor(AMBER[0],AMBER[1],AMBER[2]);doc.setLineWidth(0.8);
+  doc.line(100,72,W/2-6,72);doc.line(W/2+6,72,W-100,72);
+  doc.setFillColor(AMBER[0],AMBER[1],AMBER[2]);doc.circle(W/2,72,1.4,"F");
+  doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]);doc.setLineWidth(0.4);
+  doc.line(92,74.2,W/2-9,74.2);doc.line(W/2+9,74.2,W-92,74.2);
+  // === RECIPIENT ===
+  doc.setFont("helvetica","normal");doc.setFontSize(10.5);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+  doc.text("This certificate is proudly presented to",W/2,84,{align:"center"});
+  var name=(cert.empName||"EMPLOYEE").toUpperCase();
+  var nameSize=24;doc.setFont("helvetica","bold");
+  do{doc.setFontSize(nameSize);nameSize--;}while(doc.getTextWidth(name)>W-110&&nameSize>13);
+  doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]);doc.text(name,W/2,97,{align:"center"});
+  var nw=doc.getTextWidth(name);
+  doc.setDrawColor(AMBER[0],AMBER[1],AMBER[2]);doc.setLineWidth(0.5);
+  doc.line(W/2-nw/2,101,W/2+nw/2,101);
+  doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+  doc.text("for successfully completing the training program",W/2,108,{align:"center"});
+  var tname=(cert.training||"");
+  var tSize=16;doc.setFont("helvetica","bold");
+  do{doc.setFontSize(tSize);tSize--;}while(doc.getTextWidth(tname)>W-90&&tSize>10);
+  doc.setTextColor(GREEN[0],GREEN[1],GREEN[2]);doc.text(tname,W/2,117,{align:"center"});
+  doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+  var idLine="Employee ID: "+(cert.empId||"—");
+  var dpt=(emp&&emp.dept)||(cert.dept||"");
+  if(dpt)idLine+="    ·    Department: "+dpt;
+  doc.text(idLine,W/2,123,{align:"center"});
+  // === INFO CHIPS (score / completed / valid until) ===
+  var chipW=56,chipH=15,chipGap=8,chipY=129;
+  var chips=[
+    {label:"SCORE ACHIEVED",value:(cert.score||0)+"%"},
+    {label:"COMPLETED ON",value:formatDate(cert.completedDate||cert.issued)||"—"},
+    {label:"VALID UNTIL",value:formatDate(cert.expiry)||"—"}
+  ];
+  var cx=(W-(chips.length*chipW+(chips.length-1)*chipGap))/2;
+  chips.forEach(function(ch){
+    doc.setFillColor(255,249,238);doc.setDrawColor(AMBER[0],AMBER[1],AMBER[2]);doc.setLineWidth(0.4);
+    doc.roundedRect(cx,chipY,chipW,chipH,2.5,2.5,"FD");
+    doc.setFont("helvetica","bold");doc.setFontSize(6.3);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text(ch.label,cx+chipW/2,chipY+5.6,{align:"center"});
+    doc.setFontSize(11.5);doc.setTextColor(GREEN[0],GREEN[1],GREEN[2]);
+    doc.text(ch.value,cx+chipW/2,chipY+12,{align:"center"});
+    cx+=chipW+chipGap;
+  });
+  // === GOLD SEAL ===
+  var sealX=W/2,sealY=158;
+  doc.setFillColor(255,204,92);doc.circle(sealX,sealY,12.5,"F");
+  doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]);doc.setLineWidth(0.8);doc.circle(sealX,sealY,12.5,"S");
+  doc.setLineWidth(0.4);doc.circle(sealX,sealY,9.9,"S");
+  doc.setFillColor(AMBER[0],AMBER[1],AMBER[2]);
+  doc.triangle(sealX-5,sealY+8,sealX-8.5,sealY+19,sealX-1.5,sealY+16.5,"F");
+  doc.triangle(sealX+5,sealY+8,sealX+8.5,sealY+19,sealX+1.5,sealY+16.5,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(12);doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]);
+  doc.text((cert.score||0)+"%",sealX,sealY-0.5,{align:"center"});
+  doc.setFontSize(4.6);doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+  doc.text("S C O R E",sealX,sealY+4,{align:"center"});
+  // === SIGNATURES ===
+  var sigY=176,sigW=62;
+  var sigs=[{x:40,label:trainerName,role:"T R A I N E R"},{x:W-40-sigW,label:managerName,role:"AUTHORIZED SIGNATORY"}];
+  sigs.forEach(function(s){
+    doc.setDrawColor(NAVY[0],NAVY[1],NAVY[2]);doc.setLineWidth(0.45);
+    doc.line(s.x,sigY,s.x+sigW,sigY);
+    doc.setFont("helvetica","bold");doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]);
+    var nm=s.label||"",ns=8.5;doc.setFontSize(ns);
+    while(doc.getTextWidth(nm)>sigW-4&&ns>6){ns--;doc.setFontSize(ns);}
+    doc.text(nm,s.x+sigW/2,sigY-2.5,{align:"center"});
+    doc.setFont("helvetica","normal");doc.setFontSize(6);doc.setTextColor(GRAY[0],GRAY[1],GRAY[2]);
+    doc.text(s.role,s.x+sigW/2,sigY+5,{align:"center"});
+  });
+  // === FOOTER ===
+  doc.setFillColor(NAVY[0],NAVY[1],NAVY[2]);doc.rect(13,H-21,W-26,8,"F");
+  doc.setDrawColor(AMBER[0],AMBER[1],AMBER[2]);doc.setLineWidth(0.8);doc.line(13,H-21,W-13,H-21);
+  doc.setFont("helvetica","normal");doc.setFontSize(7);doc.setTextColor(205,208,214);
+  doc.text("Certificate No: "+cert.num+"    |    "+company+"    |    Issued: "+(formatDate(cert.issued)||""),W/2,H-15.8,{align:"center"});
   doc.save("Certificate_"+cert.empId+"_"+cert.num+".pdf");
   toast("Certificate downloaded successfully","success");
 }
@@ -6944,7 +7017,7 @@ function renderReports(){
     </div>
     <div class="chart-card" style="margin-bottom:14px;">
       <div class="chart-card-title"><span class="dot"></span>Training Completion Overview</div>
-      <canvas id="reportChart" height="120"></canvas>
+      <div class="chart-box" style="height:250px;"><canvas id="reportChart"></canvas></div>
     </div>
     <div class="table-wrap">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--sur2);border-bottom:1px solid var(--bdr);flex-wrap:wrap;gap:8px;">
@@ -6989,7 +7062,7 @@ function renderReports(){
     const passed=catData.map(c=>catOutcomes.filter(r=>isOfficialResultPass(r)&&((findTrainingLoose(r.training)||{}).cat===c||r.cat===c||(r.training||'').toLowerCase().includes(c.toLowerCase()))).length);
     const isDark=document.documentElement.getAttribute("data-theme")==="dark";
     const textColor=isDark?"#7d8590":"#656d76";
-    new Chart(ctx,{type:"bar",data:{labels:catData,datasets:[{label:"Enrolled",data:enrolled,backgroundColor:"rgba(62,160,232,.7)",borderRadius:4},{label:"Passed",data:passed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxRotation:45}},y:{ticks:{color:textColor}}}}});
+    new Chart(ctx,{type:"bar",data:{labels:catData,datasets:[{label:"Enrolled",data:enrolled,backgroundColor:"rgba(62,160,232,.7)",borderRadius:4},{label:"Passed",data:passed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor}}},scales:{x:{ticks:{color:textColor,maxRotation:45}},y:{ticks:{color:textColor,precision:0}}}}});
   },100);
 }
 function reportCard(icon,title,desc,color,action){
@@ -8335,7 +8408,7 @@ function renderSettings(){
         <div class="form-section-title"><span class="mat-ico">business</span> Company Settings</div>
         <div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Company Name</label><input class="form-control-sm" id="st_company" value="${s.companyName}" ${isAdmin?"":"disabled"}></div>
         <div class="form-group" style="margin-bottom:12px;"><label class="form-label-sm">Company Logo (emoji)</label><input class="form-control-sm" id="st_logo" value="${s.companyLogo}" ${isAdmin?"":"disabled"}></div>
-        <div class="form-group"><label class="form-label-sm">Min Score for Certificate (%)</label><input class="form-control-sm" id="st_mincert" type="number" value="${s.minCertScore||70}" min="0" max="100" ${isAdmin?"":"disabled"}></div>
+        <div class="form-group"><label class="form-label-sm">Min Score for Certificate (%)</label><input class="form-control-sm" id="st_mincert" type="number" value="${s.minCertScore||75}" min="0" max="100" ${isAdmin?"":"disabled"}></div>
       </div>
       <div class="form-section">
         <div class="form-section-title"><span class="mat-ico">palette</span> Appearance</div>
@@ -8512,7 +8585,7 @@ function doGet(e) { return ContentService.createTextOutput('PTS Safety Drive API
 
           <div>SOPs: <b style="color:var(--txt);">${DB.sops.length}</b></div>
           <div>Equipment: <b style="color:var(--txt);">${EQUIPMENT_DATA.length}</b></div>
-          <div>Min Cert Score: <b style="color:var(--amber);">${DB.settings.minCertScore||70}%</b></div>
+          <div>Min Cert Score: <b style="color:var(--amber);">${DB.settings.minCertScore||75}%</b></div>
           <div>Firestore Storage: <b style="color:var(--purple);">${(()=>{var u=getFirestoreUsage();return u.usedMB+' MB used / '+u.freeLimitMB+' MB free ('+u.pct+'%)';})()}</b></div>
         </div>
       </div>`:""}
@@ -8522,7 +8595,7 @@ function doGet(e) { return ContentService.createTextOutput('PTS Safety Drive API
 function saveSettings(){
   DB.settings.companyName=document.getElementById("st_company")?.value||DB.settings.companyName;
   DB.settings.companyLogo=document.getElementById("st_logo")?.value||DB.settings.companyLogo;
-  DB.settings.minCertScore=parseInt(document.getElementById("st_mincert")?.value)||70;
+  DB.settings.minCertScore=parseInt(document.getElementById("st_mincert")?.value)||75;
   DB.settings.sheetUrl=(document.getElementById("st_sheeturl")?.value||"").trim();
   DB.settings.driveUrl=(document.getElementById("st_driveurl")?.value||"").trim();
   DB.settings.driveFolder=(document.getElementById("st_drivefolder")?.value||"").trim();
@@ -9601,6 +9674,18 @@ function loadDB(){
 
   // Rebuild completed arrays from testResults (source of truth)
   reconcileTrainingsFromResults();
+  // MIGRATION (Task 7): the certificate threshold default moved from 70% to 75% — every score
+  // at or above 75% earns a certificate. Runs ONCE (flag); a value the admin sets afterwards
+  // in Settings is never touched again.
+  if(!DB.settings._cert75Migrated){
+    if(DB.settings.minCertScore===undefined||Number(DB.settings.minCertScore)===70)DB.settings.minCertScore=75;
+    DB.settings._cert75Migrated=true;
+    try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  }
+  // AUTO-ISSUE (Task 7): everyone with a best score >= threshold gets a certificate — covers
+  // results recorded before this rule existed or any missed issuance. Re-run after cloud sync
+  // in initApp as well (cloud replaces the local arrays).
+  try{var _autoCerts=autoIssueCertificates();if(_autoCerts>0)console.log('[loadDB] Auto-issued '+_autoCerts+' certificate(s) for scores >= '+(Number(DB.settings.minCertScore)||75)+'%');}catch(e){}
   // Always ensure defaults exist
   if(!DB.admins.find(a=>a.username==="admin")){
     DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});
@@ -9765,6 +9850,10 @@ async function initApp(){
     }
     // Do NOT set firebaseReady=false — keep trying to save
   }
+
+  // AUTO-ISSUE certificates against the final loaded data (local + cloud + restored backup):
+  // everyone with a best score at/above the certificate threshold now has a certificate.
+  try{var _autoCerts2=autoIssueCertificates();if(_autoCerts2>0)console.log('[initApp] Auto-issued '+_autoCerts2+' certificate(s) for scores >= '+(Number(DB.settings.minCertScore)||75)+'%');}catch(e){console.warn('[initApp] auto-issue certificates failed:',e);}
 
   // === ENABLE LOGIN — handle auth-success vs auth-failure ===
   if(firebaseReady){
