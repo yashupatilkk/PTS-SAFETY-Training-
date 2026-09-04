@@ -2715,12 +2715,31 @@ function getDashboardTrainingEmployees(t){
   // until the admin assigns people. Roster = explicitly assigned employees + anyone who already
   // has an official result for this training (a tester always counts as a participant even if
   // the enrollment was forgotten — the detail modal still lists them as a synthesized row).
+  // CONSISTENCY FIX ("attended 24 but card says 23"): offline-trained employees (t.offlineTrained)
+  // ALSO belong to the roster — they attended this training. Previously the Training Attended
+  // card unioned them in while the card strip / detail modal / Employees Attending card did NOT,
+  // so a removed-but-still-offline-marked person stayed visible in ONE number and invisible in
+  // every other view. Now every view shares this exact roster.
   var out=[],seen={};
   // Dedupe by id+name (NOT id alone): two people sharing one ID (duplicate-ID roster records)
   // must BOTH stay in the roster — the forgiving tester matcher disables its id-forgiving
   // cascade steps exactly when an id occurs twice, so one tested twin can never clear the other.
   var pushEmp=function(e){if(!e||!e.id)return;var k=e.id+'|'+String(e.name||'').trim().toLowerCase();if(seen[k])return;seen[k]=1;out.push(e);};
-  (DB.employees||[]).forEach(function(e){if((t.enrolled||[]).indexOf(e.id)>=0)pushEmp(e);});
+  // Forgiving id resolution: every EXACT id match is pushed (duplicate-ID twins both come in),
+  // and an assigned id with NO exact match gets one normalized retry (trim+case+space-insensitive)
+  // so a legacy "emp001 " / "emp006" enrollment still resolves to "EMP006" instead of silently
+  // shrinking the roster below the "Currently Assigned (N)" badge. Truly unknown ids stay out of
+  // the roster but are surfaced as ghosts by getGhostEnrolledIds() (warned + cleanable in UI).
+  var resolveIds=function(ids){
+    (ids||[]).forEach(function(eid){
+      var exact=(DB.employees||[]).filter(function(x){return x&&x.id===eid;});
+      if(exact.length){exact.forEach(pushEmp);return;}
+      var e=getEmployeeByAnyId(eid);
+      if(e)pushEmp(e);
+    });
+  };
+  resolveIds(t.enrolled);
+  resolveIds(t.offlineTrained);
   getDashboardResultsForTraining(t).forEach(function(r){(DB.employees||[]).forEach(function(x){if(x&&x.id===r.empId)pushEmp(x);});});
   return out;
 }
@@ -2817,7 +2836,43 @@ function makeRosterTesterMatcher(t){
 function getDashboardPendingForTraining(t){
   if(!t)return 0;
   var m=makeRosterTesterMatcher(t);
-  return getDashboardTrainingEmployees(t).filter(function(e){return !m.tested(e);}).length;
+  // Offline-trained employees already attended (📧 Offline Training in the detail modal) — they
+  // must NOT inflate the Pending card. This restores the visible identity per training:
+  //   Roster = Tests Passed + Tests Failed + Pending + Offline
+  var off=(t.offlineTrained||[]);
+  return getDashboardTrainingEmployees(t).filter(function(e){return !m.tested(e)&&off.indexOf(e.id)<0;}).length;
+}
+// ---------- Roster audit helpers (why "assigned 26" can show as a 23-person roster) ----------
+// 1) Resolve an assigned/offline id to an employee record — exact match first, then ONE
+//    normalized retry (trim + case + internal-space insensitive) so legacy data like
+//    "emp001 " still finds "EMP001" instead of silently vanishing from every roster.
+function getEmployeeByAnyId(eid){
+  if(eid===undefined||eid===null||eid==='')return null;
+  var e=(DB.employees||[]).find(function(x){return x&&x.id===eid;});
+  if(e)return e;
+  var q=normPersonField(eid);if(!q)return null;
+  return (DB.employees||[]).find(function(x){return x&&normPersonField(x.id)===q;})||null;
+}
+// 2) Assigned ids that match NO employee record (exact or normalized). They inflate the
+//    Assign dialog's "Currently Assigned (N)" badge but can never appear in any roster —
+//    the #1 reason the user sees "I selected all 26" while the card shows x/23.
+//    Surfaced in the training card strip and the detail modal, with one-click cleanup.
+function getGhostEnrolledIds(t){
+  if(!t)return [];
+  return (t.enrolled||[]).filter(function(eid){return !getEmployeeByAnyId(eid);});
+}
+// 3) Exact-duplicate employee records (same normalized id AND same normalized name). The
+//    roster intentionally counts them ONCE (same person entered twice), while "Total
+//    Employees" counts raw rows — so 26 rows can legitimately be 23 unique persons. The UI
+//    now says so instead of leaving an unexplained 3-person gap.
+function getDuplicateEmployeeRecords(){
+  var seen={},dups=[];
+  (DB.employees||[]).forEach(function(e){
+    if(!e)return;
+    var k=normPersonField(e.id)+'|'+normPersonField(e.name);
+    if(seen[k])dups.push(e);else seen[k]=1;
+  });
+  return dups;
 }
 // Every schedulable training on the dashboard — normal AND Round 2 (shown with its own name).
 function getDashboardTrainings(){
@@ -2861,11 +2916,13 @@ function isOfficialResultPass(r){
 }
 // ---------- NEW: "Training Attended" stat (dashboard card + Master Audit summary) ----------
 // Total PERSONS involved in the given trainings — i.e. the dashboard identity
-//   Participants = Tests Passed + Pending + Tests Failed  (every roster member counts,
-//   passed OR failed OR still awaiting the test).
-// A person counts when they are in the training roster: explicitly assigned (t.enrolled),
-// linked through retrainingRecords (Round 2), already holding an official result (a tester
-// always counts as a participant), or marked offline-trained (t.offlineTrained).
+//   Roster = Tests Passed + Tests Failed + Pending + Offline-trained
+//   (every roster member counts: tested, awaiting, or attended offline).
+// A person counts when they are in the training roster: explicitly assigned (t.enrolled — with
+// one normalized retry for case/space variants), linked through retrainingRecords (Round 2),
+// already holding an official result (a tester always counts as a participant), or marked
+// offline-trained (t.offlineTrained — now INCLUDED IN THE ROSTER itself so the card, the
+// training card strip, the detail modal and "Employees Attending" can never disagree).
 // Persons are deduped across the WHOLE requested scope with the same normalized id+name key the
 // roster uses — one person attending 3 trainings counts ONCE, duplicate-ID people stay separate.
 // Passing ALL trainings returns every person involved in ANY training; passing one training
@@ -2882,10 +2939,6 @@ function getAttendedPersonsForTrainings(trainings){
   (trainings||[]).forEach(function(t){
     if(!t)return;
     getDashboardTrainingEmployees(t).forEach(pushAttended);
-    (t.offlineTrained||[]).forEach(function(eid){
-      var emp=(DB.employees||[]).find(function(x){return x&&x.id===eid;});
-      if(emp)pushAttended(emp);
-    });
   });
   return out;
 }
@@ -2912,11 +2965,25 @@ function renderDashboard(){
   // "participants minus passed", which wrongly kept failed testers in Pending and merged
   // duplicate-ID passers (showed 21 instead of 18 for 24 participants / 6 tested).
   const pending=visibleTrainings.reduce(function(s,t){return s+getDashboardPendingForTraining(t);},0);
-  // NEW — "Training Attended" card: total persons in the visible scope = Tests Passed +
-  // Pending + Tests Failed persons. ALL selected → every person involved in ANY training
-  // (counted once across trainings); one training selected → that training's total only,
-  // so the card ALWAYS changes with the "Show dashboard data for training" filter.
+  // NEW — "Training Attended" card: total persons in the visible scope = the shared roster
+  // (Tests Passed + Tests Failed + Pending + Offline-trained). ALL selected → every person
+  // involved in ANY training (counted once across trainings); one training selected → that
+  // training's total only, so the card ALWAYS changes with the "Show dashboard data for
+  // training" filter. The sub label shows the LIVE BREAKDOWN so the number is self-verifiable
+  // against the training card strip ("4/23 tested — 2 passed — 2 failed") and the detail modal.
   const attendedCount=getAttendedPersonsForTrainings(visibleTrainings).length;
+  var attendedSub;
+  if(selectedTraining){
+    var _offCount=getDashboardTrainingEmployees(selectedTraining).filter(function(e){return (selectedTraining.offlineTrained||[]).indexOf(e.id)>=0;}).length;
+    attendedSub="Passed "+completed+" · Failed "+failed+" · Pending "+pending+(_offCount>0?" · Offline "+_offCount:"");
+  }else{
+    // WHY not "Total Employees"? Only persons assigned to (or tested in) at least one training
+    // count here. Say explicitly how many employees are in NO training instead of a bare 24.
+    var _attSet={};
+    getAttendedPersonsForTrainings(officialTrainings).forEach(function(e){_attSet[normPersonField(e.id)+'|'+normPersonField(e.name)]=1;});
+    var _unassigned=(DB.employees||[]).filter(function(e){return !_attSet[normPersonField(e.id)+'|'+normPersonField(e.name)];}).length;
+    attendedSub="All trainings · unique persons"+(_unassigned>0?" · "+_unassigned+" in no training":"");
+  }
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
   const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
   const el=document.getElementById("view-dashboard");
@@ -2932,7 +2999,7 @@ function renderDashboard(){
       <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name+(selectedTraining._isR2Training?' (Round 2)':''):'Showing all trainings (incl. Round 2)'}</span>
     </div>
     <div class="stat-grid" style="margin-bottom:18px;">
-      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",selectedTraining?"Selected training · passed+pending+failed":"All trainings · unique persons")}
+      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",attendedSub)}
       ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments")}
       ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2")}
       ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count")}
@@ -4649,6 +4716,11 @@ function renderTrainings(){
         const failedEmpCount=Array.from(testedEmps).filter(function(eid){return !passedEmps.has(eid);}).length;
         const completedCount=testedEmps.size;
         const passedCount=passedEmps.size;
+        // Offline-trained roster members (📧 shown in the detail modal) and assigned IDs that
+        // match no employee (ghosts) — both now VISIBLE on the card instead of silently
+        // changing the denominator: "4/23 tested — 2 passed — 2 failed — 1 offline — ⚠2 ghost IDs".
+        const offCount=eligibleEmployees.filter(function(e){return (t.offlineTrained||[]).indexOf(e.id)>=0;}).length;
+        const ghostCount=getGhostEnrolledIds(t).length;
         const pct=enrolledCount?Math.round(completedCount/enrolledCount*100):0;
         return`<div class="training-card" onclick="openTrainingDetail('${t.id}')">
           <div class="training-thumb" style="background:linear-gradient(135deg,${catInfo.color}33,${catInfo.color}11)">
@@ -4667,7 +4739,7 @@ function renderTrainings(){
             ${t.manager?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px;"><span class="mat-ico" style="font-size:11px;">supervisor_account</span> Manager: <b>${t.manager}</b></div>`:''}
             <div class="training-progress"><div class="fill" style="width:${pct}%"></div></div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:10.5px;color:var(--muted);">${completedCount}/${enrolledCount} tested — ✅${passedCount} passed${failedEmpCount>0?" — ❌"+failedEmpCount+" failed":""}</span>
+              <span style="font-size:10.5px;color:var(--muted);">${completedCount}/${enrolledCount} tested — ✅${passedCount} passed${failedEmpCount>0?" — ❌"+failedEmpCount+" failed":""}${offCount>0?" — 📧"+offCount+" offline":""}${ghostCount>0?" — ⚠"+ghostCount+" ghost ID"+(ghostCount>1?"s":"")+" (open for cleanup)":""}</span>
               <span class="badge badge-${t.cert?"amber":"info"}">${t.cert?"📜 Cert":"No Cert"}</span>
             </div>
             <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
@@ -4972,6 +5044,20 @@ function openTrainingDetail(id){
   const enrolledEmps=participantEmps;
   const trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===t.name;});
   const ytLinkId=t.youtubeLink?extractYoutubeId(t.youtubeLink):null;
+  // ROSTER AUDIT: explain any gap between "Currently Assigned (N)" and this table. Ghost IDs
+  // (assigned ids matching no employee) get a one-click cleanup; duplicate employee records
+  // (same id+name entered twice) are counted once — both used to silently skew the counts.
+  var _ghostIds=getGhostEnrolledIds(t);
+  var _dupEmps=getDuplicateEmployeeRecords();
+  var _auditWarn='';
+  if(_ghostIds.length||_dupEmps.length){
+    _auditWarn='<div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.35);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:10px;font-size:12px;">'
+      +'<b style="color:var(--amber);">⚠ Data check:</b> '
+      +(_ghostIds.length?_ghostIds.length+' assigned ID'+(_ghostIds.length>1?'s':'')+' match no employee ('+_escDrill(_ghostIds.slice(0,6).join(', '))+(_ghostIds.length>6?'…':'')+') — they can never appear in any roster or count. <button class="btn btn-sm btn-amber" style="padding:2px 10px;font-size:11px;" onclick="purgeGhostEnrollment(\''+t.id+'\')"><span class="mat-ico" style="font-size:11px;">cleaning_services</span> Clean up</button>':'')
+      +(_ghostIds.length&&_dupEmps.length?' · ':'')
+      +(_dupEmps.length?_dupEmps.length+' duplicate employee record'+(_dupEmps.length>1?'s':'')+' (same ID + name) '+(_dupEmps.length>1?'are':'is')+' counted once in rosters — check the Employees page.':'')
+      +'</div>';
+  }
   openModal(`
     <div class="modal-accent"></div>
     <div class="modal-head">
@@ -5001,6 +5087,7 @@ function openTrainingDetail(id){
         ${t.youtubeLink?`<button class="btn btn-outline" style="border-color:var(--red);color:var(--red);" onclick="removeVideoFromTraining('${t.id}')"><span class="mat-ico" style="font-size:11px;">smart_display</span> Remove Video</button>`:""}
         <button class="btn btn-red" onclick="deleteTraining('${t.id}')"><span class="mat-ico">delete</span> Delete</button>
       </div>
+      ${_auditWarn}
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);">Assigned / Tested Employees (${enrolledEmps.length}) — Completion Status</div>${enrolledEmps.length?`<div class="search-wrap" style="margin-left:auto;width:240px;"><span class="mat-ico">search</span><input class="search-bar" id="trainingEmployeeSearch" placeholder="Search Employee ID or Name..." oninput="filterTrainingEmployees(this.value)"></div>`:''}</div>
       ${enrolledEmps.length?`<div class="table-wrap"><table id="trainingEmployeeTable">
         <thead><tr><th>Employee ID</th><th>Name</th><th>Department</th><th>Assigned</th><th>Status</th><th>Attempts</th><th>Score</th><th>Result</th><th>Actions</th></tr></thead>
@@ -5070,7 +5157,7 @@ function assignEmployees(trnId){
     <div class="modal-head"><h2>Assign Employees</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div>
     <div class="modal-body">
       <div style="margin-bottom:12px;font-size:13px;">Enroll employees in: <b>${t.name}</b></div>
-      ${(()=>{var _cur=(t.enrolled||[]).map(function(id){var e=DB.employees.find(function(x){return x.id===id;});return {id:id,name:e?e.name:id,ai:getAssignmentInfo(t,id)};});if(!_cur.length)return '<div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.3);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--red);"><b>Nobody assigned yet</b> — employees will see this training in their login only after you assign them.</div>';return '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px;">👥 Currently Assigned ('+_cur.length+')</div><div style="display:flex;flex-wrap:wrap;gap:6px;">'+_cur.map(function(c){return '<span class="badge badge-info" style="font-size:10.5px;">'+_escDrill(c.name)+(c.ai?' · '+formatDate(c.ai.date):'')+'</span>';}).join('')+'</div></div>';})()}
+      ${(()=>{var _cur=(t.enrolled||[]).map(function(id){var e=DB.employees.find(function(x){return x.id===id;});return {id:id,name:e?e.name:id,ai:getAssignmentInfo(t,id)};});if(!_cur.length)return '<div style="background:rgba(232,72,58,.08);border:1px solid rgba(232,72,58,.3);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--red);"><b>Nobody assigned yet</b> — employees will see this training in their login only after you assign them.</div>';var _ghosts=getGhostEnrolledIds(t);return '<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px;">👥 Currently Assigned ('+_cur.length+(_ghosts.length?' · ⚠ '+_ghosts.length+' unknown ID'+(_ghosts.length>1?'s':'')+' NOT counted in rosters':'')+')</div><div style="display:flex;flex-wrap:wrap;gap:6px;">'+_cur.map(function(c){return '<span class="badge '+(c.ai||DB.employees.find(function(x){return x.id===c.id;})?'badge-info':'badge-danger')+'" style="font-size:10.5px;" '+(c.ai||DB.employees.find(function(x){return x.id===c.id;})?'':'title="This ID matches no employee — it is never counted"')+'>'+_escDrill(c.name)+(c.ai?' · '+formatDate(c.ai.date):'')+'</span>';}).join('')+'</div>'+(_ghosts.length?'<div style="font-size:10.5px;color:var(--red);margin-top:6px;">⚠ Highlighted ID'+(_ghosts.length>1?'s':'')+' match no employee record (deleted or mistyped) — they are never counted. Open the training and use "Clean up" to remove them.</div>':'')+'</div>';})()}
       <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:12px;margin-bottom:14px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);margin-bottom:6px;">🎯 Quick Assign by Employee ID</div>
         <input class="form-control-sm" id="assignByIds" placeholder="EMP001, EMP002, EMP003..." style="width:100%;margin-bottom:6px;">
@@ -5225,6 +5312,28 @@ async function removeEmployeeFromTraining(trnId,empId,empName){
   }
   queueSheetSync(['Training Data','Trainings','Certificates']);
   if(document.getElementById('modal')&&document.getElementById('modal').style.display!=='none')openTrainingDetail(trnId);
+}
+// One-click cleanup of assigned IDs that match no employee record (ghosts). They inflate the
+// Assign dialog's "Currently Assigned (N)" badge but can never appear in any roster, so the
+// admin sees "I assigned 26" while every card shows 23. Removes the ghost ids from
+// enrolled + all assignment logs and saves VERIFIED to cloud (same path as assign/remove).
+function purgeGhostEnrollment(trnId){
+  var t=DB.trainings.find(function(x){return x&&x.id===trnId;});
+  if(!t)return;
+  var ghosts=getGhostEnrolledIds(t);
+  if(!ghosts.length){toast('No unknown assigned IDs — this roster is clean.','info');return;}
+  if(!confirm('Remove '+ghosts.length+' assigned ID'+(ghosts.length>1?'s':'')+' that match no employee?\n\n'+ghosts.join(', ')+'\n\nThey inflate the assigned count but can never appear in any roster, test list or report.'))return;
+  var gs={};ghosts.forEach(function(id){gs[id]=1;});
+  t.enrolled=(t.enrolled||[]).filter(function(id){return !gs[id];});
+  if(t.assignments)t.assignments=(t.assignments||[]).filter(function(a){return a&&a.empId&&!gs[a.empId];});
+  if(t.assignmentLog)t.assignmentLog=(t.assignmentLog||[]).filter(function(a){return a&&a.empId&&!gs[a.empId];});
+  if(t.assignmentHistory)t.assignmentHistory=(t.assignmentHistory||[]).filter(function(a){return a&&a.empId&&!gs[a.empId];});
+  try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+  updateBadges();renderTrainings();saveDB();
+  toast('Removed '+ghosts.length+' unknown assigned ID'+(ghosts.length>1?'s':'')+' from "'+t.name+'". Counts are now consistent.','success',5000);
+  if(firebaseReady){saveTrainingToCloud(t);}
+  queueSheetSync(['Training Data','Trainings']);
+  openTrainingDetail(trnId);
 }
 function retrainEmployee(trnId,empId,empName){
   var t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
@@ -6946,13 +7055,15 @@ function exportFailReport(){
 function exportPendingReport(){
   const pending=[];
   DB.trainings.forEach(t=>{
-    // Same forgiving matcher as the dashboard Pending card: an id/name variant in a test result
-    // can no longer list a tested employee as Pending, and the export now equals the dashboard.
+    // SAME shared roster as the dashboard Pending card (assigned + offline-trained + result
+    // holders, forgiving id resolution): an id/name variant can no longer be missed, a ghost
+    // assigned ID can no longer leak in, and an offline-trained person is not "Pending".
+    // The export now equals the dashboard exactly.
     const m=makeRosterTesterMatcher(t);
-    (t.enrolled||[]).forEach(eid=>{
-      const e=DB.employees.find(x=>x.id===eid)||DB.employees.find(x=>normPersonField(x.id)===normPersonField(eid));
-      if(!m.tested({id:eid,name:e?e.name:''})&&!(t.completed||[]).includes(eid)){
-        if(e)pending.push({"Employee ID":eid,"Name":e.name,"Department":e.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});
+    const off=(t.offlineTrained||[]);
+    getDashboardTrainingEmployees(t).forEach(function(emp){
+      if(!m.tested(emp)&&!(t.completed||[]).includes(emp.id)&&off.indexOf(emp.id)<0){
+        pending.push({"Employee ID":emp.id,"Name":emp.name,"Department":emp.dept,"Training":t.name,"Date":t.date,"Status":"Pending"});
       }
     });
   });
