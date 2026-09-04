@@ -594,7 +594,6 @@ select.form-control-sm{background:var(--sur2);}
         </div>
       </div>
       <div class="checkbox-row">
-        <label class="checkbox-label"><input type="checkbox" id="rememberMe"> Remember me</label>
         <button class="link-btn" onclick="showForgot()">Forgot password?</button>
       </div>
       <div id="empLoginHint" style="display:none;font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px;">Tip: Enter your <b>full name</b> (as registered) or your password</div>
@@ -2184,8 +2183,8 @@ async function doLogin(){
       }
     }
     // LOGIN SUCCESS
-    var safeUser=Object.assign({},currentUser);delete safeUser.password;
-    if(document.getElementById("rememberMe").checked)localStorage.setItem("mep_user",JSON.stringify(safeUser));
+    // AUTO-LOGIN DISABLED (user request): the session is deliberately NOT persisted — closing or
+    // reloading the app always requires a fresh sign-in on the login page.
     startApp();
     // Sync Firebase Auth for employee in background
     // CRITICAL: After employee auth, re-auth as admin so visibility handler & sync work
@@ -3207,15 +3206,15 @@ function renderDashboard(){
     </div>
     <!-- GROUPED BAR CHARTS -->
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><div class="chart-box"><canvas id="chartMonthly"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar (or "View tests") to see exactly which tests are counted.</div></div>
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><div class="chart-box"><canvas id="chartDept"></canvas></div></div>
+      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openMonthlyTestDetails(-1)"><canvas id="chartMonthly"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar for that month, or click anywhere on the graph to see all tests.</div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openDeptDrill(-1)"><canvas id="chartDept"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar for that department, or click anywhere on the graph to see all departments.</div></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Pass / Fail Distribution</div><div class="chart-box"><canvas id="chartPassFail"></canvas></div></div>
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Training-wise Completion (Grouped)</div><div class="chart-box"><canvas id="chartTrnCompletion"></canvas></div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Pass / Fail Distribution</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openPassFailDrill(-1)"><canvas id="chartPassFail"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click Pass or Fail to see the people, or click anywhere on the graph to see both lists.</div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Training-wise Completion (Grouped)</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openTrnCompDrill(-1)"><canvas id="chartTrnCompletion"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a training for its full completion list, or click anywhere on the graph to see all trainings.</div></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><div class="chart-box"><canvas id="chartScoreDist"></canvas></div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openScoreDistDrill(-1)"><canvas id="chartScoreDist"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a score band to see who scored there, or click anywhere on the graph to see all scores.</div></div>
       <div class="chart-card">
         <div class="chart-card-title"><span class="dot"></span>Recent Test Activities</div>
         <div class="activity-list">
@@ -3429,6 +3428,167 @@ function openMonthlyTestDetails(idx){
     '<div style="font-size:11px;color:var(--muted);margin-top:10px;">This list counts every official test attempt (retakes included, shown as "Attempt #2" etc.). The dashboard Tests Passed / Tests Failed cards count each person once by best score — that is why Total Tests can be higher than Passed + Failed.</div>'+
   '</div>','860px');
 }
+// ---------- DASHBOARD GRAPH DRILL-DOWNS (user: click a graph box anywhere -> see the related data) ----------
+// Every dashboard chart opens the data behind it: click a BAR for that exact slice, click anywhere
+// else on the graph for the full list. The scope ALWAYS mirrors drawCharts() (the dashboard
+// training filter), so the numbers in the modal match the chart the user is looking at.
+function _drillScope(){
+  var selectedTrn=(dashboardTrainingFilter&&dashboardTrainingFilter!=='ALL')?findTrainingLoose(dashboardTrainingFilter):null;
+  var results=selectedTrn?getDashboardResultsForTraining(selectedTrn):getDashboardOfficialResults();
+  return{selectedTrn:selectedTrn,results:results,outcomes:bestResultsByPersonTrn(results),
+    trainings:selectedTrn?[selectedTrn]:getDashboardTrainings(),
+    emps:selectedTrn?getDashboardTrainingEmployees(selectedTrn):DB.employees,
+    scopeLabel:selectedTrn?('Training: '+selectedTrn.name):'All Trainings (incl. Round 2)'};
+}
+function _drillOutTable(list){
+  var rows=list.map(function(r){
+    var pass=isOfficialResultPass(r);
+    return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(r.empId)+'</td>'+
+      '<td><b>'+_escDrill(r.empName)+'</b></td>'+
+      '<td>'+_escDrill(r.training)+'</td>'+
+      '<td style="font-weight:700;color:'+(pass?'var(--green)':'var(--red)')+';">'+Number(r.score||0)+'%</td>'+
+      '<td><span class="badge badge-'+(pass?'active':'danger')+'">'+(pass?'PASS':'FAIL')+'</span></td>'+
+      '<td style="white-space:nowrap;">'+formatDate(r.date)+'</td></tr>';
+  }).join('');
+  return '<div class="table-wrap" style="max-height:340px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Training</th><th>Best Score</th><th>Result</th><th>Date</th></tr></thead><tbody>'+(rows||'')+'</tbody></table></div>';
+}
+function _drillModal(title,body){
+  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>'+title+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'+body+'</div>','880px');
+}
+// 1) DEPARTMENT-WISE COMPLETION — click a dept bar -> people + results of THAT department.
+function openDeptDrill(idx){
+  var S=_drillScope();
+  var deptOfResult=function(r){var e=(DB.employees||[]).find(function(x){return x.id===r.empId;});return (e&&e.dept)||r.dept||"Unknown";};
+  var deptSet={};
+  S.emps.forEach(function(e){deptSet[e.dept||"Unknown"]=1;});
+  S.outcomes.forEach(function(r){deptSet[deptOfResult(r)]=1;});
+  var activeDepts=DEPARTMENTS.filter(function(d){return deptSet[d];}).concat(Object.keys(deptSet).filter(function(d){return DEPARTMENTS.indexOf(d)<0;}).sort());
+  var title='Department-wise Completion',body='';
+  if(idx<0||!activeDepts[idx]){
+    var rows=activeDepts.map(function(d,i){
+      var tot=S.emps.filter(function(e){return (e.dept||"Unknown")===d;}).length;
+      var p=S.outcomes.filter(function(r){return isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;
+      var f=S.outcomes.filter(function(r){return !isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;
+      return '<tr onclick="openDeptDrill('+i+')" style="cursor:pointer;"><td><b>'+_escDrill(d)+'</b></td><td style="text-align:center;">'+tot+'</td><td style="text-align:center;color:var(--green);font-weight:700;">'+p+'</td><td style="text-align:center;color:var(--red);font-weight:700;">'+f+'</td><td style="text-align:center;"><span class="mat-ico" style="font-size:14px;color:var(--muted);">chevron_right</span></td></tr>';
+    }).join('');
+    body='<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Department</th><th>Employees</th><th>Passed</th><th>Failed</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Click a department to see its employees and every test result behind the chart bars.</div>';
+  }else{
+    var d=activeDepts[idx];
+    var emps=S.emps.filter(function(e){return (e.dept||"Unknown")===d;});
+    var outs=S.outcomes.filter(function(r){return deptOfResult(r)===d;});
+    var p=outs.filter(isOfficialResultPass).length,f=outs.length-p;
+    var rosterCount={};
+    S.trainings.forEach(function(t){getDashboardTrainingEmployees(t).forEach(function(e){if((e.dept||"Unknown")===d){var k=normPersonField(e.id)+'|'+normPersonField(e.name);rosterCount[k]=(rosterCount[k]||0)+1;}});});
+    var empRows=emps.map(function(e){
+      var k=normPersonField(e.id)+'|'+normPersonField(e.name);
+      var certs=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
+      return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id)+'</td><td><b>'+_escDrill(e.name)+'</b></td><td style="text-align:center;">'+(rosterCount[k]||0)+'</td><td style="text-align:center;">'+certs+'</td></tr>';
+    }).join('');
+    title='Department — '+d;
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+        '<span class="badge badge-info">Employees: '+emps.length+'</span>'+
+        '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Passed: '+p+'</span>'+
+        '<span class="badge badge-danger">Failed: '+f+'</span>'+
+        '<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openDeptDrill(-1)">All departments</button>'+
+        '<span class="badge badge-amber">'+_escDrill(S.scopeLabel)+'</span></div>'+
+      '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:4px 0 8px;">Test results — '+_escDrill(d)+'</div>'+
+      (outs.length?_drillOutTable(outs):'<p style="color:var(--muted);text-align:center;padding:12px;">No test results for this department yet.</p>')+
+      '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Employees — '+_escDrill(d)+'</div>'+
+      (empRows?'<div class="table-wrap" style="max-height:240px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Trainings</th><th>Certificates</th></tr></thead><tbody>'+empRows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:12px;">No employees recorded in this department.</p>');
+  }
+  _drillModal(title,body);
+}
+// 2) PASS / FAIL DISTRIBUTION — click a slice -> the people behind Pass or behind Fail.
+function openPassFailDrill(idx){
+  var S=_drillScope();
+  var passed=S.outcomes.filter(isOfficialResultPass).sort(function(a,b){return Number(b.score||0)-Number(a.score||0);});
+  var failed=S.outcomes.filter(function(r){return !isOfficialResultPass(r);}).sort(function(a,b){return Number(a.score||0)-Number(b.score||0);});
+  var sec=function(label,list,color){
+    return '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:'+color+';margin:14px 0 8px;">'+label+' ('+list.length+')</div>'+
+      (list.length?_drillOutTable(list):'<p style="color:var(--muted);text-align:center;padding:10px;">Nobody here.</p>');
+  };
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;align-items:center;">'+
+      '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Passed: '+passed.length+'</span>'+
+      '<span class="badge badge-danger">Failed: '+failed.length+'</span>'+
+      (idx>=0?'<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openPassFailDrill(-1)">Both lists</button>':'')+
+      '<span class="badge badge-amber"'+(idx>=0?'':' style="margin-left:auto;"')+'>'+_escDrill(S.scopeLabel)+'</span></div>';
+  if(idx===1){body+=sec('Failed — best score below the pass mark',failed,'var(--red)');}
+  else{
+    body+=sec('Passed — best score at or above the pass mark',passed,'var(--green)');
+    if(idx<0)body+=sec('Failed — best score below the pass mark',failed,'var(--red)');
+  }
+  body+='<div style="font-size:11px;color:var(--muted);margin-top:10px;">One row per person per training (best score) — these are the exact numbers inside the Pass / Fail doughnut.</div>';
+  _drillModal('Pass / Fail Distribution',body);
+}
+// 3) TRAINING-WISE COMPLETION — click a training bar -> every person in it with their status.
+function openTrnCompDrill(idx){
+  var S=_drillScope();
+  var list=S.trainings.filter(function(t){return getDashboardTrainingEmployees(t).length>0||getDashboardResultsForTraining(t).length>0;});
+  if(S.selectedTrn&&!list.length)list=S.trainings.slice(0,1);
+  if(list.length>14)list=list.slice(0,14);
+  if(!list.length){_drillModal('Training-wise Completion','<p style="color:var(--muted);text-align:center;padding:24px;">No trainings with participants or results yet.</p>');return;}
+  var title='Training-wise Completion',body='';
+  if(idx<0||!list[idx]){
+    var rows=list.map(function(t,i){
+      var rosterN=getDashboardTrainingEmployees(t).length;
+      var best=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+      var passedIds={};best.filter(isOfficialResultPass).forEach(function(r){passedIds[r.empId]=1;});
+      var comp=best.filter(isOfficialResultPass).length;
+      var pend=getDashboardTrainingEmployees(t).filter(function(e){return !passedIds[e.id];}).length;
+      return '<tr onclick="openTrnCompDrill('+i+')" style="cursor:pointer;"><td><b>'+_escDrill(t.name)+'</b>'+(t._isR2Training?' <span class="badge badge-info" style="font-size:9px;">Round 2</span>':'')+'</td><td style="text-align:center;">'+rosterN+'</td><td style="text-align:center;color:var(--green);font-weight:700;">'+comp+'</td><td style="text-align:center;color:var(--amber);font-weight:700;">'+pend+'</td><td style="text-align:center;"><span class="mat-ico" style="font-size:14px;color:var(--muted);">chevron_right</span></td></tr>';
+    }).join('');
+    body='<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Enrolled</th><th>Completed</th><th>Pending</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px;">These are the exact numbers of the grouped chart. Click a training to see every person in it with their status.</div>';
+  }else{
+    var t=list[idx];
+    var roster=getDashboardTrainingEmployees(t);
+    var best=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+    var m=makeRosterTesterMatcher(t);
+    var offIds={};(t.offlineTrained||[]).forEach(function(x){offIds[x]=1;});
+    var comp=best.filter(isOfficialResultPass).length;
+    var passedIds={};best.filter(isOfficialResultPass).forEach(function(r){passedIds[r.empId]=1;});
+    var pend=roster.filter(function(e){return !passedIds[e.id];}).length;
+    var rows=roster.map(function(e){
+      var b=m.best(e),status;
+      if(b&&isOfficialResultPass(b))status='<span class="badge badge-active">PASS '+Number(b.score||0)+'%</span>';
+      else if(b)status='<span class="badge badge-danger">FAIL '+Number(b.score||0)+'%</span>';
+      else if(offIds[e.id])status='<span class="badge badge-info">Offline training</span>';
+      else status='<span class="badge badge-amber">Pending</span>';
+      var att=m.rows(e).length;
+      return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id)+'</td><td><b>'+_escDrill(e.name)+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td style="text-align:center;">'+att+'</td><td>'+status+'</td></tr>';
+    }).join('');
+    title='Training — '+t.name;
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+        '<span class="badge badge-info">Enrolled: '+roster.length+'</span>'+
+        '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Completed: '+comp+'</span>'+
+        '<span class="badge badge-amber">Pending: '+pend+'</span>'+
+        '<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openTrnCompDrill(-1)">All trainings</button>'+
+        '<span class="badge badge-amber">'+_escDrill(S.scopeLabel)+'</span></div>'+
+      '<div class="table-wrap" style="max-height:380px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Attempts</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Status uses the best attempt per person (pass line for this training: '+(t.passing||70)+'%). Failed people can retake the test or be assigned offline training.</div>';
+  }
+  _drillModal(title,body);
+}
+// 4) SCORE DISTRIBUTION — click a score band -> everybody whose best score falls in that band.
+function openScoreDistDrill(idx){
+  var S=_drillScope();
+  var ranges=["0-39%","40-59%","60-69%","70-79%","80-89%","90-100%"];
+  var bandOf=function(r){var s=Number(r.score||0);return s<=39?0:s<=59?1:s<=69?2:s<=79?3:s<=89?4:5;};
+  var title='Score Distribution',body='';
+  if(idx<0||!ranges[idx]){
+    var all=S.outcomes.slice().sort(function(a,b){return Number(b.score||0)-Number(a.score||0);});
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;"><span class="badge badge-info">Person + training results: '+all.length+'</span><span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+      (all.length?_drillOutTable(all):'<p style="color:var(--muted);text-align:center;padding:12px;">No test results yet.</p>')+
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Best score per person per training. Click a band on the chart to filter it.</div>';
+  }else{
+    var rows=S.outcomes.filter(function(r){return bandOf(r)===idx;}).sort(function(a,b){return Number(b.score||0)-Number(a.score||0);});
+    title='Scores '+ranges[idx];
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;"><span class="badge badge-info">'+ranges[idx]+': '+rows.length+' result(s)</span><button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openScoreDistDrill(-1)">All scores</button><span class="badge badge-amber">'+_escDrill(S.scopeLabel)+'</span></div>'+
+      (rows.length?_drillOutTable(rows):'<p style="color:var(--muted);text-align:center;padding:12px;">Nobody scored in this band.</p>');
+  }
+  _drillModal(title,body);
+}
 function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   // Scope by RESOLVED training id (loose name matching) so name variants and Round 2 trainings
   // are never silently dropped. 'ALL' includes every official attempt (normal + Round 2).
@@ -3452,7 +3612,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   var monthFailedData=monthlyDrillBuckets.map(function(b){return b.results.filter(function(r){return !isOfficialResultPass(r);}).length;});
   destroyChart("chartMonthly");
   var mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:30}},onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index);}},onHover:function(evt,els){if(evt.native)evt.native.target.style.cursor=els.length?"pointer":"default";},plugins:{legend:{labels:{color:textColor,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see which tests';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});}
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:30}},onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index);}else{openMonthlyTestDetails(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{labels:{color:textColor,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see which tests';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});}
   // === DEPARTMENT CHART — REAL DATA ===
   // Dept of a result = the employee's CURRENT department (lookup by empId, fallback to the dept
   // recorded on the result). Dept list is dynamic: every dept that actually has employees or
@@ -3469,12 +3629,12 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
     var deptTotal=activeDepts.map(function(d){return scopeEmps.filter(function(e){return (e.dept||"Unknown")===d;}).length;});
     var deptPassed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;});
     var deptFailed=activeDepts.map(function(d){return chartOutcomeResults.filter(function(r){return !isOfficialResultPass(r)&&deptOfResult(r)===d;}).length;});
-    charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",datasets:{bar:{maxBarThickness:16}},plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
+    charts.dept=new Chart(dCtx,{type:"bar",data:{labels:activeDepts,datasets:[{label:"Employees",data:deptTotal,backgroundColor:"rgba(62,160,232,.6)",borderRadius:4},{label:"Passed",data:deptPassed,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Failed",data:deptFailed,backgroundColor:"rgba(232,72,58,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",datasets:{bar:{maxBarThickness:16}},onClick:function(evt,els){if(els&&els.length){openDeptDrill(els[0].index);}else{openDeptDrill(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{labels:{color:textColor,font:{size:10}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see this department';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor},beginAtZero:true},y:{grid:{color:gridColor},ticks:{color:textColor,font:{size:11}}}}}});
   }
   // === PASS/FAIL DOUGHNUT ===
   destroyChart("chartPassFail");
   var pfCtx=document.getElementById("chartPassFail");
-  if(pfCtx){charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[dashPassed||0,dashFailed||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}}},cutout:"65%"}});}
+  if(pfCtx){charts.pf=new Chart(pfCtx,{type:"doughnut",data:{labels:["Pass","Fail"],datasets:[{data:[dashPassed||0,dashFailed||0],backgroundColor:["rgba(62,207,142,.8)","rgba(232,72,58,.8)"],borderWidth:0,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(evt,els){if(els&&els.length){openPassFailDrill(els[0].index);}else{openPassFailDrill(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{position:"bottom",labels:{color:textColor,padding:16,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see the people';}}}},cutout:"65%"}});}
   // === TRAINING-WISE COMPLETION GROUPED BAR ===
   // Shows every training that actually has participants or results (normal + Round 2),
   // so the chart mirrors the real data instead of a wall of empty zeros.
@@ -3492,7 +3652,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
       var passedIds=new Set(trnBest[i].filter(isOfficialResultPass).map(function(r){return r.empId;}));
       return getDashboardTrainingEmployees(t).filter(function(e){return !passedIds.has(e.id);}).length;
     });
-    charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:24}},plugins:{legend:{labels:{color:textColor,font:{size:10}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45,autoSkip:true}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});
+    charts.trnComp=new Chart(tcCtx,{type:"bar",data:{labels:trnNames,datasets:[{label:"Enrolled",data:trnEnrolled,backgroundColor:"rgba(139,109,232,.7)",borderRadius:4},{label:"Completed",data:trnCompleted,backgroundColor:"rgba(62,207,142,.7)",borderRadius:4},{label:"Pending",data:trnPending,backgroundColor:"rgba(255,176,32,.7)",borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:24}},onClick:function(evt,els){if(els&&els.length){openTrnCompDrill(els[0].index);}else{openTrnCompDrill(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{labels:{color:textColor,font:{size:10}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see the full list';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10},maxRotation:45,autoSkip:true}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});
   }
   // === SCORE DISTRIBUTION BAR CHART ===
   destroyChart("chartScoreDist");
@@ -3504,7 +3664,7 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
       var parts=rng.replace('%','').split('-').map(Number);
       return chartOutcomeResults.filter(function(r){return Number(r.score)>=parts[0]&&Number(r.score)<=parts[1];}).length;
     });
-    charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:44}},plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});
+    charts.scoreDist=new Chart(sdCtx,{type:"bar",data:{labels:ranges,datasets:[{label:"Employees",data:rangeCounts,backgroundColor:rangeColors.map(function(c){return c+'cc';}),borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:44}},onClick:function(evt,els){if(els&&els.length){openScoreDistDrill(els[0].index);}else{openScoreDistDrill(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{display:false},tooltip:{callbacks:{afterBody:function(items){return 'Click to see who scored here';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});
   }
 }
 function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
@@ -9946,9 +10106,11 @@ async function initApp(){
     document.documentElement.setAttribute("data-theme",tBg);DB.settings.theme=tBg;
     document.getElementById("themeBtn").querySelector(".mat-ico").textContent=tBg==="dark"?"dark_mode":"light_mode";
     if(!DB.admins.find(function(a){return a.username==="admin";})){DB.admins.push({username:"admin",password:"admin123",name:"Admin User",role:"admin"});}
-    // Auth persistence + session check (needed for auto-login)
-    try{if(firebaseReady){await new Promise(function(r){var u=fbAuth.onAuthStateChanged(r);setTimeout(u,3000);});var fbu=fbAuth.currentUser;if(fbu){var uid=fbu.email.split('@')[0].toUpperCase();var fnd=false;if(uid==='ADMIN'){var ad=DB.admins.find(function(a){return a.username==='admin';});if(ad){currentUser=Object.assign({},ad,{type:"admin"});isAdmin=true;fnd=true;}}else{var ep=DB.employees.find(function(e){return e.id===uid;});if(ep){currentUser=Object.assign({},ep,{type:"employee"});isAdmin=false;fnd=true;}}if(fnd){startApp();return;}}}}catch(e){}
-    var sv=localStorage.getItem("mep_user");if(sv){try{var p=JSON.parse(sv);var v=false;if(p.type==="admin"){var m=DB.admins.find(function(a){return a.username===p.username;});if(m){currentUser=Object.assign({},m,{type:"admin"});isAdmin=true;v=true;}}else if(p.type==="employee"){var m2=DB.employees.find(function(e){return e.id===p.id;});if(m2){currentUser=Object.assign({},m2,{type:"employee"});isAdmin=false;v=true;}}if(v){startApp();}else{localStorage.removeItem("mep_user");}}catch(e2){localStorage.removeItem("mep_user");}}
+    // AUTO-LOGIN DISABLED (user request): neither the Firebase Auth session nor a saved
+    // localStorage session signs anybody in automatically — the login page ALWAYS shows.
+    // A stale Firebase session is signed out so the cloud session matches the signed-in user.
+    try{if(firebaseReady&&fbAuth.currentUser){console.log('[initApp] Stale Firebase session ignored — auto-login is off:',fbAuth.currentUser.email);fbAuth.signOut().catch(function(){});}}catch(e){}
+    try{localStorage.removeItem("mep_user");}catch(e){}
     return;
   }
   if(loadMsg)loadMsg.style.display='none';
@@ -10004,42 +10166,17 @@ async function initApp(){
   DB.settings.theme=t;
   document.getElementById("themeBtn").querySelector(".mat-ico").textContent=t==="dark"?"dark_mode":"light_mode";
 
-  // Try Firebase Auth persistence first
+  // AUTO-LOGIN DISABLED (user request): the Firebase Auth session and any saved localStorage
+  // session no longer sign anybody in — after a reload the login page ALWAYS shows and a fresh
+  // sign-in is required. A stale Firebase session is signed out so the cloud session always
+  // matches the user who actually signs in.
   try{
-    if(firebaseReady){
-      await new Promise(r=>{const unsub=fbAuth.onAuthStateChanged(r);setTimeout(unsub,3000);});
-      const fbUser=fbAuth.currentUser;
-      if(fbUser){
-        const uid=fbUser.email.split('@')[0].toUpperCase();
-        let found=false;
-        if(uid==='ADMIN'){
-          const admin=DB.admins.find(a=>a.username==='admin');
-          if(admin){currentUser={...admin,type:"admin"};isAdmin=true;found=true;}
-        }else{
-          const emp=DB.employees.find(e=>e.id===uid);
-          if(emp){currentUser={...emp,type:"employee"};isAdmin=false;found=true;}
-        }
-        if(found){startApp();return;}
-      }
+    if(firebaseReady&&fbAuth.currentUser){
+      console.log('[initApp] Stale Firebase session ignored — auto-login is off:',fbAuth.currentUser.email);
+      fbAuth.signOut().catch(()=>{});
     }
-  }catch(e){console.warn('Auth persistence check error:',e);}
-
-  // Fallback: check localStorage session
-  const saved=localStorage.getItem("mep_user");
-  if(saved){
-    try{
-      const parsed=JSON.parse(saved);
-      let valid=false;
-      if(parsed.type==="admin"){
-        const match=DB.admins.find(a=>a.username===parsed.username);
-        if(match){currentUser={...match,type:"admin"};isAdmin=true;valid=true;}
-      }else if(parsed.type==="employee"){
-        const match=DB.employees.find(e=>e.id===parsed.id);
-        if(match){currentUser={...match,type:"employee"};isAdmin=false;valid=true;}
-      }
-      if(valid){startApp();}else{localStorage.removeItem("mep_user");}
-    }catch{localStorage.removeItem("mep_user");}
-  }
+  }catch(e){}
+  try{localStorage.removeItem("mep_user");}catch(e){}
 }
 
 initApp();
