@@ -2931,28 +2931,42 @@ function certPersonMatchesOutcome(c,r,idCount){
   return !!(c.empName&&r.empName&&normPersonField(r.empName)===normPersonField(c.empName));
 }
 function getOfficialTrainingCertificates(){
-  // A certificate counts while its holder holds a qualifying result (best score >= certificate
-  // threshold — the 75% rule) for that training, or completed it via offline training. Matching
-  // is FORGIVING (loose training resolution + person cascade), so name-variant results and
-  // duplicate-ID twins can neither hide a real certificate nor borrow someone else's score.
-  // Also dedupes per employee+training (keep latest) so retake duplicates never display.
-  var offMap={};
-  (DB.trainings||[]).forEach(function(t){(t.offlineTrained||[]).forEach(function(eid){offMap[eid+'|'+t.name]=true;});});
+  // v3 (user report "2 Tests Passed but 3 Certificates"): a certificate displays ONLY when its
+  // holder has a QUALIFYING PASS for that training — best official outcome with score >= the
+  // certificate threshold (75%) AND >= the training's own passing mark. The certificate count is
+  // therefore a SUBSET of the dashboard "Tests Passed" count BY CONSTRUCTION (same
+  // person+training granularity), so the two cards can never disagree again:
+  //   - OFFLINE BYPASS REMOVED: offline training is a corrective-action path assigned to people
+  //     who FAILED the online test (BSC Step 3). Their stale/legacy certificate records (issued
+  //     under older, lower thresholds) no longer display — offline completion is tracked in
+  //     Offline Training records / NCRs, not certificates. A person who genuinely PASSED and is
+  //     ALSO marked offline still shows their certificate via the outcome path.
+  //   - the outcome path additionally requires isOfficialResultPass(), so a training whose
+  //     passing mark sits ABOVE 75% can never show a certificate for a failed score.
+  //   - dedupe keys on the RESOLVED qualifying person+training (not the raw cert fields), so
+  //     variant-spelled duplicate records collapse onto the ONE outcome they mirror.
+  // Matching stays FORGIVING (loose training resolution + person cascade), so name-variant
+  // results and duplicate-ID twins can neither hide a real certificate nor borrow a score.
   var minCert=Number(DB.settings.minCertScore)||75;
   var outcomes=bestResultsByPersonTrn(getDashboardOfficialResults());
   var idCount=getEmployeeIdCounts();
-  var list=(DB.certificates||[]).filter(function(c){
-    if(!isOfficialTrainingCertificate(c))return false;
-    if(offMap[(c.empId||'')+'|'+(c.training||'')])return true;
-    var trn=findTrainingLoose(c.training);
-    if(!trn)return false;
-    return outcomes.some(function(r){
-      return resultTrnId(r)===trn.id&&Number(r.score||0)>=minCert&&certPersonMatchesOutcome(c,r,idCount);
-    });
-  });
   var certMap={};
-  list.forEach(function(c){
-    var key=(c.empId||'')+'|'+(c.training||'');
+  (DB.certificates||[]).forEach(function(c){
+    if(!isOfficialTrainingCertificate(c))return;
+    var trn=findTrainingLoose(c.training);
+    if(!trn)return;
+    // Find the qualifying outcome this certificate mirrors (deterministic scan of best outcomes).
+    var hit=null;
+    for(var i=0;i<outcomes.length;i++){
+      var r=outcomes[i];
+      if(resultTrnId(r)!==trn.id)continue;
+      if(Number(r.score||0)<minCert)continue;
+      if(!isOfficialResultPass(r))continue; // must be a PASS (training pass mark), not just >= 75
+      if(certPersonMatchesOutcome(c,r,idCount)){hit=r;break;}
+    }
+    if(!hit)return;
+    // Dedupe on the QUALIFYING person+training — one displayed certificate per pass outcome.
+    var key=resultPersonKey(hit)+'|'+trn.id;
     var prev=certMap[key];
     if(!prev){certMap[key]=c;return;}
     var dPrev=String(prev.completedDate||prev.issued||'');
@@ -2966,8 +2980,11 @@ function getOfficialTrainingCertificates(){
 // Results that arrived any other way (recorded before the 75% rule, imported, admin-entered, or
 // missed by an earlier bug) never got one. autoIssueCertificates() scans the BEST official
 // outcome per person per training and creates every missing certificate — so "everyone who
-// scored 75 or above" always ends up with one. Runs on load, after cloud sync, and on demand
-// from the Certificates page. Idempotent: existing certificates are never duplicated.
+// scored 75 or above AND PASSED the training" always ends up with one. The pass requirement
+// (isOfficialResultPass) keeps auto-issued certificates a subset of the dashboard "Tests
+// Passed" count even when a training's pass mark sits above the 75% certificate threshold.
+// Runs on load, after cloud sync, and on demand from the Certificates page. Idempotent:
+// existing certificates are never duplicated.
 function makeUniqueCertNum(){
   var base="CERT-"+Date.now().toString(36).toUpperCase(),num=base,n=0;
   while((DB.certificates||[]).some(function(c){return c.num===num;})){n++;num=base+"-"+n;}
@@ -2979,6 +2996,7 @@ function autoIssueCertificates(){
   bestResultsByPersonTrn(getDashboardOfficialResults()).forEach(function(r){
     var score=Number(r.score||0);
     if(score<minCert)return;
+    if(!isOfficialResultPass(r))return;          // FAILED the training (pass mark above 75?) → never a certificate
     var trn=findTrainingLoose(r.training);
     if(!trn||trn._isR2Training)return;              // official scheduled trainings only (matches the certificate views)
     // Canonical employee for the certificate: exact id+name record first, then any id match.
@@ -3122,7 +3140,12 @@ function renderDashboard(){
       +" · "+_att.unique+" unique persons"
       +(_parts.length?" · "+_parts.join(" · "):"");
   }
+  // Certificates card — v3 validator: every displayed certificate mirrors ONE pass outcome
+  // (passed the training AND best score >= certificate threshold), so Certificates <= Tests
+  // Passed ALWAYS. The sub label states the rule so the number is self-explanatory.
+  const _minCert=Number(DB.settings.minCertScore)||75;
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
+  const certSub="Passed test · score ≥ "+_minCert+"% · one per person & training";
   const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
   // DATA HEALTH strip: when employee rows > unique persons, show the reasons + one-click review
   // directly on the dashboard (duplicate rows merged / rows without ID). This is THE answer to
@@ -3161,7 +3184,7 @@ function renderDashboard(){
       ${statCard("pending","Pending",pending,"#f0883e","Awaiting training")}
       ${statCard("cancel","Tests Failed",failed,"#e8483a","Official training fail count")}
       ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library")}
-      ${statCard("workspace_premium","Certificates",certCount,"#c084fc","Issued")}
+      ${statCard("workspace_premium","Certificates",certCount,"#c084fc",certSub)}
       ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%")}
     </div>
     <div class="quick-actions" style="margin-bottom:18px;">
@@ -6819,6 +6842,13 @@ function renderCertificates(){
   const certs=isAdmin?officialCerts:officialCerts.filter(c=>c.empId===currentUser.id);
   const practiceCerts=isAdmin?(DB.practiceCertificates||[]):(DB.practiceCertificates||[]).filter(c=>c.empId===currentUser.id);
   const expiring=certs.filter(c=>{const d=daysUntil(c.expiry);return d>=0&&d<=30;});
+  // v3 validator — count official-looking cert records that no longer DISPLAY because their
+  // holder has no qualifying PASS (best score below the 75% rule, failed the training's pass
+  // mark, or offline-assigned without a pass). Surfaced as an info line so the list length is
+  // always explainable ("why does the database have more certificates than shown?").
+  var _shownNums={};officialCerts.forEach(function(c){_shownNums[c.num]=1;});
+  var _scopeCerts=isAdmin?(DB.certificates||[]):(DB.certificates||[]).filter(function(c){return c&&c.empId===currentUser.id;});
+  const hiddenOutdated=_scopeCerts.filter(function(c){return c&&!_shownNums[c.num]&&isOfficialTrainingCertificate(c);}).length;
   document.getElementById("view-certificates").innerHTML=`
     <div class="section-header">
       <div class="section-title">Certificates <span>Issued</span></div>
@@ -6828,6 +6858,7 @@ function renderCertificates(){
       </div>
     </div>
     ${expiring.length?`<div class="cert-banner"><span class="mat-ico" style="color:var(--amber);font-size:24px;">warning</span><div><b style="color:var(--amber);">${expiring.length} certificate(s) expiring within 30 days!</b><div style="font-size:11px;color:var(--muted);margin-top:2px;">${expiring.map(c=>c.empName+' — '+c.training).join(", ")}</div></div></div>`:""}
+    ${hiddenOutdated?`<div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--purple);font-size:18px;">visibility_off</span><div><b style="color:var(--txt);">${hiddenOutdated} outdated certificate record${hiddenOutdated>1?"s":""} hidden.</b> Certificates display only for people who PASSED the training with a best score of at least ${DB.settings.minCertScore||75}%. Records left over from older rules (lower pass marks) or held by failed / offline-assigned people stay in the database but are not shown or counted.</div></div>`:""}
     <div class="table-wrap">
       <table>
         <thead><tr><th>Certificate No</th><th>Employee ID</th><th>Employee Name</th><th>Training</th><th>Score</th><th>Dept</th><th>Completion Date</th><th>Issued</th><th>Expiry</th><th>Status</th><th>Download</th></tr></thead>
