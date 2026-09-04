@@ -1342,6 +1342,43 @@ function sanitizeForFirestore(obj){
   return clean;
 }
 
+// NEW: RELIABLE + VERIFIED cloud save for ONE training document.
+// Why: assign/remove used fire-and-forget Firebase writes — when the write silently failed
+// (admin auth expired/failed, Firebase rate limit, Firestore rules, offline), the next
+// loadDBFromFirestore() loaded the STALE cloud copy ("cloud is the single source of truth for
+// trainings") and the change REVERTED: removed employees came BACK after refresh, newly added
+// employees VANISHED after refresh. This helper:
+//   1. ensures admin auth (with the cloud-password dialog fallback),
+//   2. writes the doc (JSON-safe + Firestore-sanitized payload),
+//   3. READS IT BACK and verifies the membership fields really landed in the cloud,
+//   4. retries up to 3 attempts, and
+//   5. shows a LOUD toast if the cloud still disagrees — no more silent data loss.
+async function saveTrainingToCloud(t){
+  if(!firebaseReady||!t||!t.id)return {ok:false,error:'Firebase not ready'};
+  var payload=null;
+  try{payload=sanitizeForFirestore(JSON.parse(JSON.stringify(t)));}catch(e){payload=sanitizeForFirestore(t);}
+  var lastErr='';
+  for(var attempt=1;attempt<=3;attempt++){
+    try{
+      var authOk=await authAsAdmin(attempt>1);
+      if(!authOk){lastErr='admin sign-in failed';continue;}
+      await fbDB.collection('trainings').doc(String(t.id)).set(payload,{merge:true});
+      // VERIFY: read the doc back and compare the membership arrays the roster/dashboard use
+      var snap=await fbDB.collection('trainings').doc(String(t.id)).get();
+      var d=snap.exists?(snap.data()||{}):null;
+      if(!d){lastErr='cloud doc missing after write';continue;}
+      var fieldsOk=['enrolled','completed','retrained','offlineTrained'].every(function(f){
+        return JSON.stringify(d[f]||[])===JSON.stringify(t[f]||[]);
+      });
+      if(fieldsOk)return {ok:true};
+      lastErr='cloud verify mismatch (enrolled/completed/retrained/offlineTrained)';
+    }catch(e){lastErr=(e&&(e.code||e.message))||String(e);}
+  }
+  toast('⚠ Cloud sync FAILED for "'+(t.name||t.id)+'" — '+lastErr+'. Saved on this device only; it may REVERT after refresh. Check internet / Firebase password.','error',9000);
+  console.error('[saveTrainingToCloud] FAILED for',t.id,':',lastErr);
+  return {ok:false,error:lastErr};
+}
+
 async function fbSaveCollection(collName,items,keyField){
   if(!firebaseReady)return {ok:false,error:'Firebase not ready'};
   try{
@@ -5095,8 +5132,12 @@ function confirmAssign(trnId){
   // showed every employee a training they were never assigned to).
   selected.forEach(function(eid){DB.notifications.unshift({id:genId("N"),msg:'You have been assigned to "'+t.name+'". Date: '+formatDate(t.date),time:"Just now",read:false,icon:"school",forEmp:eid});});
   updateBadges();renderTrainings();saveDB();
-  // Immediate Firebase save for training enrollment
-  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});var _origT=t._isR2Training?DB.trainings.find(function(x){return x.id===t._r2ForFailedTrnId;}):null;if(_origT)await fbDB.collection('trainings').doc(String(_origT.id)).set(JSON.parse(JSON.stringify(_origT)),{merge:true});}catch(e){console.warn('Firebase assign save error:',e);}})();}
+  // Immediate Firebase save for training enrollment — now VERIFIED (auth fallback + read-back
+  // check + retry + loud error toast) so a newly added employee can no longer silently vanish
+  // from the cloud and disappear again after refresh.
+  saveTrainingToCloud(t);
+  var _origT=t._isR2Training?DB.trainings.find(function(x){return x.id===t._r2ForFailedTrnId;}):null;
+  if(_origT)saveTrainingToCloud(_origT);
 }
 function confirmAssignAllDept(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
@@ -5113,16 +5154,23 @@ function confirmAssignAllDept(trnId){
   registerR2Assignments(t,toAssign.map(e=>e.id));
   closeModal();toast(`✅ ${toAssign.length} employees from "${dept}" assigned`,"success");
   updateBadges();renderTrainings();saveDB();
-  // Immediate Firebase save for training enrollment
-  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});var _origT=t._isR2Training?DB.trainings.find(function(x){return x.id===t._r2ForFailedTrnId;}):null;if(_origT)await fbDB.collection('trainings').doc(String(_origT.id)).set(JSON.parse(JSON.stringify(_origT)),{merge:true});}catch(e){console.warn('Firebase dept assign save error:',e);}})();}
+  // Immediate Firebase save for dept enrollment — now VERIFIED (see saveTrainingToCloud note).
+  saveTrainingToCloud(t);
+  var _origT=t._isR2Training?DB.trainings.find(function(x){return x.id===t._r2ForFailedTrnId;}):null;
+  if(_origT)saveTrainingToCloud(_origT);
 }
 async function removeEmployeeFromTraining(trnId,empId,empName){
   const t=DB.trainings.find(function(x){return x.id===trnId;});if(!t)return;
   if(!confirm('Remove '+empName+' ('+empId+') from this training?\n\nThis clears their assignment, video progress, test attempts, certificates and training records. If assigned again, they must complete the training again.'))return;
   const trnName=t.name;
   // Capture IDs before changing local data so cloud documents can also be removed.
-  const resultIds=DB.testResults.filter(function(r){return r.empId===empId&&r.training===trnName;}).map(function(r){return r.id;});
-  const certIds=DB.certificates.filter(function(c){return c.empId===empId&&c.training===trnName;}).map(function(c){return c.num;});
+  // FIX (removed employee still showing on the dashboard): match results/certificates LOOSELY
+  // (resultTrnId → resolved training id, case/space-insensitive) instead of exact name. The
+  // dashboard roster synthesizes a participant row for ANY surviving result that loose-matches
+  // the training — so a result recorded under a name variant ("fire safety", double space, etc.)
+  // used to survive the exact-match cleanup and resurrect the removed person on the dashboard.
+  const resultIds=DB.testResults.filter(function(r){return r.empId===empId&&resultTrnId(r)===t.id;}).map(function(r){return r.id;});
+  const certIds=DB.certificates.filter(function(c){return c.empId===empId&&resultTrnId(c)===t.id;}).map(function(c){return c.num;});
   // Remove only this employee's data for this training; all other training history stays intact.
   t.enrolled=(t.enrolled||[]).filter(function(id){return id!==empId;});
   t.completed=(t.completed||[]).filter(function(id){return id!==empId;});
@@ -5135,22 +5183,42 @@ async function removeEmployeeFromTraining(trnId,empId,empName){
   if(t.assignments)t.assignments=(t.assignments||[]).filter(function(a){return a.empId!==empId;});
   t.retrainingRecords=(t.retrainingRecords||[]).filter(function(r){return r.empId!==empId;});
   t.offlineRecords=(t.offlineRecords||[]).filter(function(r){return r.empId!==empId;});
-  DB.testResults=DB.testResults.filter(function(r){return !(r.empId===empId&&r.training===trnName);});
-  DB.certificates=DB.certificates.filter(function(c){return !(c.empId===empId&&c.training===trnName);});
-  DB.feedbackForms=(DB.feedbackForms||[]).filter(function(f){return !(f.empId===empId&&f.training===trnName);});
-  DB.correctiveActions=(DB.correctiveActions||[]).filter(function(c){return !(c.empId===empId&&(c.training===trnName||c.trnName===trnName));});
+  DB.testResults=DB.testResults.filter(function(r){return !(r.empId===empId&&resultTrnId(r)===t.id);});
+  DB.certificates=DB.certificates.filter(function(c){return !(c.empId===empId&&resultTrnId(c)===t.id);});
+  DB.feedbackForms=(DB.feedbackForms||[]).filter(function(f){return !(f.empId===empId&&(f.training===trnName||resultTrnId(f)===t.id));});
+  DB.correctiveActions=(DB.correctiveActions||[]).filter(function(c){return !(c.empId===empId&&(c.training===trnName||c.trnName===trnName||resultTrnId(c)===t.id));});
   DB.notifications=(DB.notifications||[]).filter(function(n){return !(n.forEmp===empId&&n.msg&&n.msg.indexOf(trnName)>=0);});
+  // FIX (R2 resurrection): retrainingRecords that link a person to THIS training may live on
+  // OTHER training documents (the ORIGINAL training stores {r2TrnId: this.id} records for its
+  // Round 2). The old cleanup only touched t.retrainingRecords, so removing someone from a
+  // Round 2 training left the link on the original training — the R2 roster scanned all
+  // trainings' retrainingRecords, found it, and the removed person stayed in the roster and on
+  // the dashboard forever. Sweep EVERY training and cut every link pointing at this one.
+  var touchedTrns=[];
+  (DB.trainings||[]).forEach(function(tr){
+    if(!tr||tr.id===t.id||!tr.retrainingRecords)return;
+    var beforeLen=tr.retrainingRecords.length;
+    tr.retrainingRecords=tr.retrainingRecords.filter(function(rec){return !(rec&&rec.empId===empId&&(rec.r2TrnId===t.id||rec.r2TrnName===trnName));});
+    if(tr.retrainingRecords.length!==beforeLen)touchedTrns.push(tr);
+  });
+  // Ensure membership maps exist so the cloud merge (which replaces whole map fields) actually
+  // clears the removed person's keys instead of keeping the stale cloud map untouched.
+  if(!t.completedDates)t.completedDates={};
+  if(!t.videoProgress)t.videoProgress={};
   try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){console.warn('Local save after training removal:',e);}
   updateBadges();saveDB();
   toast(empName+' removed from '+trnName+'. Training data cleared; reassignment will require a fresh completion.','success',5000);
-  // Delete linked cloud records and save the cleaned training document.
+  // Delete linked cloud records and save the cleaned training document — VERIFIED writes now:
+  // the training doc is read back after writing, so a silent cloud failure can no longer
+  // resurrect the removed employee on the next refresh (loud toast + retry instead).
   if(firebaseReady){
     try{
       var adminOk=await authAsAdmin();
       if(adminOk){
         for(const rid of resultIds){try{await fbDB.collection('testResults').doc(String(rid)).delete();}catch(e){}}
         for(const cid of certIds){try{await fbDB.collection('certificates').doc(String(cid)).delete();}catch(e){}}
-        await fbDB.collection('trainings').doc(String(trnId)).set(sanitizeForFirestore(t),{merge:true});
+        await saveTrainingToCloud(t);
+        for(const tr of touchedTrns){await saveTrainingToCloud(tr);}
         await saveDB();
       }
     }catch(e){console.warn('Firebase remove training data error:',e);}
