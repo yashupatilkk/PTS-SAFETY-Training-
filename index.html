@@ -2959,6 +2959,9 @@ function isOfficialResultPass(r){
 // returns just that training's total (the sum the Tests Passed / Pending / Tests Failed cards
 // show). The count is always computed from the CURRENT filter, so it changes on every
 // "Show dashboard data for training" switch.
+// NOTE (Task 6): with MULTIPLE trainings selected the dashboard headline number now comes from
+// getTotalAttendancesForTrainings() below (Σ per-training rosters = total attendances) — this
+// function remains the UNIQUE-persons figure shown in the sub label, gap report and exports.
 function getAttendedPersonsForTrainings(trainings){
   var seen={},out=[];
   var pushAttended=function(e){
@@ -2971,6 +2974,26 @@ function getAttendedPersonsForTrainings(trainings){
     getDashboardTrainingEmployees(t).forEach(pushAttended);
   });
   return out;
+}
+// ---------- NEW (Task 6): TOTAL TRAINING ATTENDANCES — the number the user adds up by hand ----------
+// User report: "Training 1 attend 23, Training 2 attend 2, total 25 I need — but it shows only 23."
+// The old ALL-view card collapsed every person to ONE count (unique persons), so a person in two
+// trainings was counted once and the card read 23 while every OTHER dashboard card already summed
+// across the scope (Pending = reduce over per-training pending; Passed/Failed = person+training
+// pairs). The attended card now uses the SAME sum rule: with "All Trainings" selected it shows
+//   roster(Training 1) + roster(Training 2) + ... = total attendances (23 + 2 = 25)
+// — exactly the per-training "Employees Attending" numbers added up. One training selected →
+// exactly that training's roster (unchanged). per[] feeds the card's live "23 + 2 = 25" breakdown;
+// unique stays available for the reference label.
+function getTotalAttendancesForTrainings(trainings){
+  var per=[],total=0;
+  (trainings||[]).forEach(function(t){
+    if(!t)return;
+    var c=getDashboardTrainingEmployees(t).length;
+    per.push({name:t.name||('Training '+(per.length+1)),count:c});
+    total+=c;
+  });
+  return {total:total,per:per,unique:getAttendedPersonsForTrainings(trainings).length};
 }
 function renderDashboard(){
   if(!isAdmin){renderEmpDashboard();return;}
@@ -2995,27 +3018,32 @@ function renderDashboard(){
   // "participants minus passed", which wrongly kept failed testers in Pending and merged
   // duplicate-ID passers (showed 21 instead of 18 for 24 participants / 6 tested).
   const pending=visibleTrainings.reduce(function(s,t){return s+getDashboardPendingForTraining(t);},0);
-  // NEW — "Training Attended" card: total persons in the visible scope = the shared roster
-  // (Tests Passed + Tests Failed + Pending + Offline-trained). ALL selected → every person
-  // involved in ANY training (counted once across trainings); one training selected → that
-  // training's total only, so the card ALWAYS changes with the "Show dashboard data for
-  // training" filter. The sub label shows the LIVE BREAKDOWN so the number is self-verifiable
-  // against the training card strip ("4/23 tested — 2 passed — 2 failed") and the detail modal.
-  const attendedCount=getAttendedPersonsForTrainings(visibleTrainings).length;
+  // Task 6 — "Training Attended" card: TOTAL ATTENDANCES in the visible scope (Σ per-training
+  // rosters), consistent with the other cards: Pending already sums per-training pending and
+  // Passed/Failed count person+training pairs. ALL selected → Training 1 + Training 2 + ...
+  // added up (e.g. 23 + 2 = 25); one training selected → that training's roster, so the card
+  // ALWAYS changes with the "Show dashboard data for training" filter.
+  const _att=getTotalAttendancesForTrainings(visibleTrainings);
+  const attendedCount=_att.total;
   var attendedSub;
   if(selectedTraining){
     var _offCount=getDashboardTrainingEmployees(selectedTraining).filter(function(e){return (selectedTraining.offlineTrained||[]).indexOf(e.id)>=0;}).length;
     attendedSub="Passed "+completed+" · Failed "+failed+" · Pending "+pending+(_offCount>0?" · Offline "+_offCount:"");
   }else{
-    // WHY not "Total Employees"? The card counts unique PERSONS involved in any training.
-    // If employee rows > attended persons, say exactly why ON the card: duplicate rows merged,
-    // rows without an ID (can never be assigned), employees in no training.
+    // Sub label mirrors the per-training numbers the user adds by hand ("23 + 2 = 25"), then
+    // closes the identity with the SAME sums the other cards show: total = Passed + Failed +
+    // Pending (+ Offline). Unique persons + data-gap reasons stay visible for reference.
+    var _sumExpr=(_att.per.length>1?_att.per.map(function(p){return p.count;}).join(" + ")+" = ":"")+_att.total;
+    var _offSum=officialTrainings.reduce(function(s,t){return s+getDashboardTrainingEmployees(t).filter(function(e){return (t.offlineTrained||[]).indexOf(e.id)>=0;}).length;},0);
     var _gap=getRosterGapReport(getAttendedPersonsForTrainings(officialTrainings));
     var _parts=[];
     if(_gap.dupRows>0)_parts.push(_gap.dupRows+" duplicate row"+(_gap.dupRows>1?"s":"")+" merged");
     if(_gap.idless>0)_parts.push(_gap.idless+" without ID");
     if(_gap.unassigned>0)_parts.push(_gap.unassigned+" in no training");
-    attendedSub="All trainings · unique persons"+(_parts.length?" · "+_parts.join(" · "):"");
+    attendedSub="All trainings · "+_sumExpr+" total attendances"
+      +" · Passed "+completed+" · Failed "+failed+" · Pending "+pending+(_offSum>0?" · Offline "+_offSum:"")
+      +" · "+_att.unique+" unique persons"
+      +(_parts.length?" · "+_parts.join(" · "):"");
   }
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
   const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
@@ -4475,6 +4503,7 @@ function exportMasterAuditExcel(){
       {Item:'Report Generated',Value:new Date().toLocaleString()},
       {Item:'Total Employees',Value:DB.employees.length},
       {Item:'Training Attended Persons',Value:getAttendedPersonsForTrainings(getDashboardTrainings()).length},
+      {Item:'Total Training Attendances',Value:getTotalAttendancesForTrainings(getDashboardTrainings()).total},
       {Item:'Total Trainings',Value:DB.trainings.length},
       {Item:'Total Test Results',Value:DB.testResults.length},
       {Item:'Total Certificates',Value:getOfficialTrainingCertificates().length},
