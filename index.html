@@ -2874,6 +2874,36 @@ function getDuplicateEmployeeRecords(){
   });
   return dups;
 }
+// 4) FULL GAP REPORT — why "Training Attended" can be lower than "Total Employees" even when
+//    EVERY employee was assigned. The dashboard sub label shows the non-zero reasons directly
+//    on the card, so a "26 records → 23 persons" gap never needs debugging:
+//      dupRows   — extra rows with the same ID+name as an earlier row (rosters count the person once)
+//      idless    — employee records without an ID (can never be assigned or rostered)
+//      unassigned— employees (with ID, not duplicates) that appear in NO training roster
+function getRosterGapReport(attendedPersons){
+  var emps=DB.employees||[];
+  var attSet={};
+  (attendedPersons||[]).forEach(function(e){attSet[normPersonField(e.id)+'|'+normPersonField(e.name)]=1;});
+  var dupRows=0,idless=0,unassigned=0,seenKeys={};
+  emps.forEach(function(e){
+    if(!e)return;
+    if(!e.id){idless++;return;}
+    var k=normPersonField(e.id)+'|'+normPersonField(e.name);
+    if(seenKeys[k]){dupRows++;return;}
+    seenKeys[k]=1;
+    if(!attSet[k])unassigned++;
+  });
+  return {total:emps.length,dupRows:dupRows,idless:idless,unassigned:unassigned};
+}
+// Jump to the Employees page pre-filtered on the first duplicated ID so the extra row can be
+// fixed (give it a distinct ID/name) or deleted — the direct remedy for "attended < total".
+function reviewDuplicateEmployees(){
+  var dups=getDuplicateEmployeeRecords();
+  if(!dups.length){toast('No duplicate employee records found.','info');return;}
+  emp_search=dups[0].id;
+  gotoView('employees');
+  toast('Showing employees matching "'+emp_search+'" — give the extra same-ID+name row a distinct ID/name or delete it so every person counts once.','info',6000);
+}
 // Every schedulable training on the dashboard — normal AND Round 2 (shown with its own name).
 function getDashboardTrainings(){
   return (DB.trainings||[]).filter(function(t){return t&&t.name&&t.id&&t.name!=='undefined';});
@@ -2977,15 +3007,34 @@ function renderDashboard(){
     var _offCount=getDashboardTrainingEmployees(selectedTraining).filter(function(e){return (selectedTraining.offlineTrained||[]).indexOf(e.id)>=0;}).length;
     attendedSub="Passed "+completed+" · Failed "+failed+" · Pending "+pending+(_offCount>0?" · Offline "+_offCount:"");
   }else{
-    // WHY not "Total Employees"? Only persons assigned to (or tested in) at least one training
-    // count here. Say explicitly how many employees are in NO training instead of a bare 24.
-    var _attSet={};
-    getAttendedPersonsForTrainings(officialTrainings).forEach(function(e){_attSet[normPersonField(e.id)+'|'+normPersonField(e.name)]=1;});
-    var _unassigned=(DB.employees||[]).filter(function(e){return !_attSet[normPersonField(e.id)+'|'+normPersonField(e.name)];}).length;
-    attendedSub="All trainings · unique persons"+(_unassigned>0?" · "+_unassigned+" in no training":"");
+    // WHY not "Total Employees"? The card counts unique PERSONS involved in any training.
+    // If employee rows > attended persons, say exactly why ON the card: duplicate rows merged,
+    // rows without an ID (can never be assigned), employees in no training.
+    var _gap=getRosterGapReport(getAttendedPersonsForTrainings(officialTrainings));
+    var _parts=[];
+    if(_gap.dupRows>0)_parts.push(_gap.dupRows+" duplicate row"+(_gap.dupRows>1?"s":"")+" merged");
+    if(_gap.idless>0)_parts.push(_gap.idless+" without ID");
+    if(_gap.unassigned>0)_parts.push(_gap.unassigned+" in no training");
+    attendedSub="All trainings · unique persons"+(_parts.length?" · "+_parts.join(" · "):"");
   }
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
   const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
+  // DATA HEALTH strip: when employee rows > unique persons, show the reasons + one-click review
+  // directly on the dashboard (duplicate rows merged / rows without ID). This is THE answer to
+  // "I assigned everyone — why does Training Attended show fewer?"
+  var _dupEmps=getDuplicateEmployeeRecords();
+  var _gapAll=getRosterGapReport(getAttendedPersonsForTrainings(officialTrainings));
+  var _dataHealth='';
+  if(_dupEmps.length||_gapAll.idless){
+    _dataHealth='<div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.35);border-radius:var(--r);padding:10px 14px;margin-bottom:18px;font-size:12.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+      +'<span class="mat-ico" style="color:var(--amber);font-size:20px;">warning</span>'
+      +'<div style="flex:1;min-width:260px;"><b>Data check:</b> '
+      +(_dupEmps.length?_dupEmps.length+' duplicate employee row'+(_dupEmps.length>1?'s':'')+' (same ID + name — e.g. '+_escDrill(_dupEmps.slice(0,3).map(function(e){return e.id;}).join(', '))+') '+( _dupEmps.length>1?'are':'is')+' counted as ONE person. ':'')
+      +(_gapAll.idless?_gapAll.idless+' employee row'+(_gapAll.idless>1?'s have':' has')+' no ID and can never be assigned or counted. ':'')
+      +'Give each row a distinct ID + name (or delete the extra row) so Training Attended equals your real headcount.</div>'
+      +(_dupEmps.length?'<button class="btn btn-sm btn-amber" onclick="reviewDuplicateEmployees()"><span class="mat-ico" style="font-size:12px;">person_search</span> Review duplicates</button>':'')
+      +'</div>';
+  }
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
@@ -2998,6 +3047,7 @@ function renderDashboard(){
       </select>
       <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name+(selectedTraining._isR2Training?' (Round 2)':''):'Showing all trainings (incl. Round 2)'}</span>
     </div>
+    ${_dataHealth}
     <div class="stat-grid" style="margin-bottom:18px;">
       ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",attendedSub)}
       ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments")}
@@ -5049,13 +5099,16 @@ function openTrainingDetail(id){
   // (same id+name entered twice) are counted once — both used to silently skew the counts.
   var _ghostIds=getGhostEnrolledIds(t);
   var _dupEmps=getDuplicateEmployeeRecords();
+  var _idlessRows=(DB.employees||[]).filter(function(e){return e&&!e.id;}).length;
   var _auditWarn='';
-  if(_ghostIds.length||_dupEmps.length){
+  if(_ghostIds.length||_dupEmps.length||_idlessRows){
     _auditWarn='<div style="background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.35);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:10px;font-size:12px;">'
       +'<b style="color:var(--amber);">⚠ Data check:</b> '
       +(_ghostIds.length?_ghostIds.length+' assigned ID'+(_ghostIds.length>1?'s':'')+' match no employee ('+_escDrill(_ghostIds.slice(0,6).join(', '))+(_ghostIds.length>6?'…':'')+') — they can never appear in any roster or count. <button class="btn btn-sm btn-amber" style="padding:2px 10px;font-size:11px;" onclick="purgeGhostEnrollment(\''+t.id+'\')"><span class="mat-ico" style="font-size:11px;">cleaning_services</span> Clean up</button>':'')
-      +(_ghostIds.length&&_dupEmps.length?' · ':'')
-      +(_dupEmps.length?_dupEmps.length+' duplicate employee record'+(_dupEmps.length>1?'s':'')+' (same ID + name) '+(_dupEmps.length>1?'are':'is')+' counted once in rosters — check the Employees page.':'')
+      +(_ghostIds.length&&(_dupEmps.length||_idlessRows)?' · ':'')
+      +(_dupEmps.length?_dupEmps.length+' duplicate employee record'+(_dupEmps.length>1?'s':'')+' (same ID + name) '+(_dupEmps.length>1?'are':'is')+' counted once in rosters. <button class="btn btn-sm btn-amber" style="padding:2px 10px;font-size:11px;" onclick="reviewDuplicateEmployees()"><span class="mat-ico" style="font-size:11px;">person_search</span> Review</button>':'')
+      +(_dupEmps.length&&_idlessRows?' · ':'')
+      +(_idlessRows?_idlessRows+' employee row'+(_idlessRows>1?'s have':' has')+' no ID (can never be assigned).':'')
       +'</div>';
   }
   openModal(`
