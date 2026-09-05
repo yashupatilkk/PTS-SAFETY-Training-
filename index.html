@@ -6957,91 +6957,19 @@ function handleSubmitTestClick(){var allAnswered=quizState.answers.every(functio
 function showFeedbackForm(){if(!quizState.active)return;var overlay=document.getElementById('feedbackOverlay');if(overlay){overlay.style.display='flex';return;}
 var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===quizState.training;});
 var today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
-var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:60px;height:60px;" />';
-var managerHtml='<select id="fb_manager_select" style="padding:2px 4px;border:1px solid #999;font-size:10pt;font-family:Calibri,Arial,sans-serif;max-width:120px;" onchange="var v=this.value;if(v===\'__custom__\'){document.getElementById(\'fb_manager\').value=\'\';document.getElementById(\'fb_manager\').style.display=\'inline-block\';document.getElementById(\'fb_manager\').focus();}else{document.getElementById(\'fb_manager\').value=v;document.getElementById(\'fb_manager\').style.display=v?\'none\':\'inline-block\';}"><option value="">-- Select --</option>'+(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(trnMatch?trnMatch.manager||DB.settings.defaultManager:'')?' selected':'')+'>'+m+'</option>';}).join('')+'<option value="__custom__">+ Custom...</option></select><input id="fb_manager" value="'+(trnMatch?trnMatch.manager||DB.settings.defaultManager||'':'')+ '" placeholder="Type name" style="display:'+(trnMatch&&trnMatch.manager?'none':'inline-block')+';margin-left:4px;padding:2px 4px;border:none;border-bottom:1px solid #000;background:transparent;font-size:10pt;width:90px;font-family:Calibri,Arial,sans-serif;">';
-var likertRows='';for(var qi=0;qi<FB_QUESTIONS.length;qi++){var q=FB_QUESTIONS[qi];likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(qi+1)+'. '+q+'</td>';for(var si=0;si<5;si++){var sv=si+1;likertRows+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbRating('+qi+','+sv+')"><span class="fb_likert_'+qi+'" data-val="'+sv+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}likertRows+='</tr>';}
-var overallCircles='';for(var oi=0;oi<5;oi++){var ov=oi+1;overallCircles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbOverall('+ov+')"><span class="fb_overall_btn" data-val="'+ov+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}
-var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:10px;overflow-y:auto;';
-div.innerHTML=`
-<div style="background:#fff;border:2px solid #000;width:100%;max-width:850px;font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;">
-<!-- HEADER TABLE: 3 cols ~17% | 53% | 30% -->
-<table style="width:100%;border-collapse:collapse;">
-<tr>
-  <td style="border:1px solid #000;width:17%;padding:6px;vertical-align:middle;text-align:center;" rowspan="4">${logoImg}</td>
-  <td style="border:1px solid #000;padding:4px 10px;vertical-align:middle;text-align:center;font-weight:bold;font-size:12px;letter-spacing:0.3px;">Prestige Office Management Private Limited</td>
-  <td style="border:1px solid #000;width:30%;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>
-</tr>
-<tr>
-  <td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1px;color:#333;font-weight:bold;">Integrated Management System</td>
-  <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Issued Date:<br/><b>01/06/2024</b></td>
-</tr>
-<tr>
-  <td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:11pt;text-decoration:underline;font-weight:bold;">Training Feedback Form</td>
-  <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Rev.<b>02</b></td>
-</tr>
-<tr>
-  <td style="border:1px solid #000;"></td>
-  <td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>
-</tr>
-</table>
-<!-- EMPLOYEE INFORMATION: flat 3-col table matching docx -->
-<table style="width:100%;border-collapse:collapse;">
-<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>
-<tr>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;width:36%;">Name: <b>${currentUser.name||'\u2014'}</b></td>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;width:28%;">Employee ID: <b>${currentUser.id||'\u2014'}</b></td>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;width:36%;">Department: <b>${currentUser.dept||'\u2014'}</b></td>
-</tr>
-<tr>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Job Title: <b>${currentUser.desig||'\u2014'}</b></td>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Date: <b>${today}</b></td>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Manager: <span style="font-weight:normal;font-size:10pt;">${managerHtml}</span></td>
-</tr>
-<tr>
-  <td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Training Course: <b>${quizState.training}</b></td>
-  <td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Trainer: <b>${trnMatch?trnMatch.trainer||'Not assigned':'Not assigned'}</b></td>
-</tr>
-</table>
-<!-- INSTRUCTION -->
-<div style="padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;">Please indicate your impressions of the items listed below.</div>
-<!-- LIKERT TABLE -->
-<table style="width:100%;border-collapse:collapse;">
-<tr>
-  <td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Agree</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Agree</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>
-</tr>
-${likertRows}
-</table>
-<!-- OVERALL RATING -->
-<div style="padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;">How do you rate the training overall?</div>
-<table style="width:100%;border-collapse:collapse;">
-<tr>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>
-  <td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>
-</tr>
-<tr><td style="border:1px solid #000;"></td>${overallCircles}</tr>
-</table>
-<!-- OPEN QUESTIONS -->
-<table style="width:100%;border-collapse:collapse;margin-top:6px;">
-<tr><td colspan="2" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>
-<tr><td colspan="2" style="border:1px solid #000;padding:0;"><textarea id="fb_enjoy" rows="6" placeholder="Share what you liked..." style="width:100%;padding:6px 8px;border:none;background:#fff;color:#000;font-size:10pt;resize:vertical;font-family:Calibri,Arial,sans-serif;outline:none;"></textarea></td></tr>
-</table>
-<!-- REFERENCE FORM ENDS WITH THE LARGE COMMENT AREA -->
-<!-- FOOTER -->
-<div style="padding:4px 8px;font-size:8pt;color:#888;text-align:left;">Page 1 of 1</div>
-<!-- SUBMIT BUTTON -->
-<div style="padding:8px 10px 12px;text-align:center;border-top:1px solid #eee;">
-  <button onclick="submitFeedbackAndQuiz()" style="padding:10px 28px;background:#1a73e8;color:#fff;border:none;border-radius:4px;font-size:12pt;font-weight:bold;cursor:pointer;font-family:Calibri,Arial,sans-serif;">Submit Feedback &amp; Complete Test</button>
-</div>
-</div>
-`;
+var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:64px;height:64px;object-fit:contain;" />';
+var managerHtml='<select id="fb_manager_select" style="border:0;background:#fff;font:10pt Arial;max-width:125px;" onchange="var v=this.value;var x=document.getElementById(\'fb_manager\');if(v===\'__custom__\'){x.value=\'\';x.style.display=\'inline-block\';x.focus();}else{x.value=v;x.style.display=v?\'none\':\'inline-block\';}"><option value="">Select</option>'+(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(trnMatch?trnMatch.manager||DB.settings.defaultManager:'')?' selected':'')+'>'+m+'</option>';}).join('')+'<option value="__custom__">Custom...</option></select><input id="fb_manager" value="'+(trnMatch?trnMatch.manager||DB.settings.defaultManager||'':'')+'" style="display:'+(trnMatch&&trnMatch.manager?'none':'inline-block')+';border:0;border-bottom:1px solid #555;width:90px;font:10pt Arial;background:#fff;">';
+var likertRows='';for(var qi=0;qi<FB_QUESTIONS.length;qi++){var q=FB_QUESTIONS[qi];likertRows+='<tr><td style="padding:7px 4px 7px 0;font-size:10pt;line-height:1.25;vertical-align:middle;">'+(qi+1)+'. '+q+'</td>';for(var si=0;si<5;si++){var sv=si+1;likertRows+='<td style="padding:7px 2px;text-align:center;vertical-align:middle;cursor:pointer;" onclick="setFbRating('+qi+','+sv+')"><span class="fb_likert_'+qi+'" data-val="'+sv+'" style="display:inline-block;width:11px;height:11px;border-radius:50%;border:1.2px solid #000;background:#fff;"></span></td>';}likertRows+='</tr>';} 
+var overallCircles='';for(var oi=0;oi<5;oi++){var ov=oi+1;overallCircles+='<td style="padding:3px 2px;text-align:center;cursor:pointer;" onclick="setFbOverall('+ov+')"><span class="fb_overall_btn" data-val="'+ov+'" style="display:inline-block;width:11px;height:11px;border-radius:50%;border:1.2px solid #000;background:#fff;"></span></td>';}
+var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:18px 10px;overflow-y:auto;';
+div.innerHTML='<div style="background:#fff;color:#000;width:100%;max-width:900px;border:1px solid #222;padding:26px 28px 16px;font-family:Arial,Helvetica,sans-serif;font-size:10pt;box-shadow:0 10px 40px rgba(0,0,0,.45);">'+
+'<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #000;"><tr><td rowspan="4" style="width:17%;border:1px solid #000;text-align:center;vertical-align:middle;padding:5px;">'+logoImg+'</td><td style="width:53%;border:1px solid #000;text-align:center;padding:6px 5px;font-size:12pt;font-weight:bold;">Prestige Office Management Private Limited<br/><span style="font-size:11pt;font-weight:normal;">Integrated Management System</span><br/><span style="font-size:11pt;font-weight:normal;text-decoration:underline;">Training Feedback Form</span></td><td style="width:30%;border:1px solid #000;padding:4px 7px;font-size:9pt;vertical-align:top;">Document Number: IMSP 29 F05</td></tr><tr><td style="border:0;"></td><td style="border:1px solid #000;padding:4px 7px;font-size:9pt;">Issued Date: 01/06/2024</td></tr><tr><td style="border:0;"></td><td style="border:1px solid #000;padding:4px 7px;font-size:9pt;">Rev.02</td></tr><tr><td style="border:0;"></td><td style="border:1px solid #000;padding:4px 7px;font-size:9pt;">Revision Date: 01/08/2025</td></tr></table>'+
+'<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:38px;border:1px solid #000;"><tr><td colspan="3" style="border:1px solid #000;background:#b5c6e7;padding:9px 8px;font-weight:bold;font-size:10pt;">EMPLOYEE INFORMATION</td></tr><tr><td style="width:40%;border:1px solid #000;padding:11px 8px;">Name: '+(currentUser.name||'—')+'</td><td style="width:30%;border:1px solid #000;padding:11px 8px;">Employee ID: '+(currentUser.id||'—')+'</td><td style="width:30%;border:1px solid #000;padding:11px 8px;">Department: '+(currentUser.dept||'—')+'</td></tr><tr><td style="border:1px solid #000;padding:11px 8px;">Job Title: '+(currentUser.desig||'—')+'</td><td style="border:1px solid #000;padding:11px 8px;">Date: '+today+'</td><td style="border:1px solid #000;padding:11px 8px;">Manager: '+managerHtml+'</td></tr><tr><td colspan="2" style="border:1px solid #000;padding:11px 8px;">Training Course: '+quizState.training+'</td><td style="border:1px solid #000;padding:11px 8px;">Trainer: '+(trnMatch?trnMatch.trainer||'Not assigned':'Not assigned')+'</td></tr></table>'+
+'<div style="border-top:10px solid #cbd8e8;margin-top:0;padding:7px 20px 5px;font-size:10pt;">Please indicate your impressions of the items listed below.</div>'+
+'<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr><td style="width:52%;"></td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Strongly<br/>Agree</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Agree</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Neutral</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Disagree</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Strongly<br/>Disagree</td></tr>'+likertRows+'</table>'+
+'<div style="padding:9px 0 4px;font-size:10pt;">How do you rate the training overall?</div><table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr><td style="width:20%;font-size:9pt;">Excellent</td><td style="width:20%;font-size:9pt;">Good</td><td style="width:20%;font-size:9pt;">Average</td><td style="width:20%;font-size:9pt;">Poor</td><td style="width:20%;font-size:9pt;">Very poor</td></tr><tr>'+overallCircles+'</tr></table>'+
+'<div style="margin-top:14px;border:1px solid #bbb;"><div style="padding:8px;font-size:10pt;">What did you enjoy most about the training?</div><textarea id="fb_enjoy" rows="5" placeholder="Share your feedback..." style="display:block;width:100%;height:110px;padding:8px;border:0;border-top:1px solid #bbb;background:#fff;color:#000;font:10pt Arial;resize:vertical;outline:none;"></textarea></div>'+
+'<div style="font-size:8pt;color:#777;margin-top:24px;">Page 1 of 1</div><div style="text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid #eee;"><button onclick="submitFeedbackAndQuiz()" style="padding:11px 30px;background:#1a73e8;color:#fff;border:0;border-radius:4px;font-size:12pt;font-weight:bold;cursor:pointer;">Submit Feedback &amp; Complete Test</button></div></div>';
 document.body.appendChild(div);}
 let _fbRatings={};
 let _fbOverall=0;
@@ -7209,6 +7137,7 @@ if(firebaseReady){(async function(){try{if(!isAdmin)await authAsAdmin();fbDB.col
 setTimeout(function(){uploadFeedbackPDFToDrive(fb);},500);
 // Push feedback to Google Sheet via the debounced queueSheetSync system
 queueSheetSync(["Feedback"]);
+console.log('[Feedback] Employee feedback queued for Google Sheet sync:',fb.empId,fb.training);
 submitQuiz();
 }
 
@@ -9257,7 +9186,10 @@ let _sheetSyncRunning=false;
 
 // Queue a sheet sync — call this after ANY data change (debounced automatically)
 function queueSheetSync(sheetNames){
-  if(!isAdmin) return; // Only admin can sync
+  // Employees are allowed to sync ONLY their submitted Feedback row. Full exports
+  // remain admin-only so an employee cannot trigger Employees/Certificates/etc.
+  var feedbackOnly=Array.isArray(sheetNames)&&sheetNames.length===1&&sheetNames[0]==='Feedback';
+  if(!isAdmin&&!feedbackOnly) return;
   if(DB.settings.sheetAutoSync===false) return; // Auto-sync OFF (default is ON)
   var url=DB.settings.sheetUrl||"";
   if(!url) return;
