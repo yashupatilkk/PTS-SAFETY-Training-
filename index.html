@@ -1727,11 +1727,23 @@ async function testFirebaseConnection(){
   el.innerHTML='<span style="color:var(--amber);">Testing Firebase connection (deep diagnostic)...</span>';
   const results=[];
   var restToken=null;
+  // Every diagnostic request must settle. A blocked REST/Firebase request used to leave
+  // the panel stuck forever on the loading message with no actionable error.
+  const withTimeout=async function(work,label,ms){
+    const timeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error(label+' timed out after '+Math.round(ms/1000)+'s'));},ms);});
+    return Promise.race([work(),timeout]);
+  };
+  const renderProgress=function(){
+    el.innerHTML=results.map(function(r){return '<div style="margin:2px 0;font-size:11px;">'+r+'</div>';}).join('')+
+      '<div style="margin-top:8px;font-size:11px;color:var(--muted);">Running diagnostic checks…</div>';
+  };
+  const addResult=function(html){results.push(html);renderProgress();};
+  try{
 
   // Test 0: Auth status and token check
   try{
     if(fbAuth.currentUser){
-      restToken=await fbAuth.currentUser.getIdToken(true);
+      restToken=await withTimeout(function(){return fbAuth.currentUser.getIdToken(true);},'Firebase auth token refresh',10000);
       results.push('<span style="color:var(--green);">Auth: Signed in as '+fbAuth.currentUser.email+'</span>');
       results.push('<span style="color:var(--muted);">Token (first 30 chars): '+restToken.substring(0,30)+'...</span>');
       // Decode JWT to check project claim and issued-at
@@ -1759,7 +1771,7 @@ async function testFirebaseConnection(){
   // Test 0b: Check if Firestore API is even enabled (unauthenticated — should return 401 or specific error, NOT 403)
   try{
     var apiCheckUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases';
-    var apiCheckResp=await fetch(apiCheckUrl);
+    var apiCheckResp=await withTimeout(function(){return fetch(apiCheckUrl);},'Firestore API check',10000);
     var apiCheckText=await apiCheckResp.text();
     if(apiCheckResp.status===401 || apiCheckResp.status===403){
       // 401 = API exists but needs auth (GOOD — means API is enabled)
@@ -1781,7 +1793,7 @@ async function testFirebaseConnection(){
   // Test 0c: REST call WITHOUT auth token — if this also returns 403 (not 401), rules are blocking unauth
   try{
     var noAuthUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config/_apiTest';
-    var noAuthResp=await fetch(noAuthUrl);
+    var noAuthResp=await withTimeout(function(){return fetch(noAuthUrl);},'Unauthenticated Firestore check',10000);
     var noAuthText=await noAuthResp.text();
     if(noAuthResp.status===401){
       results.push('<span style="color:var(--green);">No-auth test: Returns 401 (API alive, needs auth) ✓</span>');
@@ -1796,14 +1808,14 @@ async function testFirebaseConnection(){
 
   // Test 1: Read from employees
   try{
-    const snap=await fbDB.collection('employees').get();
+    const snap=await withTimeout(function(){return fbDB.collection('employees').get();},'Firestore employees read',10000);
     results.push('<span style="color:var(--green);">READ employees: OK ('+snap.size+' docs)</span>');
   }catch(e){
     results.push('<span style="color:var(--red);">READ employees: FAILED — '+e.message+'</span>');
   }
   // Test 2: Write a test doc
   try{
-    await fbDB.collection('config').doc('_connectionTest').set({testAt:Date.now(),testBy:'admin'});
+    await withTimeout(function(){return fbDB.collection('config').doc('_connectionTest').set({testAt:Date.now(),testBy:'admin'});},'Firestore config write',10000);
     results.push('<span style="color:var(--green);">WRITE test doc: OK</span>');
     // Clean up
     try{await fbDB.collection('config').doc('_connectionTest').delete();}catch(e){}
@@ -1812,10 +1824,10 @@ async function testFirebaseConnection(){
   }
   // Test 3: Direct REST API test (bypasses SDK) — READ
   try{
-    if(!restToken && fbAuth.currentUser) restToken=await fbAuth.currentUser.getIdToken(true);
+    if(!restToken && fbAuth.currentUser) restToken=await withTimeout(function(){return fbAuth.currentUser.getIdToken(true);},'Firebase auth token refresh',10000);
     // REST READ test
     var readUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/employees';
-    var readResp=await fetch(readUrl,{headers:{'Authorization':'Bearer '+restToken}});
+    var readResp=await withTimeout(function(){return fetch(readUrl,{headers:{'Authorization':'Bearer '+restToken}});},'Firestore REST read',10000);
     if(readResp.ok){
       var readData=await readResp.json();
       results.push('<span style="color:var(--green);">REST API READ: OK ('+(readData.documents?readData.documents.length:0)+' docs)</span>');
@@ -1825,11 +1837,11 @@ async function testFirebaseConnection(){
     }
     // REST WRITE test (auto-generated doc ID)
     var writeUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config?documentId=_restTest';
-    var writeResp=await fetch(writeUrl,{
+    var writeResp=await withTimeout(function(){return fetch(writeUrl,{
       method:'POST',
       headers:{'Authorization':'Bearer '+restToken,'Content-Type':'application/json'},
       body:JSON.stringify({fields:{t:{stringValue:'rest test '+Date.now()}}})
-    });
+    });},'Firestore REST write',10000);
     if(writeResp.ok){
       results.push('<span style="color:var(--green);">REST API WRITE: OK (status '+writeResp.status+')</span>');
       // Clean up
@@ -1846,7 +1858,7 @@ async function testFirebaseConnection(){
     const batch=fbDB.batch();
     const ref=fbDB.collection('employees').doc('__test__'+Date.now());
     batch.set(ref,{id:'__test__',name:'Connection Test',_test:true},{merge:true});
-    await batch.commit();
+    await withTimeout(function(){return batch.commit();},'Firestore employees write',10000);
     results.push('<span style="color:var(--green);">WRITE employees: OK</span>');
     // Clean up
     try{await fbDB.collection('employees').doc(ref.id).delete();}catch(e){}
@@ -1878,6 +1890,11 @@ async function testFirebaseConnection(){
   }
   results.push('</div>');
   el.innerHTML=results.map(function(r){return '<div style="margin:2px 0;font-size:11px;">'+r+'</div>';}).join('');
+  }catch(unexpected){
+    // Never strand the settings panel in a loading state if a future check throws.
+    results.push('<span style="color:var(--red);">Diagnostic stopped unexpectedly: '+String(unexpected.message||unexpected)+'</span>');
+    el.innerHTML=results.map(function(r){return '<div style="margin:2px 0;font-size:11px;">'+r+'</div>';}).join('');
+  }
 }
 
 async function forceSyncFromCloud(){
@@ -6670,6 +6687,27 @@ function downloadPracticeCertificate(num){
   doc.setTextColor(125,133,144);doc.setFontSize(9);doc.text('For learning and revision purposes only. Not an official competency certificate.',148,176,{align:'center'});doc.text('Reference: '+c.num+'   Date: '+c.issued,148,187,{align:'center'});
   doc.save(c.num+'.pdf');
 }
+function queuePendingOfficialResult(result){
+  try{
+    var pending=JSON.parse(localStorage.getItem('pts_pending_test_results')||'[]');
+    pending=pending.filter(function(x){return x&&x.id!==result.id;});pending.push(result);
+    localStorage.setItem('pts_pending_test_results',JSON.stringify(pending));
+  }catch(e){console.warn('Could not queue pending test result:',e);}
+}
+async function retryPendingOfficialResults(){
+  if(!firebaseReady)return;
+  var pending=[];try{pending=JSON.parse(localStorage.getItem('pts_pending_test_results')||'[]');}catch(e){return;}
+  if(!pending.length)return;
+  try{if(!isAdmin){if(!await authAsAdmin())return;}}catch(e){return;}
+  var remaining=[];
+  for(var i=0;i<pending.length;i++){
+    try{await fbDB.collection('testResults').doc(String(pending[i].id)).set(sanitizeForFirestore(pending[i]),{merge:true});}
+    catch(e){remaining.push(pending[i]);}
+  }
+  localStorage.setItem('pts_pending_test_results',JSON.stringify(remaining));
+  if(pending.length!==remaining.length){toast((pending.length-remaining.length)+' pending employee result(s) synced to cloud','success',5000);}
+}
+
 function submitQuiz(){
   if(window._quizSubmitting){toast('Please wait, result is being saved','error');return;}
   window._quizSubmitting=true;
@@ -6724,19 +6762,28 @@ function submitQuiz(){
   if(firebaseReady){
     (async function(){
       try{
-        // Auth as admin before writing — employees don't have write permission
-        if(!isAdmin)try{await authAsAdmin();}catch(e){}
-        const r=DB.testResults[DB.testResults.length-1];
-        if(r) await fbDB.collection('testResults').doc(String(r.id)).set(sanitizeForFirestore(r),{merge:true});
+        // Employee accounts are read-only in Firestore. Always switch to the admin
+        // account and save the exact result created by this submission (not array tail).
+        if(!isAdmin){
+          var adminAuthOk=await authAsAdmin();
+          if(!adminAuthOk)throw new Error('Admin Firebase authentication failed; result kept locally and queued for retry');
+        }
+        const r=DB.testResults.find(function(x){return x&&x.id===result.id;})||result;
+        await fbDB.collection('testResults').doc(String(r.id)).set(sanitizeForFirestore(r),{merge:true});
         if(certNum){
           // FIX: look up the certificate by employee+training (not array tail) — issuance may have updated an existing cert
           const c=DB.certificates.find(cc=>cc.empId===r.empId&&cc.training===r.training);
           if(c) await fbDB.collection('certificates').doc(String(c.num)).set(sanitizeForFirestore(c),{merge:true});
         }
         console.log('Quiz result saved to Firebase immediately');
+        try{var queued=JSON.parse(localStorage.getItem('pts_pending_test_results')||'[]');localStorage.setItem('pts_pending_test_results',JSON.stringify(queued.filter(function(x){return x&&x.id!==r.id;})));}catch(qe){}
         // Re-auth as admin for subsequent operations (employee may have been signed in)
         if(!isAdmin)try{await authAsAdmin();}catch(e){}
-      }catch(e){console.warn('Firebase quiz save error:',e);}
+      }catch(e){
+        console.error('Firebase quiz save error:',e);
+        queuePendingOfficialResult(result);
+        toast('Test completed locally, but cloud sync failed. It is queued for retry: '+(e.message||e),'error',8000);
+      }
       finally{window._quizSubmitting=false;}
     })();
   }
@@ -7012,64 +7059,32 @@ var ratings=fb.ratings||{};
 var companyName='Prestige Office Management Private Limited';
 var fmtDate='';
 if(fb.date){var dp=fb.date.split('-');if(dp.length===3)fmtDate=dp[2]+'/'+dp[1]+'/'+dp[0];else fmtDate=fb.date;}
-var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:65px;height:65px;" />';
+var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:68px;height:68px;object-fit:contain;" />';
 var likertRows='';
-FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?r.score:0;
-var circles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
-likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'</tr>';});
+FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?r.score:0;var circles='';
+for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:0;padding:7px 2px;text-align:center;width:12%;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1.2px solid #000;background:'+(filled?'#000':'#fff')+';"></span></td>';}
+likertRows+='<tr><td style="border:0;padding:6px 8px 6px 0;font-size:10pt;line-height:1.25;vertical-align:middle;width:52%;">'+(i+1)+'. '+q+'</td>'+circles+'</tr>';});
 var overallCircles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===fb.overallRating;overallCircles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
-var html='<!DOCTYPE html><html><head><meta charset="UTF-8">';
-html+='<style>@page{size:A4;margin:6mm 8mm;}body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}</style>';
-html+='</head><body>';
-html+='<table style="border:2px solid #000;width:100%;">';
-html+='<tr>';
-html+='<td style="border:1px solid #000;width:17%;padding:4px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;vertical-align:middle;text-align:center;font-weight:bold;font-size:13px;letter-spacing:0.5px;">'+companyName+'</td>';
-html+='<td style="border:1px solid #000;width:30%;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px 8px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1.5px;color:#333;font-weight:bold;">Integrated Management System</td>';
-html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Issued Date:<br/><b>01/06/2024</b></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px 8px;vertical-align:middle;text-align:center;font-size:11pt;text-decoration:underline;font-weight:bold;">Training Feedback Form</td>';
-html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Rev.<b>02</b></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;"></td>';
-html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>';
-html+='</tr>';
-html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:left;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Name: <b>'+(fb.empName||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Employee ID: <b>'+(fb.empId||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Department: <b>'+(fb.dept||'')+'</b></td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Job Title: <b>'+(fb.desig||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Date: <b>'+fmtDate+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Manager: <b>'+(fb.manager||'')+'</b></td></tr>';
-html+='<tr><td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Training Course: <b>'+(fb.training||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Trainer: <b>'+(fb.trainer||'')+'</b></td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Agree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Agree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>';
-html+='</tr>';
-html+=likertRows;
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>How do you rate the training overall?</b></td></tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>';
-html+='</tr>';
-html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'</tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:170px;">'+(fb.enjoy||'')+'</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;border-top:1px solid #ccc;padding:4px 6px;font-size:7pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
-html+='</table>';
-html+='</body></html>';
-return html;}
+for(var c=0;c<5;c++){var v=c+1;var filled=v===fb.overallRating;overallCircles+='<td style="border:0;text-align:center;padding:2px 2px;width:12%;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1.2px solid #000;background:'+(filled?'#000':'#fff')+';"></span></td>';}
+var enjoy=String(fb.enjoy||'').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br/>');
+var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+
+'@page{size:A4;margin:8mm 10mm;}*{box-sizing:border-box;}body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}td{font-weight:normal;}' +
+'</style></head><body>';
+html+='<div style="border:1px solid #000;padding:20px 20px 10px;min-height:275mm;">';
+html+='<table style="border:1px solid #000;table-layout:fixed;">';
+html+='<tr><td rowspan="4" style="border:1px solid #000;width:17%;height:30px;padding:4px;text-align:center;vertical-align:middle;">'+logoImg+'</td><td style="border:1px solid #000;width:53%;padding:5px 8px;text-align:center;font-weight:bold;font-size:11pt;vertical-align:middle;">'+companyName+'<br/><span style="font-size:10.5pt;font-weight:normal;">Integrated Management System</span><br/><span style="font-size:10.5pt;font-weight:normal;">Training Feedback Form</span></td><td style="border:1px solid #000;width:30%;padding:3px 7px;font-size:8.5pt;line-height:1.35;vertical-align:top;">Document Number: IMSP 29 F05</td></tr>';
+html+='<tr><td style="border:0;padding:0;"></td><td style="border:1px solid #000;padding:3px 7px;font-size:8.5pt;line-height:1.35;vertical-align:top;">Issued Date: 01/06/2024</td></tr>';
+html+='<tr><td style="border:0;padding:0;"></td><td style="border:1px solid #000;padding:3px 7px;font-size:8.5pt;line-height:1.35;vertical-align:top;">Rev.02</td></tr>';
+html+='<tr><td style="border:0;padding:0;"></td><td style="border:1px solid #000;padding:3px 7px;font-size:8.5pt;line-height:1.35;vertical-align:top;">Revision Date: 01/08/2025</td></tr></table>';
+html+='<table style="margin-top:40px;border:1px solid #000;table-layout:fixed;"><tr><td colspan="3" style="border:1px solid #000;background:#b5c6e7;padding:7px 8px;font-weight:bold;font-size:10pt;">EMPLOYEE INFORMATION</td></tr>';
+html+='<tr><td style="border:1px solid #000;width:40%;padding:10px 8px;">Name: '+(fb.empName||'')+'</td><td style="border:1px solid #000;width:30%;padding:10px 8px;">Employee ID: '+(fb.empId||'')+'</td><td style="border:1px solid #000;width:30%;padding:10px 8px;">Department: '+(fb.dept||'')+'</td></tr>';
+html+='<tr><td style="border:1px solid #000;padding:10px 8px;">Job Title: '+(fb.desig||'')+'</td><td style="border:1px solid #000;padding:10px 8px;">Date: '+fmtDate+'</td><td style="border:1px solid #000;padding:10px 8px;">Manager: '+(fb.manager||'')+'</td></tr>';
+html+='<tr><td colspan="2" style="border:1px solid #000;padding:10px 8px;">Training Course: '+(fb.training||'')+'</td><td style="border:1px solid #000;padding:10px 8px;">Trainer: '+(fb.trainer||'')+'</td></tr></table>';
+html+='<div style="border-top:10px solid #cbd8e8;margin-top:0;padding:6px 20px 4px;font-size:10pt;">Please indicate your impressions of the items listed below.</div>';
+html+='<table style="table-layout:fixed;"><tr><td style="width:52%;"></td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Strongly<br/>Agree</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Agree</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Neutral</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Disagree</td><td style="width:12%;text-align:center;font-size:9pt;padding:3px 1px;">Strongly<br/>Disagree</td></tr>'+likertRows+'</table>';
+html+='<div style="padding:8px 0 3px;font-size:10pt;">How do you rate the training overall?</div><table style="table-layout:fixed;"><tr><td style="width:20%;font-size:9pt;">Excellent</td><td style="width:20%;font-size:9pt;">Good</td><td style="width:20%;font-size:9pt;">Average</td><td style="width:20%;font-size:9pt;">Poor</td><td style="width:20%;font-size:9pt;">Very poor</td></tr><tr><td style="text-align:left;padding-left:18px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1.2px solid #000;background:'+(fb.overallRating===1?'#000':'#fff')+';"></span></td>'+overallCircles+'</tr></table>';
+html+='<table style="margin-top:16px;border:1px solid #bbb;table-layout:fixed;"><tr><td style="border-bottom:1px solid #bbb;padding:8px;font-size:10pt;">What did you enjoy most about the training?</td></tr><tr><td style="height:95px;padding:8px;vertical-align:top;font-size:10pt;">'+enjoy+'</td></tr></table>';
+html+='<div style="font-size:8pt;color:#777;margin-top:80px;">Page 1 of 1</div></div></body></html>';return html;}
 // Track Drive connection status — set by testDriveConnection()
 var _driveConnected=false;
 var _driveTested=false;
@@ -9817,8 +9832,25 @@ function loadDBFromLocal(){
   }catch(e){console.warn("Local load failed:",e);return false;}
 }
 
+/* Normalize all official result records before admin reporting. Older/offline records may
+   have a numeric score but no boolean pass field, or may have a string value. */
+function normalizeOfficialTestResults(){
+  var changed=0;
+  (DB.testResults||[]).forEach(function(r){
+    if(!r||r.practice)return;
+    var trn=(DB.trainings||[]).find(function(t){return t&&t.name===r.training;});
+    var mark=Number(r.passing|| (trn&&trn.passing) || 70);
+    var derived=Number(r.score||0)>=mark;
+    if(r.pass!==derived){r.pass=derived;changed++;}
+    if(!r.empId&&r.employeeId){r.empId=r.employeeId;changed++;}
+    if(!r.date&&r.completedDate){r.date=r.completedDate;changed++;}
+  });
+  return changed;
+}
+
 /* Reconcile: rebuild every training's completed/completedDates from testResults (source of truth) */
 function reconcileTrainingsFromResults(){
+  normalizeOfficialTestResults();
   let updated=0;
   // Skip test results for deleted employees (their tombstones are still active)
   var tombEmpSet=_deletedIds.employees?.length?new Set(_deletedIds.employees):null;
@@ -9826,19 +9858,29 @@ function reconcileTrainingsFromResults(){
     if(!trn.completed)trn.completed=[];
     if(!trn.completedDates)trn.completedDates={};
     // Find ALL passing test results for this training (excluding tombstoned employees)
-    const passResults=DB.testResults.filter(r=>!r.practice).filter(r=>r.pass&&r.training===trn.name&&(!tombEmpSet||!tombEmpSet.has(r.empId)));
-    passResults.forEach(r=>{
-      if(!trn.completed.includes(r.empId)){
-        trn.completed.push(r.empId);
-        trn.completedDates[r.empId]=r.date;
+    const passResults=DB.testResults.filter(function(r){
+      if(!r||r.practice||r.training!==trn.name)return false;
+      if(tombEmpSet&&tombEmpSet.has(r.empId))return false;
+      // Legacy/imported results may not contain the boolean pass field.
+      return r.pass===true || Number(r.score||0)>=Number(r.passing||trn.passing||70);
+    });
+    passResults.forEach(function(r){
+      var eid=r.empId||r.employeeId||r.employeeID;
+      if(!eid)return;
+      if(!trn.completed.includes(eid)){
+        trn.completed.push(eid);
+        trn.completedDates[eid]=r.date||trn.completedDates[eid]||new Date().toISOString().split('T')[0];
         updated++;
+      }else if(!trn.completedDates[eid]&&r.date){
+        trn.completedDates[eid]=r.date;updated++;
       }
     });
-    // If an empId in completed has NO passing test result, remove it (was deleted/failed)
-    const validIds=new Set(passResults.map(r=>r.empId));
-    const beforeLen=trn.completed.length;
-    trn.completed=trn.completed.filter(eid=>validIds.has(eid));
-    if(trn.completed.length!==beforeLen)updated++;
+    // Keep explicit/admin-marked completions; only tombstoned employees are removed here.
+    if(tombEmpSet&&tombEmpSet.size){
+      var beforeLen=trn.completed.length;
+      trn.completed=trn.completed.filter(function(eid){return !tombEmpSet.has(eid);});
+      if(trn.completed.length!==beforeLen)updated++;
+    }
   });
   if(updated)console.log('Reconciled '+updated+' training completions from testResults');
   return updated;
@@ -9906,7 +9948,8 @@ async function loadDBFromFirestore(){
     // Load tombstones from cloud
     await loadTombstonesFromCloud();
     // Rebuild completed arrays from testResults (source of truth)
-    reconcileTrainingsFromResults();
+    normalizeOfficialTestResults();
+  reconcileTrainingsFromResults();
     // MIGRATION: Fix broken duration values after cloud load
     var df2=0;
     DB.trainings.forEach(function(t){if(!t.duration||t.duration==='--'||t.duration==='-'){t.duration='';df2++;}});
@@ -10060,6 +10103,7 @@ function loadDB(){
   }
 
   // Rebuild completed arrays from testResults (source of truth)
+  normalizeOfficialTestResults();
   reconcileTrainingsFromResults();
   // MIGRATION (Task 7): the certificate threshold default moved from 70% to 75% — every score
   // at or above 75% earns a certificate. Runs ONCE (flag); a value the admin sets afterwards
@@ -10376,6 +10420,7 @@ async function initApp(){
 }
 
 initApp();
+setTimeout(function(){retryPendingOfficialResults();},3000);
 document.getElementById("loginId").addEventListener("keydown",e=>{if(e.key==="Enter")document.getElementById("loginPw").focus();});
 document.getElementById("loginPw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
 </script>
