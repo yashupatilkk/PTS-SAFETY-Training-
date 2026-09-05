@@ -3176,15 +3176,15 @@ function renderDashboard(){
     </div>
     ${_dataHealth}
     <div class="stat-grid" style="margin-bottom:18px;">
-      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",attendedSub)}
-      ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments")}
-      ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2")}
-      ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count")}
-      ${statCard("pending","Pending",pending,"#f0883e","Awaiting training")}
-      ${statCard("cancel","Tests Failed",failed,"#e8483a","Official training fail count")}
-      ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library")}
-      ${statCard("workspace_premium","Certificates",certCount,"#c084fc",certSub)}
-      ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%")}
+      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",attendedSub,"openAttendedDrill()","See every attendance behind this number")}
+      ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments","openEmployeesDrill()","See the people behind this number")}
+      ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2","openTrainingsDrill()","See every training with its numbers")}
+      ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count","openPassFailDrill(0)","See everyone who passed")}
+      ${statCard("pending","Pending",pending,"#f0883e","Awaiting training","openPendingDrill()","See everyone still pending")}
+      ${statCard("cancel","Tests Failed",failed,"#e8483a","Official training fail count","openPassFailDrill(1)","See everyone who failed")}
+      ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library","openEquipmentDrill()","See the full equipment library")}
+      ${statCard("workspace_premium","Certificates",certCount,"#c084fc",certSub,"openCertsDrill()","See the issued certificates")}
+      ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%","openAvgScoreDrill()","See every score behind the average")}
     </div>
     <div class="quick-actions" style="margin-bottom:18px;">
       <div class="quick-action" onclick="openAddEmpModal()">
@@ -3290,12 +3290,12 @@ function renderEmpDashboard(){
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"").split(" ")[0]}</span></h2>
     <p style="color:var(--muted);font-size:13px;">Your Personal Training Dashboard — ${new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p></div>
     <div class="stat-grid" style="margin-bottom:18px;">
-      ${statCard("school","My Trainings",myTrns.length,"#8b6de8","Enrolled")}
-      ${statCard("pending","Pending",myPending,"#f0883e","Awaiting completion")}
-      ${statCard("check_circle","Tests Passed",myPassed,"#3ecf8e","Pass count")}
-      ${statCard("cancel","Tests Failed",myFailed,"#e8483a","Retraining req.")}
-      ${statCard("workspace_premium","Certificates",myCerts,"#c084fc","Earned")}
-      ${statCard("percent","Avg Score",myAvg+"%","#3ecf8e","Your average")}
+      ${statCard("school","My Trainings",myTrns.length,"#8b6de8","Enrolled","gotoView('trainings')","Open my trainings")}
+      ${statCard("pending","Pending",myPending,"#f0883e","Awaiting completion","gotoView('trainings')","Open my trainings")}
+      ${statCard("check_circle","Tests Passed",myPassed,"#3ecf8e","Pass count","gotoView('certificates')","View my certificates")}
+      ${statCard("cancel","Tests Failed",myFailed,"#e8483a","Retraining req.","gotoView('trainings')","Open my trainings to retake")}
+      ${statCard("workspace_premium","Certificates",myCerts,"#c084fc","Earned","gotoView('certificates')","View my certificates")}
+      ${statCard("percent","Avg Score",myAvg+"%","#3ecf8e","Your average","gotoView('quiz')","Go to online tests")}
     </div>
     <div class="quick-actions" style="margin-bottom:18px;">
       <div class="quick-action" onclick="gotoView('trainings')">
@@ -3360,12 +3360,16 @@ function renderEmpDashboard(){
   });
 }
 function getGreeting(){const h=new Date().getHours();return h<12?"Morning":h<17?"Afternoon":"Evening";}
-function statCard(icon,label,val,color,sub){
-  return`<div class="stat-card" style="border-left:4px solid ${color}">
+// onclick (optional): the whole card becomes clickable and opens the data behind the number —
+// same drill contract as the graphs (user: "I click the box and its data must show").
+function statCard(icon,label,val,color,sub,onclick,hint){
+  const clickAttrs=onclick?` onclick="${onclick}" title="${hint||"Click to see the data behind this number"}" style="border-left:4px solid ${color};cursor:pointer;"`:` style="border-left:4px solid ${color}"`;
+  return`<div class="stat-card"${clickAttrs}>
     <div class="stat-icon" style="background:${color}22"><span class="mat-ico" style="color:${color};font-size:18px;">${icon}</span></div>
     <div class="stat-num" data-target="${parseInt(val)||0}" ${String(val).includes("%")?'data-suffix="%"':''}>${val}</div>
     <div class="stat-label">${label}</div>
     <div class="stat-sub">${sub}</div>
+    ${onclick?`<span class="mat-ico" style="position:absolute;top:8px;right:8px;font-size:15px;color:var(--muted);opacity:.55;">zoom_in</span>`:""}
   </div>`;
 }
 // Drill-down data for the Monthly Training Activity chart: which tests are behind each bar.
@@ -3456,13 +3460,14 @@ function _drillModal(title,body){
   openModal('<div class="modal-accent"></div><div class="modal-head"><h2>'+title+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'+body+'</div>','880px');
 }
 // 1) DEPARTMENT-WISE COMPLETION — click a dept bar -> people + results of THAT department.
-function openDeptDrill(idx){
+function openDeptDrill(idx,byName){
   var S=_drillScope();
   var deptOfResult=function(r){var e=(DB.employees||[]).find(function(x){return x.id===r.empId;});return (e&&e.dept)||r.dept||"Unknown";};
   var deptSet={};
   S.emps.forEach(function(e){deptSet[e.dept||"Unknown"]=1;});
   S.outcomes.forEach(function(r){deptSet[deptOfResult(r)]=1;});
   var activeDepts=DEPARTMENTS.filter(function(d){return deptSet[d];}).concat(Object.keys(deptSet).filter(function(d){return DEPARTMENTS.indexOf(d)<0;}).sort());
+  if(byName){var _di=activeDepts.indexOf(byName);if(_di>=0)idx=_di;}
   var title='Department-wise Completion',body='';
   if(idx<0||!activeDepts[idx]){
     var rows=activeDepts.map(function(d,i){
@@ -3522,11 +3527,12 @@ function openPassFailDrill(idx){
   _drillModal('Pass / Fail Distribution',body);
 }
 // 3) TRAINING-WISE COMPLETION — click a training bar -> every person in it with their status.
-function openTrnCompDrill(idx){
+function openTrnCompDrill(idx,byName){
   var S=_drillScope();
   var list=S.trainings.filter(function(t){return getDashboardTrainingEmployees(t).length>0||getDashboardResultsForTraining(t).length>0;});
   if(S.selectedTrn&&!list.length)list=S.trainings.slice(0,1);
   if(list.length>14)list=list.slice(0,14);
+  if(byName){var _ti=list.findIndex(function(t){return t.name===byName;});if(_ti>=0)idx=_ti;}
   if(!list.length){_drillModal('Training-wise Completion','<p style="color:var(--muted);text-align:center;padding:24px;">No trainings with participants or results yet.</p>');return;}
   var title='Training-wise Completion',body='';
   if(idx<0||!list[idx]){
@@ -3588,6 +3594,156 @@ function openScoreDistDrill(idx){
       (rows.length?_drillOutTable(rows):'<p style="color:var(--muted);text-align:center;padding:12px;">Nobody scored in this band.</p>');
   }
   _drillModal(title,body);
+}
+// ---------- STAT CARD DRILL-DOWNS (user: "I click the box and its data does not show") ----------
+// Every number card on the dashboard opens ITS data in the same modal style as the graphs.
+// The numbers ALWAYS mirror the cards: same scope (_drillScope) and the same helper functions
+// the cards use, so a modal can never disagree with the card it was opened from.
+// _jsArg: build a safe single-quoted JS argument for onclick="fn('NAME')" attributes —
+// escape backslash + quote at JS level, then & < > " at HTML-attribute level (_escDrill).
+function _jsArg(s){return _escDrill(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));}
+// 5) TRAINING ATTENDED card -> attendances per training + every person counted.
+function openAttendedDrill(){
+  var S=_drillScope();
+  var _att=getTotalAttendancesForTrainings(S.trainings);
+  var persons=getAttendedPersonsForTrainings(S.trainings);
+  var tCount={};
+  S.trainings.forEach(function(t){getDashboardTrainingEmployees(t).forEach(function(e){var k=normPersonField(e.id)+'|'+normPersonField(e.name);tCount[k]=(tCount[k]||0)+1;});});
+  var perRows=_att.per.map(function(p,i){
+    var t=(S.trainings[i]&&S.trainings[i].name===p.name)?S.trainings[i]:(S.trainings.filter(function(x){return x.name===p.name;})[0]||null);
+    var offN=t?getDashboardTrainingEmployees(t).filter(function(e){return (t.offlineTrained||[]).indexOf(e.id)>=0;}).length:0;
+    return '<tr onclick="openTrnCompDrill(-1,\''+_jsArg(p.name)+'\')" style="cursor:pointer;"><td><b>'+_escDrill(p.name)+'</b>'+(t&&t._isR2Training?' <span class="badge badge-info" style="font-size:9px;">Round 2</span>':'')+'</td><td style="text-align:center;font-weight:700;">'+p.count+'</td><td style="text-align:center;color:var(--blue);">'+(offN||'—')+'</td><td style="text-align:center;"><span class="mat-ico" style="font-size:14px;color:var(--muted);">chevron_right</span></td></tr>';
+  }).join('');
+  var pRows=persons.map(function(e){
+    var k=normPersonField(e.id)+'|'+normPersonField(e.name);
+    var emp=(DB.employees||[]).find(function(x){return x&&x.id===e.id;});
+    return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill((emp&&emp.dept)||e.dept||'')+'</td><td style="text-align:center;font-weight:700;">'+(tCount[k]||0)+'</td></tr>';
+  }).join('');
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-amber">Total attendances: '+_att.total+'</span>'+
+      '<span class="badge badge-info">Unique persons: '+_att.unique+'</span>'+
+      '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+    '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:4px 0 8px;">Attendances per training</div>'+
+    (perRows?'<div class="table-wrap" style="max-height:260px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Attendances</th><th>Offline</th><th></th></tr></thead><tbody>'+perRows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:12px;">No trainings in this scope yet.</p>')+
+    '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Persons counted ('+persons.length+')</div>'+
+    (pRows?'<div class="table-wrap" style="max-height:300px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Trainings attended</th></tr></thead><tbody>'+pRows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:12px;">Nobody is assigned to a training in this scope yet.</p>')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">A person attending 2 trainings = 2 attendances, so Total attendances can be higher than Unique persons. Click a training row to see its full roster with statuses.</div>';
+  _drillModal('Training Attended — '+_att.total+' attendances',body);
+}
+// 6) TOTAL EMPLOYEES card -> the people behind the number.
+function openEmployeesDrill(){
+  var S=_drillScope();
+  var emps=S.emps;
+  var tCount={};
+  S.trainings.forEach(function(t){getDashboardTrainingEmployees(t).forEach(function(e){var k=normPersonField(e.id)+'|'+normPersonField(e.name);tCount[k]=(tCount[k]||0)+1;});});
+  var rows=emps.map(function(e){
+    var k=normPersonField(e.id)+'|'+normPersonField(e.name);
+    var trnN=tCount[k]||0;
+    var certs=getOfficialTrainingCertificates().filter(function(c){return c.empId===e.id;}).length;
+    var st=trnN?'<span class="badge badge-active">Assigned</span>':'<span class="badge badge-amber">Not assigned</span>';
+    return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td style="text-align:center;font-weight:700;">'+trnN+'</td><td style="text-align:center;">'+certs+'</td><td>'+st+'</td></tr>';
+  }).join('');
+  var dups=(!S.selectedTrn)?getDuplicateEmployeeRecords():[];
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-info">Employees: '+emps.length+'</span>'+
+      (dups.length?'<span class="badge badge-amber">Duplicate rows merged: '+dups.length+'</span>':'')+
+      '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+    (rows?'<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Trainings</th><th>Certificates</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:24px;">No employees in this scope.</p>')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">'+(S.selectedTrn?'Showing the roster of the selected training. ':'')+'Trainings = how many of the scoped trainings this person attends. Duplicate ID+name rows are counted as one person in rosters — give each row a distinct ID and name so every person counts.</div>';
+  _drillModal(S.selectedTrn?'Employees Attending — '+S.selectedTrn.name:'Total Employees',body);
+}
+// 7) TOTAL TRAININGS card -> one row per training with its headline numbers.
+function openTrainingsDrill(){
+  var S=_drillScope();
+  var rows=S.trainings.map(function(t){
+    var rosterN=getDashboardTrainingEmployees(t).length;
+    var best=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+    var comp=best.filter(isOfficialResultPass).length;
+    var fail=best.length-comp;
+    var pend=getDashboardPendingForTraining(t);
+    return '<tr onclick="openTrnCompDrill(-1,\''+_jsArg(t.name)+'\')" style="cursor:pointer;"><td><b>'+_escDrill(t.name)+'</b>'+(t._isR2Training?' <span class="badge badge-info" style="font-size:9px;">Round 2</span>':'')+'</td><td style="white-space:nowrap;">'+formatDate(t.date)+'</td><td>'+_escDrill(t.trainer||'')+'</td><td style="text-align:center;">'+(t.passing||70)+'%</td><td style="text-align:center;font-weight:700;">'+rosterN+'</td><td style="text-align:center;color:var(--green);font-weight:700;">'+comp+'</td><td style="text-align:center;color:var(--red);font-weight:700;">'+fail+'</td><td style="text-align:center;color:var(--amber);font-weight:700;">'+pend+'</td><td style="text-align:center;"><span class="mat-ico" style="font-size:14px;color:var(--muted);">chevron_right</span></td></tr>';
+  }).join('');
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-info">Trainings: '+S.trainings.length+'</span>'+
+      '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+    (rows?'<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Date</th><th>Trainer</th><th>Pass mark</th><th>Enrolled</th><th>Passed</th><th>Failed</th><th>Pending</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:24px;">No trainings in this scope yet.</p>')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Passed / Failed / Pending count exactly like the dashboard cards (best outcome per person, offline-trained not pending). Click a training to see every person in it.</div>';
+  _drillModal('Total Trainings',body);
+}
+// 8) PENDING card -> every pending person per training (card rule: never tested, not offline).
+function openPendingDrill(){
+  var S=_drillScope();
+  var rows='',offRows='',total=0;
+  S.trainings.forEach(function(t){
+    var m=makeRosterTesterMatcher(t);
+    var off=(t.offlineTrained||[]);
+    getDashboardTrainingEmployees(t).forEach(function(e){
+      if(!m.tested(e)&&off.indexOf(e.id)<0){
+        total++;
+        rows+='<tr><td>'+_escDrill(t.name)+'</td><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td><span class="badge badge-amber">Pending</span></td></tr>';
+      }else if(off.indexOf(e.id)>=0){
+        offRows+='<tr><td>'+_escDrill(t.name)+'</td><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td><span class="badge badge-info">Offline training</span></td></tr>';
+      }
+    });
+  });
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-amber">Pending: '+total+'</span>'+
+      '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+    (rows?'<div class="table-wrap" style="max-height:360px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:16px;">Nobody is pending in this scope — everyone assigned has tested or attended offline.</p>')+
+    (offRows?'<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Offline training — attended, NOT pending</div><div class="table-wrap" style="max-height:200px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th></tr></thead><tbody>'+offRows+'</tbody></table></div>':'')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Pending = assigned to the training, never tested and not marked offline-trained. These are the exact people behind the Pending card (a person who tested and failed is NOT pending — they appear under Tests Failed).</div>';
+  _drillModal('Pending — '+total+' person'+(total===1?'':'s'),body);
+}
+// 9) EQUIPMENT ITEMS card -> the full library grouped by category.
+function openEquipmentDrill(){
+  var cats={};
+  EQUIPMENT_DATA.forEach(function(x){cats[x.c||'Other']=(cats[x.c||'Other']||0)+1;});
+  var catRows=Object.keys(cats).map(function(c){return '<tr><td><b>'+_escDrill(c)+'</b></td><td style="text-align:center;font-weight:700;">'+cats[c]+'</td></tr>';}).join('');
+  var rows=EQUIPMENT_DATA.map(function(x){
+    return '<tr><td style="font-size:15px;">'+(x.i||'')+'</td><td><b>'+_escDrill(x.n)+'</b></td><td>'+_escDrill(x.c||'')+'</td><td style="font-size:11px;color:var(--muted);">'+_escDrill(x.s||'')+'</td><td>'+_escDrill(x.loc||'')+'</td></tr>';
+  }).join('');
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-amber">Items: '+EQUIPMENT_DATA.length+'</span>'+
+      '<span class="badge badge-info">Categories: '+Object.keys(cats).length+'</span></div>'+
+    '<div class="table-wrap" style="max-height:180px;overflow-y:auto;margin-bottom:14px;"><table><thead><tr><th>Category</th><th>Items</th></tr></thead><tbody>'+catRows+'</tbody></table></div>'+
+    '<div class="table-wrap" style="max-height:300px;overflow-y:auto;"><table><thead><tr><th></th><th>Equipment</th><th>Category</th><th>Specs</th><th>Location</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">The full equipment library — the same list the Equipment Library view shows.</div>';
+  _drillModal('Equipment Items',body);
+}
+// 10) CERTIFICATES card -> the qualifying certificates (same list the Certificates page shows).
+function openCertsDrill(){
+  var S=_drillScope();
+  var minCert=Number(DB.settings.minCertScore)||75;
+  var certs=getOfficialTrainingCertificates().filter(function(c){return !S.selectedTrn||resultTrnId(c)===S.selectedTrn.id;});
+  var rows=certs.map(function(c){
+    var days=daysUntil(c.expiry);
+    var st=days<0?['danger','Expired']:days<30?['warning','Expires in '+days+'d']:['active','Valid'];
+    return '<tr><td class="mono" style="font-size:10px;color:var(--purple);">'+_escDrill(c.num)+'</td><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(c.empId)+'</td><td><b>'+_escDrill(c.empName)+'</b></td><td>'+_escDrill(c.training)+'</td><td style="font-weight:700;color:var(--green);">'+Number(c.score||0)+'%</td><td style="white-space:nowrap;">'+formatDate(c.completedDate||c.issued)+'</td><td style="white-space:nowrap;">'+formatDate(c.expiry)+'</td><td><span class="badge badge-'+st[0]+'">'+st[1]+'</span></td><td><button class="btn btn-sm btn-amber" onclick="downloadCertificate(\''+_jsArg(c.num)+'\')"><span class="mat-ico" style="font-size:11px;">workspace_premium</span> PDF</button></td></tr>';
+  }).join('');
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-info">Certificates: '+certs.length+'</span>'+
+      '<span class="badge badge-amber">Rule: passed test · score ≥ '+minCert+'%</span>'+
+      '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+    (rows?'<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Certificate No</th><th>Employee ID</th><th>Name</th><th>Training</th><th>Score</th><th>Completed</th><th>Expiry</th><th>Status</th><th>PDF</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:24px;">No certificates in this scope yet — a certificate appears when a person PASSES the training with a best score of at least '+minCert+'%.</p>')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">One certificate per person per training, only for qualifying passes — the same list the Certificates page shows, so Certificates can never exceed Tests Passed.</div>';
+  _drillModal('Certificates',body);
+}
+// 11) AVG SCORE card -> the scores behind the average + the pass rate.
+function openAvgScoreDrill(){
+  var S=_drillScope();
+  var list=S.outcomes.slice().sort(function(a,b){return Number(b.score||0)-Number(a.score||0);});
+  var scoreSum=0;S.outcomes.forEach(function(r){scoreSum+=Number(r.score||0);});
+  var avg=S.outcomes.length?Math.round(scoreSum/S.outcomes.length):0;
+  var passed=S.outcomes.filter(isOfficialResultPass).length;
+  var compPct=S.outcomes.length?Math.round(passed/S.outcomes.length*100):0;
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
+      '<span class="badge badge-amber">Average: '+avg+'%</span>'+
+      '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Pass rate: '+compPct+'%</span>'+
+      '<span class="badge badge-info">Results: '+S.outcomes.length+'</span>'+
+      '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
+    (list.length?_drillOutTable(list):'<p style="color:var(--muted);text-align:center;padding:24px;">No test results in this scope yet.</p>')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">The average of the BEST score per person per training, sorted high to low — the exact set the Avg Score card and the pass rate use.</div>';
+  _drillModal('Average Score — '+avg+'%',body);
 }
 function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   // Scope by RESOLVED training id (loose name matching) so name variants and Round 2 trainings
@@ -9706,7 +9862,7 @@ async function loadDBFromFirestore(){
     var firstErrMsg='';
     const results=await Promise.allSettled(cols.map(async([name,,fn])=>{try{const snap=await fbDB.collection(name).get();fn(snap);loaded++;}catch(e){failed.push(name);var ec=e.code||'';var em=e.message||'';console.warn('Firestore load failed for '+name+':',ec,em);if(!firstErrCode){firstErrCode=ec;firstErrMsg=em;}}}));
     // Load settings separately (it's a single doc, not a collection)
-    try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists)Object.assign(DB.settings,setSnap.data());loaded++;}catch(e){failed.push('config/settings');if(!firstErrCode){firstErrCode=e.code||'';firstErrMsg=e.message||'';}}
+    try{const setSnap=await fbDB.collection('config').doc('settings').get();if(setSnap.exists){Object.assign(DB.settings,setSnap.data());/* Cloud docs saved before the 75% migration carry minCertScore 70 and no flag — re-apply the Task 7 rule after EVERY cloud pull so a stale cloud doc cannot resurrect 70 */if(!setSnap.data()._cert75Migrated&&Number(DB.settings.minCertScore)===70)DB.settings.minCertScore=75;}loaded++;}catch(e){failed.push('config/settings');if(!firstErrCode){firstErrCode=e.code||'';firstErrMsg=e.message||'';}}
     // Load tombstones from cloud
     await loadTombstonesFromCloud();
     // Rebuild completed arrays from testResults (source of truth)
