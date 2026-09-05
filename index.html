@@ -1463,6 +1463,9 @@ async function forceSyncToCloud(){
   }
 }
 
+function isFirestoreQuotaError(e){var m=String((e&&e.code)||'')+' '+String((e&&e.message)||e);return m.indexOf('429')>-1||m.toLowerCase().indexOf('resource-exhausted')>-1||m.toLowerCase().indexOf('quota')>-1;}
+function waitMs(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
+
 // === FORCE SYNC ALL EMPLOYEES INDIVIDUALLY ===
 // This fixes the bug where saveDB() batch skips an employee (e.g. _syncBusy flag)
 // Each employee is written ONE BY ONE to Firebase + Auth account is ensured
@@ -1483,7 +1486,7 @@ async function forceSyncAllEmployees(){
 
   // Step 0b: Test write permission
   try{if(fbAuth.currentUser)await fbAuth.currentUser.getIdToken(true);await fbDB.collection('config').doc('_permTest2').set({t:Date.now()},{merge:true});try{await fbDB.collection('config').doc('_permTest2').delete();}catch(e){}}catch(we){
-    toast('Firestore WRITE blocked! Fix: Firebase Console > Firestore Database > Rules > set: allow read, write: if request.auth != null;','error',15000);
+    if(isFirestoreQuotaError(we)){toast('Firebase quota is temporarily exhausted (429). Stop repeated sync attempts and retry after the quota window refreshes.','error',12000);}else{toast('Firestore WRITE blocked! Check Firebase Firestore Rules and admin permissions.','error',12000);}
     return {synced:0,failed:allEmps.length,authCreated:0,authExisted:0,authFailed:0,cloudCount:0,failedList:['Write permission denied']};
   }
   
@@ -1496,6 +1499,7 @@ async function forceSyncAllEmployees(){
     try{
       var safeEmp=sanitizeForFirestore(emp);
       await fbDB.collection('employees').doc(String(emp.id)).set(safeEmp,{merge:true});
+      await waitMs(250);
       synced++;
       console.log('[forceSyncAllEmployees] Firestore OK: '+emp.id+' ('+emp.name+')');
     }catch(err){
@@ -1507,6 +1511,7 @@ async function forceSyncAllEmployees(){
         failedList.push(emp.id+': full object failed, minimal write OK ('+(err.message||err)+')');
         console.warn('[forceSyncAllEmployees] Minimal OK for '+emp.id);
       }catch(err2){
+        if(isFirestoreQuotaError(err2)){failed++;failedList.push(emp.id+': Firebase quota exhausted (429); sync stopped to avoid making it worse');break;}
         failed++;
         failedList.push(emp.id+': '+(err.message||err)+' | minimal: '+(err2.message||err2));
         console.error('[forceSyncAllEmployees] Firestore FAIL: '+emp.id, err, err2);
@@ -1527,6 +1532,7 @@ async function forceSyncAllEmployees(){
       authCreated++;
       console.log('[forceSyncAllEmployees] Auth CREATED: '+emp2.id);
     }catch(authErr){
+      if(isFirestoreQuotaError(authErr)){authFailed++;failedList.push('Auth '+emp2.id+': Firebase quota exhausted (429)');break;}
       if(authErr.code==='auth/email-already-in-use'){
         authExisted++;
         console.log('[forceSyncAllEmployees] Auth EXISTS: '+emp2.id);
@@ -1538,6 +1544,7 @@ async function forceSyncAllEmployees(){
     }
     // Re-sign in as admin after each auth creation (signing in as employee changes context)
     await authAsAdmin();
+    await waitMs(500);
   }
   
   // Step 3: Verify by reading back from cloud
@@ -1727,6 +1734,8 @@ async function testFirebaseConnection(){
   el.innerHTML='<span style="color:var(--amber);">Testing Firebase connection (deep diagnostic)...</span>';
   const results=[];
   var restToken=null;
+  var quotaDetected=false;
+  var quotaText='';
   // Every diagnostic request must settle. A blocked REST/Firebase request used to leave
   // the panel stuck forever on the loading message with no actionable error.
   const withTimeout=async function(work,label,ms){
@@ -1800,7 +1809,8 @@ async function testFirebaseConnection(){
     }else if(noAuthResp.status===403){
       results.push('<span style="color:var(--amber);">No-auth test: Returns 403 — '+noAuthText.substring(0,100)+'</span>');
     }else{
-      results.push('<span style="color:var(--amber);">No-auth test: Status '+noAuthResp.status+' — '+noAuthText.substring(0,100)+'</span>');
+      if(noAuthResp.status===429){quotaDetected=true;quotaText=noAuthText;}
+      results.push('<span style="color:'+(noAuthResp.status===429?'var(--red)':'var(--amber)')+';">No-auth test: Status '+noAuthResp.status+' — '+noAuthText.substring(0,100)+'</span>');
     }
   }catch(e){
     results.push('<span style="color:var(--red);">No-auth test error: '+e.message+'</span>');
@@ -1820,6 +1830,7 @@ async function testFirebaseConnection(){
     // Clean up
     try{await fbDB.collection('config').doc('_connectionTest').delete();}catch(e){}
   }catch(e){
+    if(String(e.code||'').indexOf('resource-exhausted')>-1||String(e.message||e).toLowerCase().indexOf('quota')>-1){quotaDetected=true;quotaText=e.message||String(e);}
     results.push('<span style="color:var(--red);">WRITE test doc: FAILED — '+e.message+'</span>');
   }
   // Test 3: Direct REST API test (bypasses SDK) — READ
@@ -1833,7 +1844,8 @@ async function testFirebaseConnection(){
       results.push('<span style="color:var(--green);">REST API READ: OK ('+(readData.documents?readData.documents.length:0)+' docs)</span>');
     }else{
       var readErr=await readResp.text();
-      results.push('<span style="color:var(--red);">REST API READ: FAILED (status '+readResp.status+'): '+readErr.substring(0,200)+'</span>');
+      if(readResp.status===429){quotaDetected=true;quotaText=readErr;}
+      results.push('<span style="color:'+(readResp.status===429?'var(--red)':'var(--red)')+';">REST API READ: FAILED (status '+readResp.status+'): '+readErr.substring(0,200)+'</span>');
     }
     // REST WRITE test (auto-generated doc ID)
     var writeUrl='https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config?documentId=_restTest';
@@ -1848,6 +1860,7 @@ async function testFirebaseConnection(){
       try{await fetch('https://firestore.googleapis.com/v1/projects/pts-safety-training/databases/(default)/documents/config/_restTest',{method:'DELETE',headers:{'Authorization':'Bearer '+restToken}});}catch(e){}
     }else{
       var writeErr=await writeResp.text();
+      if(writeResp.status===429){quotaDetected=true;quotaText=writeErr;}
       results.push('<span style="color:var(--red);">REST API WRITE: FAILED (status '+writeResp.status+'): '+writeErr.substring(0,200)+'</span>');
     }
   }catch(e){
@@ -1863,6 +1876,7 @@ async function testFirebaseConnection(){
     // Clean up
     try{await fbDB.collection('employees').doc(ref.id).delete();}catch(e){}
   }catch(e){
+    if(String(e.code||'').indexOf('resource-exhausted')>-1||String(e.message||e).toLowerCase().indexOf('quota')>-1||String(e.message||e).toLowerCase().indexOf('timed out')>-1){quotaDetected=true;quotaText=e.message||String(e);}
     results.push('<span style="color:var(--red);">WRITE employees: FAILED — '+e.message+'</span>');
   }
   // Summary + actionable advice
@@ -1870,7 +1884,12 @@ async function testFirebaseConnection(){
   var hasFail=results.some(function(r){return r.indexOf('FAILED')>-1;});
   var hasApiDisabled=results.some(function(r){return r.indexOf('API DISABLED')>-1;});
   var hasTokenMismatch=results.some(function(r){return r.indexOf('AUD MISMATCH')>-1;});
-  if(hasApiDisabled){
+  if(quotaDetected){
+    results.push('<span style="color:var(--red);">→ Firebase is throttling this project: HTTP 429 RESOURCE_EXHAUSTED (quota exceeded).</span>');
+    results.push('<span style="color:var(--txt2);">→ Authentication and Firestore reads are working. This is not a rules, API-disabled, or database-recreation problem.</span>');
+    results.push('<span style="color:var(--txt2);">→ Stop repeated sync/test attempts, wait for the quota window to refresh, then retry. For persistent limits, open Google Cloud Console → Firestore → Quotas and review/increase the affected quota.</span>');
+    results.push('<span style="color:var(--amber);">→ Do not delete or recreate the Firestore database.</span>');
+  }else if(hasApiDisabled){
     results.push('<span style="color:var(--red);">→ The Cloud Firestore API is DISABLED for your project.</span>');
     results.push('<span style="color:var(--txt2);">→ Fix: Go to <b>console.cloud.google.com</b> → APIs & Services → Library → search "Cloud Firestore API" → <b>ENABLE</b></span>');
   }else if(hasTokenMismatch){
