@@ -1444,6 +1444,7 @@ async function forceSyncToCloud(){
       fbSaveCollection('customEquipment',DB.customEquipment||[],'id'),
       fbSaveCollection('customQuestions',DB.customQuestions||[],'ts'),
       fbSaveCollection('correctiveActions',DB.correctiveActions||[],'id'),
+      fbSaveCollection('feedbackForms',DB.feedbackForms||[],'id'),
       fbSaveSettings()
     ]);
     const failed=results.filter(r=>r&&r.ok===false);
@@ -3118,6 +3119,33 @@ function getTotalAttendancesForTrainings(trainings){
   });
   return {total:total,per:per,unique:getAttendedPersonsForTrainings(trainings).length};
 }
+// Task 14: one-click dashboard refresh for admin monitoring — pushes the outcome funnel first so
+// the merge-pull below can never show data older than local (Task 13 pairing), then re-renders
+// the dashboard and stamps the time so the admin always knows how fresh the numbers are.
+var _dashLastRefresh=null;
+async function refreshDashboardSync(){
+  if(!currentUser)return;
+  var btn=document.getElementById('dashRefreshBtn');if(btn){btn.disabled=true;btn.style.opacity='.6';}
+  toast('Refreshing dashboard data...','info',1500);
+  try{
+    if(firebaseReady){
+      try{await authAsAdmin();}catch(e){console.warn('Dash refresh auth failed:',e);}
+      try{await Promise.all([
+        fbSaveCollection('testResults',DB.testResults,'id'),
+        fbSaveCollection('certificates',DB.certificates,'num'),
+        fbSaveCollection('feedbackForms',DB.feedbackForms||[],'id'),
+        fbSaveCollection('trainings',DB.trainings,'id')
+      ]);}catch(e){console.warn('Dash refresh push error:',e);}
+      var _r=await loadDBFromFirestore();
+      if(_r&&_r.failed&&_r.failed.length>0)toast('Cloud: '+_r.failed.length+' collection(s) failed to load — showing cached data','warning',4000);
+      try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+    }
+    _dashLastRefresh=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    renderDashboard();
+    toast('Dashboard up to date','success',2000);
+  }catch(e){console.warn('Dash refresh error:',e);toast('Refresh failed: '+(e&&e.message||e),'error',4000);}
+  if(btn){btn.disabled=false;btn.style.opacity='1';}
+}
 function renderDashboard(){
   if(!isAdmin){renderEmpDashboard();return;}
   var selectedTraining=dashboardTrainingFilter!=='ALL'?getDashboardTrainings().find(function(t){return t.name===dashboardTrainingFilter;}):null;
@@ -3202,6 +3230,8 @@ function renderDashboard(){
         ${officialTrainings.map(function(t){return '<option value="'+String(t.name).replace(/"/g,'&quot;')+'" '+(selectedTraining&&selectedTraining.name===t.name?'selected':'')+'>'+String(t.name).replace(/</g,'&lt;')+(t._isR2Training?' \u2014 Round 2':'')+'</option>';}).join('')}
       </select>
       <span style="font-size:11px;color:var(--muted);">${selectedTraining?'Showing real data for: '+selectedTraining.name+(selectedTraining._isR2Training?' (Round 2)':''):'Showing all trainings (incl. Round 2)'}</span>
+      <button id="dashRefreshBtn" class="btn btn-sm btn-outline" style="margin-left:auto;border-color:var(--purple);color:var(--purple);" onclick="refreshDashboardSync()" title="Pull the latest data from the cloud and re-render every card"><span class="mat-ico" style="font-size:12px;">refresh</span> Refresh</button>
+      ${_dashLastRefresh?'<span id="dashRefreshTime" style="font-size:11px;color:var(--muted);">Updated '+_dashLastRefresh+'</span>':''}
     </div>
     ${_dataHealth}
     <div class="stat-grid" style="margin-bottom:18px;">
@@ -5672,10 +5702,10 @@ function openTrainingDetail(id){
             <td style="display:flex;gap:4px;">${actionBtns}</td>
           </tr>`;
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)${trnFeedbacks.length?`<button class="btn btn-sm btn-outline" style="margin-left:auto;border-color:var(--green);color:var(--green);" onclick="downloadAllFeedbackDocs()"><span class="mat-ico" style="font-size:11px;">download</span> Download All as .doc</button>`:''}</div>
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)${trnFeedbacks.length?`<button class="btn btn-sm btn-outline" style="margin-left:auto;border-color:var(--green);color:var(--green);" onclick="downloadAllFeedbackDocs('${_jsArg(t.name)}')"><span class="mat-ico" style="font-size:11px;">download</span> Download All as .doc</button>`:''}</div>
       ${trnFeedbacks.length?`<div class="table-wrap" style="max-height:280px;overflow-y:auto;"><table>
         <thead><tr><th>Emp ID</th><th>Name</th><th>Date</th><th>Overall</th><th>Q1-Q10 Avg</th><th>Enjoyed</th><th>Details</th></tr></thead>
-        <tbody>${trnFeedbacks.map(function(fb){var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=fb.overallRating||0;var olColor=overallScore>=4?'var(--green)':overallScore>=3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
+        <tbody>${trnFeedbacks.map(function(fb){normalizeFeedback(fb);var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=Number(fb.overallRating)||0;var olColor=overallScore>0&&overallScore<=2?'var(--green)':overallScore===3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
     </div>
   `,"900px");
 }
@@ -5686,7 +5716,7 @@ function filterTrainingEmployees(query){
     row.style.display=(!q||text.indexOf(q)>=0)?'':'none';
   });
 }
-function showFeedbackDetail(fbId){var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});if(!fb){toast('Feedback not found','error');return;}var ratings=fb.ratings||{};var rows='';for(var i=1;i<=10;i++){var rk='q'+i;var r=ratings[rk];if(r){var color=r.score>=4?'var(--green)':r.score>=3?'var(--amber)':'var(--red)';rows+='<tr><td style="padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bdr);">'+i+'. '+r.text+'</td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);"><span style="color:'+color+';font-weight:700;">'+r.label+'</span></td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);">'+r.score+'/5</td></tr>';}}var olColor=(fb.overallRating||0)>=4?'var(--green)':(fb.overallRating||0)>=3?'var(--amber)':'var(--red)';openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Feedback Detail — '+fb.empName+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px;"><div><span style="color:var(--muted);">Employee</span><div><b>'+fb.empName+'</b> ('+fb.empId+')</div></div><div><span style="color:var(--muted);">Department</span><div><b>'+fb.dept+'</b></div></div><div><span style="color:var(--muted);">Designation</span><div><b>'+(fb.desig||'—')+'</b></div></div><div><span style="color:var(--muted);">Training</span><div><b>'+fb.training+'</b></div></div><div><span style="color:var(--muted);">Trainer</span><div><b>'+(fb.trainer||'—')+'</b></div></div><div><span style="color:var(--muted);">Date</span><div><b>'+fb.date+'</b></div></div></div><div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Responses</div><div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th style="text-align:left;">Statement</th><th>Rating</th><th>Score</th></tr></thead><tbody>'+rows+'</tbody></table></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;"><div><span style="font-size:12px;font-weight:700;color:var(--txt);">Overall Rating</span><div style="margin-top:4px;"><span class="badge" style="background:'+olColor+'20;color:'+olColor+';font-size:14px;padding:6px 14px;">'+fb.overallLabel+' ('+fb.overallRating+'/5)</span></div></div></div>'+(fb.enjoy?'<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:700;color:var(--txt);">What did you enjoy most?</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.enjoy+'</div></div>':'')+(fb.suggestions?'<div><span style="font-size:12px;font-weight:700;color:var(--txt);">Suggestions</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.suggestions+'</div></div>':'')+'</div>','700px');}
+function showFeedbackDetail(fbId){var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});if(!fb){toast('Feedback not found','error');return;}normalizeFeedback(fb);var ratings=fb.ratings||{};var rows='';for(var i=1;i<=10;i++){var rk='q'+i;var r=ratings[rk];if(r){var _sc=Number(r.score);var color=_sc<=2?'var(--green)':_sc<=3?'var(--amber)':'var(--red)';rows+='<tr><td style="padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bdr);">'+i+'. '+r.text+'</td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);"><span style="color:'+color+';font-weight:700;">'+r.label+'</span></td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);">'+r.score+'/5</td></tr>';}}var _ov=Number(fb.overallRating)||0;var olColor=_ov>0&&_ov<=2?'var(--green)':_ov===3?'var(--amber)':'var(--red)';openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Feedback Detail — '+fb.empName+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px;"><div><span style="color:var(--muted);">Employee</span><div><b>'+fb.empName+'</b> ('+fb.empId+')</div></div><div><span style="color:var(--muted);">Department</span><div><b>'+fb.dept+'</b></div></div><div><span style="color:var(--muted);">Designation</span><div><b>'+(fb.desig||'—')+'</b></div></div><div><span style="color:var(--muted);">Training</span><div><b>'+fb.training+'</b></div></div><div><span style="color:var(--muted);">Trainer</span><div><b>'+(fb.trainer||'—')+'</b></div></div><div><span style="color:var(--muted);">Date</span><div><b>'+fb.date+'</b></div></div></div><div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Responses</div><div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th style="text-align:left;">Statement</th><th>Rating</th><th>Score</th></tr></thead><tbody>'+(rows||'<tr><td colspan="3" style="text-align:center;padding:10px;color:var(--muted);">No responses recorded for this feedback.</td></tr>')+'</tbody></table></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;"><div><span style="font-size:12px;font-weight:700;color:var(--txt);">Overall Rating</span><div style="margin-top:4px;"><span class="badge" style="background:'+olColor+'20;color:'+olColor+';font-size:14px;padding:6px 14px;">'+fb.overallLabel+' ('+fb.overallRating+'/5)</span></div></div></div>'+(fb.enjoy?'<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:700;color:var(--txt);">What did you enjoy most?</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.enjoy+'</div></div>':'')+(fb.suggestions?'<div><span style="font-size:12px;font-weight:700;color:var(--txt);">Suggestions</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.suggestions+'</div></div>':'')+'</div>','700px');}
 function assignEmployees(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
   const available=DB.employees.filter(e=>!(t.enrolled||[]).includes(e.id));
@@ -6999,6 +7029,37 @@ const FB_QUESTIONS=[
 ];
 const FB_SCALE=['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
 const FB_OVERALL=['Excellent','Good','Average','Poor','Very Poor'];
+// TASK 12: Canonicalize ANY feedback record into the exact shape every admin surface reads
+// (ratings q1..q10 = {text,score:1-5 Number,label}, overallRating Number, overallLabel string).
+// Legacy/foreign records — numeric-key ratings {0:3,...}, arrays [3,4,...], string scores,
+// missing labels — used to render as a BLANK IMSP 29 F05 form: every circle unfilled in the
+// downloaded .doc/Drive PDF, an empty Responses table in the detail modal, '—' in the training
+// modal — even though the employee had answered everything. Idempotent on canonical records.
+function normalizeFeedback(fb){
+  if(!fb||typeof fb!=='object')return fb;
+  var src=fb.ratings,out={},i,raw,v,sc;
+  for(i=0;i<FB_QUESTIONS.length;i++){
+    v=null;
+    if(Array.isArray(src)){raw=src[i];if(raw!==undefined&&raw!==null)v=raw;}
+    else if(src&&typeof src==='object'){
+      raw=src['q'+(i+1)];
+      if(raw===undefined||raw===null)raw=src[String(i)];
+      if(raw===undefined||raw===null)raw=src[i];
+      if(raw!==undefined&&raw!==null)v=raw;
+    }
+    if(v===null)continue;
+    sc=Number(typeof v==='object'?(v&&v.score):v);
+    if(!isFinite(sc))continue;
+    sc=Math.max(1,Math.min(5,Math.round(sc)));
+    var tv=(typeof v==='object')?v:{};
+    out['q'+(i+1)]={text:tv.text||FB_QUESTIONS[i],score:sc,label:tv.label||FB_SCALE[sc-1]||''};
+  }
+  fb.ratings=out;
+  var ov=Number(fb.overallRating);
+  fb.overallRating=isFinite(ov)?ov:0;
+  fb.overallLabel=fb.overallLabel||FB_OVERALL[fb.overallRating-1]||'';
+  return fb;
+}
 function setFbRating(qIdx,val){_fbRatings[qIdx]=val;var circles=document.querySelectorAll('.fb_likert_'+qIdx);circles.forEach(function(c){if(parseInt(c.dataset.val)===val){c.style.background='#000';c.style.borderColor='#000';}else{c.style.background='#fff';c.style.borderColor='#000';}});}
 function setFbOverall(val){_fbOverall=val;var circles=document.querySelectorAll('.fb_overall_btn');circles.forEach(function(c){if(parseInt(c.dataset.val)===val){c.style.background='#000';c.style.borderColor='#000';}else{c.style.background='#fff';c.style.borderColor='#000';}});}
 // Default Drive config — overridden by DB.settings if admin changes them
@@ -7008,18 +7069,19 @@ function getDriveUrl(){return (DB.settings.driveUrl||DRIVE_PDF_SCRIPT_URL).trim(
 function getDriveFolder(){return (DB.settings.driveFolder||DRIVE_FOLDER_ID).trim();}
 var PTS_LOGO_B64='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEA3ADcAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCACkAKQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9/KKKKACiiigAooooAKKKKACigkDqaivLy1sLWS9vLmOGKJC8ksrhVRQMkkngADvQNJt2RLRVTQtc0fxLo9r4h8PavbX9hfW6T2V9ZTrLDcROoZJEdSVdWBBDAkEEEVboBpxdnuFFFFAgooooAKKKKACiiigAooooAKKKKACiiigAoorI1jx14W0HxRpPgzVdXSLU9c87+yrQoxafyUDycgYXCnPJHtms6lWlRjzTkkrpau2rdkvVtpLuxNpLU16QuozntWX4z8b+E/h74fm8UeM9et9OsIB+8uLh8AnsqjqzHsqgknoDX5+ftnf8FEfjz+0b40n/AGJ/2B/AOsPr+qW5/tnxEh8m4tbQhc7GyFtFZXQm4d8qsqAbXcFeDGZvgcFWVCUr1JbRWsn8lsul3ZXPouFuG8ZxZnEcBhpRgknKc5u0KVNfFUnLZRXnu2ktWe9fHf8A4KA3svjPU/gZ+xt4RsfHPjDRnMfinxBqN15HhvwiAG3SahdggMyFG3QxsG/dyru8yMxn5h8SeKP2IvFviH/jOz9t7xD8fPFnlpLaeAfh/BeNoCTkKEitI9PVYppg25BI0qbw+ZEB5HffAn/gjb8OPh98KLC0/bF+LV9rljY3Ivf+EL0O/ex0C1uCOXKqFlu58ZTz2KOybUKkIpr0aT9nL9kPQbX+xPCfw48NeB9Ily0d1rWvzWzzDj54rbz1z2IJGCK+XzbNc2hVhRo0FVryV1RvJyt35YRaS/v1Go37bH6TiM94K4QpSpZLUnNR0liIyjQcn1arzhUqRT/590adOy3qVfiJPCf/AAUT8KeCvDtn4Q8Ef8E5v2kbHSNNtUt9OtLH4SbIIIlGFRALjAUDAAFbXhv/AIKn/Bi71J9M+I/wN+MvgMrHuil8W/DK7AnIIBCLaee5xnOSoGO/Sq+m+Hf2NfDukNoWnfG/7BM21ZrvS/LUOV6fehkBH+8W781Ho2jX3hbUGk+GXxI8B/E2CVgw0DU57e01IID9yF0bazfNkmQADGAtPEV/ErB0o1amWckLatyc+X1jCCk/+3eY/PqvF3hpipuMsNKU3vKniLyv3vNSvd6v93dnvHwv+PXwc+NFs8/wv+ImmaxJFDHLdWVvcBbq0V87fPt3xLATg/LIqng8cV1qsG6CvBvD6fAr46rdeCtOttW8DeLoAj3GnlVt9QtirBy0aTLJDKpAxnYxCPnCFlNeXfFj44fti/sN6wniP4v2Nt4x+Gz3YW68b6Dazs2joQApvrFmllWMEnMsEpXC/dDMsR1ocSZssOsRVw0atPrKhPna780JxptW6q7a6onLcjwnEmIlTyisud/DTqNKcvKMklGUuijaMpPSMWfZdFee/Cv9ofwd8StK06/jvLeFdVt1m0u8guVmtL+M8BoZl+VucDHUE7eSDXoKnIzmvpcuzXAZtRdTCz5ktGtVKL7Si7OL8mkzwMVhMTgqzpV4uMl3Fooor0DnCiiigAooooAKKKKACiiigBGOBxXzvZ/E/wAIWHxI8dftOeM7h57PQrseE/CdlEoeaeaP5p0hUA72kkOVYHIQvuwqnHuvjbxHD4P8Har4tuYi8Wl6bPdyIvVljjZyB78V8p/sq6Ra2Hwyb9oz42TLB4W+Hml39xoySqz5ZWkuLvUHGP3jqP3akZOY+m5AzfFcSYnEzzfB4HDr33zzu9YxcbRUpeUeaUkus4xWm65Ksa1fFUsPRV5SeiWuuiWnXfRdXY8p/wCChn7SfjT4NaXpNz4ntItZ+L/jNdngXwXHGLi28K2sjbBdPAcie7Z/kjDjaZFLYYQhK9y/Zo+H3w9/YG+FOmfDu5tZvFHxW8Wj+0PFtxZu13f6xqUm6SSWacrvFujNLtZhuKLI4R3MpPxP8PdA+K/7R/7eHw/+NniDwfFd+NvF+n3Hj+zsdQcS22kaUXNpokWQuB9nEf2zeMCVZISylwc/qL8IPgroXwstZr+W6l1XX9SIfW/EF6Mz3chxkZOdkYwNqA8ADJJ5r3eH8owmGwtXFzk+aV1C+s5StrUm+12tPLkjZJtfpvHsIcIZZg+E8pX7ySVbG1v5580owpRa+JQUZOGvJ70arV3GJy2sfBTxp8cZItY+J3iu60iwdSYdG0pQkyIdpAaRs7CcfMApY5A3LjbXQeGv2W/gF4VhMdh8LtKuGZ97y6nB9rct3O6bcR+GBXoAAHSiu7KMNLJsI6NCcryd5yv71SX802rXfZbRXuxSikj82xeFweOxKr1qak1pG6uortFO9vO271d2eYePf2e9Z8Xa4i6F8Rl8PaALZI5NG0nw9arIXBOXW4I3KCMDaBgY/CuPk/4J1fB+5le5vvGXimWaQkySNe2+WJ/7YV7/AEV79DO80w0FGjU5fRJP5tK7+Z5OI4ZyPF1HOvR529dXJpeibsvRJHzV8Qv2B9SbSLF/hl8XNWF7pEiyaXHrtwWEBVgw8maJQ1vg/N8ikMwXOMAiro37WXxP+HOrp8KP2lfhLcXs0sXki50+FXkvUK7ciIkx3O4nDFGUD5vlyCK+nyAeory/9p/4f+BPil4Qh8A61r2naf4gu2kfwnJd3KxyPdIBlFzyysCqsADwwIG4LjJZrl1CdTEZhh4z57c00lGo3sveXLzPolJ6uyurnn4vh+vgYe2yetKlOP2W3KErdLSvyvs42t2Pk7Vbz4cfsU+JR8W/hXqKa7+zb4w1dYvGnhu3RnbwFqc77E1CBCPMhtpGIV4sAruGwNuiQfe2hTaXPo9pLot4lxZvbRtaTxz+askZUbWD5O8EYO7JznOa+JvAegW3xzs9Q+GHjuBdF8aXdpeaX/aFyn+jeIURdtzp2oovDygMMuP3hBRmBZEL+if8Ez7v4kfDTwVq37JXxdurmfUPAFwE0C7vnXzpdKk5jgf5yXeBgU3qqxGGW12dWVeB5NgKdT+0cttOlUimpW95RvprZNwu3bRckrxlGLsj7mnxpS4wyWE8zfJmFJ8snqlXjb4ne9sRT0U023VpuNSLnyTk/qCijIPQ0UjjCiiigAooooAKKKKACiiigDyn9tPx8PAf7PmtCFl+060o0q1VoywYzAiQcdD5IlIPQECvnL9v/wAT2/h//gnJ8OvhJYSyabD8SNW8O+H9Qu9PX97a28qi6uZggx5mfIKuONwlbJ619A/tB2dt4q+N/wAKfh/rUKzabdarqOoXFs5+V5bW13Qk+uC7cdDk5zXyJ488MXPxM+Mn7L/7NfiW4MyaJ438ZWfiS1MzGOWWwihuAVbjO2KVlU9txHavhFiHV40qRrP904qj6O9Kc7eco1f/ACQ9vguVWHF0cTTScqFOtVgntz0KM68b+sor7jv/APgm9Y6vrf7bXx08T+L9JgtL3S/DvhOz0axt1wmm6bc2b3MdrGMDYiokI2442jPIr7er5X+AbR+CP+Cpvx48Lagdk/jHwh4Z1/S0x962tIGsZD+EjAfjX1OCCK+1pVFVlOaSV5z0Wy952XyVjt4spzpYzCxlJy/2XCe895NYakpP1c1K/ncWimksMkMMe9Rx30MvEMiSckExksODg9B61sfLk1FMEkp/5Y/+PCnBiThsA+maAFrmvij8KPBXxe8NSeGfG2lLPFndbXMZ2z2snaSJ+qMOPYjgggkHpSQBknH1pDkH5iMelY4jD0MVRlSrRUoyVmnqmKUYzjaSuj43Pwf8c+GPjFqvwm+IPiANc+I7Vb/wT4rcmMyapaAeRIWH3ZWQssvV2Yo2WZlY8v8AtH/HD4i6H8Rfgx+0V4P06SHV9T1a48D+L9PeST91qynzLO3EGTjzWa7VlGGKzRhmzEuPeP27vBw8UaN4H+wXxstSl8bW2nWGoJndam4Vv3gIIIIaONsgg/Lwc18h/tMeOdWl1zwnf6lGlvqGl/GLw1rviDTpDtWLWbK7ksriOLA2F5vOS4cp0+7lgteFwvmM8jrYvJIttUX7ai5O94Ss61Jt6tauWurin1Tb5OHMpwWL4zoZfiI3pYrmovupShJ0aifSdKrZwfdq91E/Rf4Y+P8ARfij4D0zx74fY/ZtSthIEJyY3+68Z91YMp7ZXjit6vH/AIRL/wAKx+Pfi74ORsqadrEK+JdBhXpEJGEVynTAHmAbUHAUZ7mvYByM19fjqFOhiGqfwO0o+jV181s/NMxyrFVcXg06v8SLcZW/mi7Nrye68mgooorjPSCiiigAooooAKzPGPii18F+FdS8W3tlPcQ6XYy3U0FqFMjpGhdgoYgE4B6kVp1HcW8FzC8NxErpIhV0cZDAjkEVUXFSTkroiopyptQdnbR+Z4r4w8U6d4x+PHwQ8Z6Uri01Sx1ieDzANyiSwjZVbB4bnBHPINeH/tM+CrXwB/wUw+FfxX8PW0k8/wDa0LXlmoIRE1JJNMmdQoOSMRSknsshJrpPFVzc/Be3h8F6okiv8MfGltrek3IYma68PXMxjlRCcF2Dyqj5wpJwOFNM/wCCgHg/xH4i8WanrnguAz6vH8Mnv/DSJE0hvbiwvRdzW8WzJ8yS1EsakZw0qnBxivmcwyOVTNMypUX+8pOOKo/3o+zikvScac4vs3foeZw9nePp4rDVaHLGrOoqU1LSK9rF0KkW+ifNKPN0TufSX/Cl/hs3xlH7QP8Awji/8Jevhv8AsAawLmXP9nef9o8jy93l4807t23d2zjivxn/AOC4/wAK/g18YP8AgvP8PvB3x3/Ya8c/tCaEv7LwuE8B/D68uIL6Kddevwt6Wt7q2fy0BKMPMxmVcg9v1L/Yb/a80T9pH4Y6NNq96I9cm0pLiHziqnUYAShmQKSpdXRklVSQkiMOOg7O/wD2UP2f9V/alsP21r3wFv8AiZpngyTwnY+Jhqt2uzR3uGuWtTbiUW7DzmZ97RmQZwGxxXqZZj8LmeEWIobS3WzT6qS6SWzX6HvYqWMVZ0cVzKdK8HGV7w5W04We3K7q3R3PxH8V/C79s79mL9in9m/9hj9uHxN4k+EHwN+NP7SesWPiaKXxt9sv/Bngt44G0fwheajGQqx3ROoNJLkeXFGvmCNVlgX3j4x/sr/s6/8ABHv/AIKifsp+Ev8AglJa3/hrW/jF4ybQvir8G7LxRqGp2eueFwmZdcuIrq5leF7GP7RNHJkBzHIRkRzh/wBVvjt8Avgv+078LNW+CP7QXw00jxd4T1uER6noet2gmhlwQyuAeUkRgHSRSHRlVlZWAI8f/Yr/AOCRn/BOb/gnj4k1Lxr+yB+y7pHhTXNWt/s95rs2pXup3wgyCYY7i/nnlgiYqpaONlVyilgSoI9A5z8n/wBljxJ/wV5+B/x9/a4+J3/BOnw1aePfD/xL/bM8f/D+98K6jG/keBtfF3FNaeLWwrqbcRXTxXAKKuLW38xpB5ap4945+G/if4Q/8G8n7cvwj8ffEa88Y6z4W/bqvdH1zxfqKP8AaNcuba+0OGa+lDyO3mTOjStukY7pDlz96v6D/gH+y58Cv2XIPGUfwJ8CnRP+E/8AHmpeNPF2dUuro6jrt/5f2u8JuZXMZk8qP93GVjXb8qrk58w8W/8ABKL9hDx78HPiP+z/AOKvgKbnwf8AFr4jT+PfiFozeKdUUav4gmmhnlvPMW6EkG6WCJvKhZIRswIwCQQD8q/hT+xr40+Cfgv9sb42/s7/ALBnxG/Zr/Z31P8AYq8V6Hd+AviL4xnu7nXvFS208y6otpNd3Ekax2ZkhWRm2qGYJzLKE/Vj/gk5cJN/wS+/ZoiikXYPgJ4OwFI5YaJaZ/HOc/Q17L8VPhX4N+NHwt8SfBv4maF/anh3xdoF5oniDThcSQi6sbqBoJ4t8bK6b4nddyMGGcgggGvmL9lj/gg7/wAEsP2J/jnof7SP7NH7LbeHPGvh5bhdK1s+N9cvfs63FtJbSjybq9kibdDLIvzIcbsjBAIAPWP2yfFvh7RtR+FnhfVNWggvNZ+Kelx2EEp+aYpvLBfcZX86+df+CinwF1nUP2uPhP4h8N6VJLp+v/Efw/c6ygmHzCG7SG4ITsAj27k9zvPrXQf8FMPG0N1+1L+zZ8PtPlf7TafFzSL66ROcpJcbF6eixyE+zD1qD40/tL6z4v8A+Conhf4PeE5beXQ/AENlb6zIY2DrqupXEeY87trqLVY8EDKv5gJzwPgc2dGVWvjKUnzQq0o6dl7tRenJOaZ9jgsnlleGwnEGF96UIyrT5rcsfZ1vYrlfeTnFLd8707H2ykMTHzlQbiMbsc4qQcCkUYGKWvvlqfGpJBRRRQMKKKKACiiigAooooA8q/ak+BFx8WPCg1vwikcfibTLeaOxdn2i7t5UKTWjk8bXUnBOCrdGUMxrwzwH8XHXwf4J8Q+KBJba38KtfGla/b3ERVo9IuB9mMxTaDuj2pCRywZctjeK+yCAeteJ/tT/ALNtz4806++IHwvhW28Tmwa3voIwAmsWxXBikB+UyABSjnnKKMgqjJ3YGpgo46lXxTcfZqUeZJu9OfxQklq1vKLSbjJuyalJHyGf5Ti+WpisCryaTlDvKLThOP8Aei4q6+1FWunY+crX4S+GP2YP2oLj9l/xffT6F4I+Iesza58DfGFlJ5Z8Oa1IQbnRwy7QkTttaKH5VO5FUtLIWT68+DmsfGpbi88H/GPw9aPPp0cZtfEumSj7PqaNkZMZAMcg25YAbck4Cgru+crPxj+z/wDtT/s8v+yr+1ZcTaXe2iC3tNXu18iS0nh3LDcxTOD5FxEPlJkADfMrbhIyVa+BX7YHjv8AZh8Y6f8Asr/t9a9bo86bPh/8Yt23SvFNqPuJcSsSLe8C43b2w3UscxyT/NYnI4ZTmaxMW4wnqpxt7OpFr3b6NNbOE1Z2929tH+q4bEYPxKwEc1y6V8wpxSxFFfHU5Vb2qju5pK1aNua69quaMp8n2BRSJIkgzG4IxkEGlyPXpXrnzIUUAg9DQTjrQAVn+KPEujeEPD174n8Q3q21jp9u091O/wDCijJ4HJPoByTgDk1curu2sbeS7u50iiiQvLJIwVUUDJJJ4AA5r43/AGt/2z/g80MOqePNduG8CWN6f7N0PTV36j451GNgFtraH7xtkcgPK2E3FRncyFfGznNY5dRUadnVnpCL79ZPtGO8n8l7zSe2EweOzLGU8HgaTq1qjtGMVdt/5LdvZLc+ev2t/wBoC4+HX7Vvwq+N2reFrrWPFurHVvEWkeEIojK8qz2/9n+H4Qq9SbgSO2z5mTlQXAWu4+An7PWv/DT4neGF8U64dU8XT/EKwv8Ax5qRmDpqWuXMj3l88W0lEFuqw27KmAWj37V34qL9krU7742arrv/AAVY+Ovg+GXxPrF82gfBTwnChlhtI41aBXiBw0jeYZULfLyk7KoMiBfor4P/AA0n034++G/Btzd/ar7wXol5rfizVU3SfaNY1IKjRSPxlhEEZWIJZUOQCTjy6OWrLuGnKT5pYmcKdO+8uacZVqtu7jGT8uZpdT6nxIzClltHAcDYP48IovGTTT5qqnUqRopr7NOdWpKX80qavpGDPpNTkUtAGBRX1p8gFFFFABRRRQAUUUUAFFFFABSNnBx6UtBGQRQB4b8Z/gP4P+MT3HxQ+Ecumt4osi0VzFLDHJa6pt4MNxG4KsxAwrkcjbyQEZfA00n9l74laXe/CD46aDrngO4lnX+1dJinkudIurkEbZHhnWRonDEsob5YwoIkyK+w/E/wwt9R1U+KvCmqSaLrGMNd2ygpOPSVDw/1+mc4ArzP4v8Aw8n8YGPUviJ4Mu9O1y0iaO18XeFYxOjIRhknhY/PDg4ZX6guBtDEHxY8T5pl2F+pZjJ4dRb5K0YOrQabvarTvzRTvd3tyt3jOabi/FzDhq+OjmeUWdVNNwb5J3VvepzTi1Ps4tc2nMlZM858Kfs+/tH/AAG+DcWm/sOfHbSvGGlwSOYNG1PWMQxRqhCw2k04vFT5gFEWYYhkkkHr54P2vv2kPCEv9i/tseGPjT4FtoW3axqvhrwRaXul2cZwVf8AtWxY7uDuYJExG0g812EOj/DTw9qi3Hjr4aGW4AEVp40+GVzLZzLjgM1jlFjbjczImzJAUNjNeleGfh/8LvFNo15pX7XvxPtY1+Uw6l4re0YfRbiFSfqOKmpxRndGiqtH6rUh0nRnQlB/fTi4vy5k0epleIynEVJ0s3wFWtVk7yc8Tiqda/XWU5U5LzdOon/MzlfDX/BX/wD4JveGPD9n4fl/agvLw2NrHCbrU/DGrPcTbVC75GFmNzHGS2OSc0/UP+CyX7GuptFpvwbfxn8StXnl8uLQPA3gm8mvG+UncFuUhUjA7MT7V0Ou/Cv9mqEeT8Q/ih4u8biMgwWOq+IZ7ld56FTF5a7vq1E/xa+DPwx0K+n8Pa14L+HGkW8K/wBp6nPdQPqDxp3eNCXyOQTJk/NkHNfPUeKM2x1eUaEIVZdqN6sr/wB61qUPWdRI+3o1ODMPyKpl9amtElUxcLPolZYWM5ekXdnhvxK8af8ABQj9s/X9P8E3nwrPwl8F6hOsjaff30dzrV7bfKQxtwP3Em4EYulVEDB9khiOeG/as8AfAu1+KFz+zz8JrK1Hi2/0y1tvjN8SvtEl1J4e0YReUmk2IlZgl5cwjytqgFow5lAjMrwenX/7SXxY/acjvPhN/wAExfCt/wDZbm8MHiz47eJ7YxWtuuR5i2fmgNcT/MckKCnUIfMEyew/sef8E7/hd+y1psepX91L4k8STXBu73WtSy5e7bl5/myXlLc+Y3PAKhMnPVw9w4q+Y1M0zSbcpK3LGXNaN78kZWSbf2p2UIK8acW7s+pzTPKvBlLnwOGhh8XKNoUo83u3s1VxTlOU5KLSlSw0pe9NKc406dlOP4Z+AbP4X+CIvjr8SPCUukaN4J8O/Z/A3gqJS7aPZRxhVL7uTcOAoLPyucuQRiP0D9mTwL4i0DwpeePvH8W3xN4xvTqmsKyENbKw/c2o3DeqRIcBGyULMMmvS9q/3R+VLgDoK+rx1GWPzSni5u0aUXGEEvdjfRta78ui9ZNtuWn4vh8EqM3UnNznJuUpS1lOcvinJ9W9uyWi0Ciiiug7gooooAKKKKACiiigAooooAKK4n9pb416d+zX+zj8QP2i9Y0KfVLTwB4J1XxHdaZbSiOS7jsbOW6aFGbIVmERUE8AnNfF/gD/AIL0Wnjv4Jar46P7FXiqx8Yx6X4G1bwz4Ik8Z6PMmu6d4s1NdO0mUX8U7Q2EpmOZLe9EEkaFHIKligB+g1IVzX52eP8A/g4O8GeBPhjo/ibUP2W7yw8TT/FjWPh54j8N+KPil4d0my0bV9N0yHUp92sT3X9nyRGGeNVcyoTKTFt37Vbu/Dv/AAWD1nxR+078Kv2W9I/ZQL614/8ABmneJ9Zkb4veGk+wadfvdC1n0tXu1HiOJY7SW4uJNPZ1hhKFfOdhFQB9k6n4T8Ma3IJdZ8PWN069GuLRHI/Eg1Sl+Gfw9eMo3gjSsEHpYRg/gQOK+J7X/gs78YNA8GfFH4h/Gb/gnD4p8H6L8KPF2k+FPEN7P8RNGvt2u3+oaJbxWSJayO5xba5b3ZmAaLbG0e4SHA72z/4KkeJfFH7Qw8DfDn9jLxbrPwttfiNceANW+MN14t0TTIB4hgvBZ3Ednpt7dxXWoWkE/mJLcRDdut5/KinEeTwVcqyuvU9pVoQlLu4xb+9o1jXrwjyxk0vVkv7Rv7G/7RvxA+Iz6f8AA2T4V+GvCdxbRb9e1fTb+91u1m58zy4WkNrIvTG4Dg47ZNP4Y/8ABHv4L2+tQeMf2mfH+tfFPWIZlmFrqMaafo0cikYaPT7bCgYADIzujc5U5qt+zD/wVj1D9qX9tXxP+yT4L/ZwsYrLwj4q8SaRrviRfjD4dnv7SHSL25sHvpdCS5/tOKCW7hiiVmhAH2uJ8lCGNH4n/wDBY5fh74l8Y/EDTf2LviBrfwG+GXiy88MfEv442l7YRw6RqNndJaXstvpMkovr+xtZ3Mc91EnymC4MaTLEWPY4ylS9lKcnDpFyfKvSN+X8D18Hn+LyulGOXU6WHmlZ1KVKnCtLo26yj7XXqlNJ9j7J0Hw5oXhbRrXw54Z0e007T7KBYbOxsbZYYYI1GFREQBVUDgADAq6BgYr4v+Fn/BXTU/jB+2X40/ZV8G/suPJpvgTxrqvhvWvFtx8UNDgnaaxshdvNDpEs6388TK8a74o3UbmJb93IF579mj/gtZr37QXwx0v42an+x1PoHhPXNZ8G6bpWp2vxX0DWJjL4j1iy06zFxaWM73Fkyi8M7JcJG2IJIyFcYF7Kx4km5ScpO7Z940V8sfC//gox8U/jp8bH0j4I/sE+PPE3whg8W3nha4+M9r4l0WC3OpWd/JY3dxDp9xdx3M+mwzRSq12mXYwuI4JMAnlv+CV3/BXpv+Co99e6l4N/Z2tPDnhyy0AahPrEfxa0DWbu1nedY4LS70yyna9sHlVbiRTcRRjFsw6laBH2hRRRQAUUUUAFFFFAHB/G/wDad+A37N194N0/45fEiy8Nv8QPF9v4X8IvfxS+Xf6vPHLJDaeYqFImdYZApkKKzBUB3Oqnlx/wUD/Y7fWfjLoMHxx0+a5/Z90mLUvjD9msrmWPw5byW1xcgvIkRSdxFa3BaOAySI0RR1VyFPP/ALen7DXhz9ujVPhV4U+JXhvQNc8C+GfGWqah470HXJJVbULC68M6zpKpbeWhInS41GCVX3xGMRF0cSIgPyJ44/4II/EKyj+J3wD+A3xJ0Pw98Jfi7cfDqw8aapqGpTXXie70rRJdVvdZuHaS0e3n1C/vLq1JkmLxSLLdmRMbYXAPtnTf+Chf7GOrfDP4VfGSw+Pmkt4X+Nmv2uh/DHWmguEh1nUriOaSGzy0YNtM32eaPZOI2EqeSQJSEOP48/4Ki/sIfDH4GePP2k/Hnx+t9N8F/DP4gXXgjxrrE2hagTYa/bXMdrNYrAtuZrllllQb4EkjK7nDFFZh8zD/AIIo+NvF2hWP7Ln7QfjbRfiX8EtN+O/iHxtbnxNeR2+snTdb8LapbXdsttYabb2lvcw+INUuL+CSEosaSBo/KeGOM+dfBv8A4N/f2nB4Gsf2dP2kP2wLbVfAlp8ZPGvxD1jxLpVrbajr/iXUtStbfT9Nlu4dY064tFcWsurSXLHzj51zF5ZLKJkAPsD/AIKFftafsJ6B8LPEn7JH7TPxk1mz/wCFofC/WVvdO8A+GNR17V7bw7PbPaXOq+TptleG1t1EzBLqeLyC6kZfYyj5/wDEfw+/4IifBP8AZ78J/sA6d4PvbnQtS8PeA/GWpS/D34FX2uP400yyvUn0q81y40jRZ7W7S+fTJ1m89VaWNrjaIw4YUPBn/BLv/gpl8AvhZpGlfBP47fC7W/EU/wAL7D4YeLR4m1bxDpAl0DRtR1R9C1Wy1LSHivbS/Wyvo4rm3j2RySI7LcDhmr/HH/glx/wUl0z9ov4ZfHH4C+O/hP8AEHVPAvwd8FeGNS8W/F74i+NNIvtT1rQrrUZ5dSmtdGmMV8ty95HI8d/LcgssikEPI0gBl638Ff8AgjfoXwM8Y+K/An7d3iH4feEP2VPjj4pv9ci0bSNIMXgPWdSElne6PFp2o6HcLcWRlnuUtVWCctLI6QTSeUiRdB8R9B/Yt+Ln7U3gX9l74l/t7/HrxxrHwv8AFvg66PguH4JW11pdtq0ctvqmjTTalpnhRINI8yK4gWaS3ubVTbfu5WjVJKzPEv8AwbyeBfiR8PP2hPFPxS0XwpqnxU8f+LPihqvwz1IapdDSoF8Qrdf2PNqsZt/3lzYNd3LRsI5hbNdzvFvcoy6ui/8ABMv/AIKEfC//AIKyav8Atv8Awtl+Dd94L8S6r4V/tRde+Ini+01WysLLQrLSdREWnWIj0u7mZIrloDeLMAxibMZBCgHU+M9T/wCCU/7Q/wCzp4+srf8Aak8R3nhf49/tNWceq3WgWU0t7beONHi06caPFANPeS1UxeGIpGW4iJkSR2SXFxbmuA+Enwz/AOCav7aXx18U6l8EP2r/AI4f8Iv4M+Kb/FbxX8MdU+Fl3ZaHpHiixvbO/u3hvda8Pi8sZJLhkuJ9PtbxJJPtUzLGsbuKzfg//wAG/vxK+EnxJ+Bnxy8M/FDw3pXiDwh8adT8WfGTQtNurk6Z4stjq2uXWk3yMbdWbU7Sz1d7QmSNVeOVk80Lbx+Z9bfsvfsZ/Ez4JeGf2ltG8U65oN1L8ZfjF4h8WeGfsNzMy2tlf6VYWcMV0XhXZKJLWQsEEihWXDMcgAHzH+zf+1d/wSr+A3iXx1+118O/+CjXxNtfC1reXXj3xP4I8R/CiGzivLLxVrU3lXVssvhiHXNQ099Uv08qS2uZkRxAruUyrInwp/4JqftJQeJdG8Jfty/GfT/hd8W/jnNa+NvgENAubG11XxfPanXLrT5YL7RxrenW95DZ3F3LAk8EExkkEZXzfLat4x/4N7LWb/gmNL+zx4R8dSX3x21j4b+CfCmr+PfGHj7V9QsNMs9J1bS9Su9O0ppVd7CwM1lM8EMMEYDeSCECjZ33wf8A+CSvxr+DXxQ0q8t/ibYeK9J0X9qu3+Jy+NvG3i7UtS8U6voo8JX2jLp19JPDIJJ7SW4iit2E3lvaplhHKrCUA6D9nbw1/wAEjvht8R7L9ovwD4n0rXfFf7VOo+I/iJ4M8f614WSa+gsV0q1/tNbe/Fij6TYQW4QtHeOhWW6kjZmeTy68y8EePv8Aghj8F/8Agnd8ItY+EfifWdP+F2qa/wCFptD+IvgX4NanNqXifU/CWt2Is/7ak0/RWcXE2oQxRN9pihe5a5m+z4L7lzr/AP4Id/tI2+o/H3wT4P8Ajp4Z0nwT4/04+DPhFBYvLG/grwRr3iOXWvGVmLI2j2xuZ1nNraspP7u3t90kOwAdp4R/4JCfHf4NfDX4p/s9fDH4z6Drvgbxn8XfAPxE8Nv4l0+10u+sNS07XNNvNdimi0jT4bMRzW+k2ptxDDGDM8gkVdzTuAZPwo8afsPeBP2th8KvgH+3X+0nodjf+OtO8Z6h8CvD/wALtXk0LTtT13ZfxR3Vy/h97rSbK6ed7mWwlvIIY5Jpt6wqroPcP+CeP7FXwY/YD8Xah+yp8Gf2q/iF4mh8I+BdNup/AfizRtAWGxsL+8vksL1r2w0W0ubmUyabqUSrJdS7F8wvGN8L14n8Rf8Agmd+3ppn/BYTxN+338FZ/hFfeDPFmseFpbqHxT8QvFun6pp9tp9jHZ3ZSw0vy9PvZGUytGt4ZkBCcR7nB9v+MPwa/wCCjXh7/gof/wANFfsqD4KT/DrxX4I8J+G/iFb/ABB1HV01uGHStW1y6mk06OzgMG9oNZYL50mDJEMhVBLAHb/CT/gpf+w58c/Gfgf4efDP4/WF7rXxK0rV9R8CafdaZe2b61Bpd3LZ33k/aYYwZIpoJ8xEiRkhklVWjUuMHwv/AMFef+Cd3jtoF+H37Q6+I/tniPxLoOmnw34V1bURqOoaBpv9p6pDam2tX+1eXZkSxvDvS53Ktu0zsFPyb8Ev+De7+2tJ+Hvw7/bRufC/iHwx4Q+Fni3QZZvCut3sOpWes6j42j1+xv7Cc28TwGK1V4ZJAysWlki2SRO5boP2WP8Agir8WP2Z/wBrnwH8XvDGq/D7TPAvgn9o74k+OLHw1oc1zE9noGveHIdJ02yghFqsYmheFfMj3LGkeNjyH5aAPfYf+C0n/BO+X4fS/FBvif4yi0aPxnbeEoprn4LeLIprrXJ2vETT7eB9LE1zOr2F3HIsSP5TxbJNjOitp+Pf+Cuf7Cfwv8M+H/FnxA8eeM9KtvE2k6nqmlwXXwb8VC6Sw0+aOG9u7m2GmefZQRPNEDLcJGhEisCVINfPf7bf/BJr9qj4/fsVaJ8Cfhd4i+H48VaB+1lr3xVgTxB4p1nT9Pu9NvNb13UILVrzTIUvbe48vVIEcwFSrRyeXNwrGTw3+xV/wWB8A698GfiV8MdU/Zt0fxR4L+H/AIm8E+KE1jxB4t12xttN1LU9LvIbq0a8zeX9yg00bhdXKAlyoYghlAP0C8F+NPCPxH8H6V8QvAHiax1rQtd06DUNG1jS7pZ7a+tZo1kinikQlZI3RlZWBIIIIorzf9g/9krw5+wn+yB4A/ZJ8LeKLrXLXwRoKWUms3cXlvf3DO0txOI9z+SjzSSMsQZhGrKgYhQSUAet0UUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAf/Z';
 function generateFeedbackPDF_HTML(fb){
+normalizeFeedback(fb);
 var ratings=fb.ratings||{};
 var companyName='Prestige Office Management Private Limited';
 var fmtDate='';
 if(fb.date){var dp=fb.date.split('-');if(dp.length===3)fmtDate=dp[2]+'/'+dp[1]+'/'+dp[0];else fmtDate=fb.date;}
 var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:65px;height:65px;" />';
 var likertRows='';
-FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?r.score:0;
+FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?Number(r.score):0;
 var circles='';
 for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
 likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'</tr>';});
 var overallCircles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===fb.overallRating;overallCircles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
+for(var c=0;c<5;c++){var v=c+1;var filled=v===Number(fb.overallRating);overallCircles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
 var html='<!DOCTYPE html><html><head><meta charset="UTF-8">';
 html+='<style>@page{size:A4;margin:6mm 8mm;}body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}</style>';
 html+='</head><body>';
@@ -7119,7 +7181,7 @@ function uploadToDrive(folderId,fileName,htmlContent,onDone){
 function uploadFeedbackPDFToDrive(fb){
 try{
 var htmlContent=generateFeedbackPDF_HTML(fb);
-var fileName='IMSP_29_F05_Feedback_'+fb.empName.replace(/\s+/g,'_')+'_'+fb.training.replace(/\s+/g,'_')+'_'+fb.date;
+var fileName='IMSP_29_F05_Feedback_'+String(fb.empName||'Employee').replace(/\s+/g,'_')+'_'+String(fb.training||'Unknown').replace(/\s+/g,'_')+'_'+String(fb.date||'');
 uploadToDrive(getDriveFolder(),fileName,htmlContent,function(ok){
   if(ok){toast('Feedback PDF sent to Drive folder','success',5000);}
   else{toast('Drive upload had an issue — feedback saved locally','warning',5000);}
@@ -7145,7 +7207,7 @@ function downloadSingleFeedbackDoc(fbId){
   var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});
   if(!fb){toast('Feedback not found','error');return;}
   var html=generateFeedbackPDF_HTML(fb);
-  var fileName='IMSP_29_F05_Feedback_'+fb.empName.replace(/\s+/g,'_')+'_'+fb.training.replace(/\s+/g,'_')+'_'+fb.date;
+  var fileName='IMSP_29_F05_Feedback_'+String(fb.empName||'Employee').replace(/\s+/g,'_')+'_'+String(fb.training||'Unknown').replace(/\s+/g,'_')+'_'+String(fb.date||'');
   try{
     var blob=new Blob([html],{type:'application/msword'});
     var url=URL.createObjectURL(blob);
@@ -7156,8 +7218,12 @@ function downloadSingleFeedbackDoc(fbId){
     toast('Feedback downloaded: '+fileName+'.doc','success');
   }catch(e){toast('Download failed: '+e.message,'error');}
 }
-function downloadAllFeedbackDocs(){
-  var trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===quizState.training;});
+function downloadAllFeedbackDocs(trnName){
+  // FIX (Task 12): this filtered by quizState.training — from the training detail modal that
+  // value is stale/undefined (the admin is NOT taking a quiz), so "Download All as .doc"
+  // produced NOTHING (or the wrong training's forms). The modal now passes the name explicitly.
+  var _trnName=trnName||quizState.training;
+  var trnFeedbacks=(DB.feedbackForms||[]).filter(function(fb){return fb.training===_trnName;});
   if(!trnFeedbacks.length){toast('No feedback to download','warning');return;}
   trnFeedbacks.forEach(function(fb,i){
     setTimeout(function(){downloadSingleFeedbackDoc(fb.id);},i*500);
@@ -9125,6 +9191,7 @@ function buildFeedbackPayload(){
   var company=DB.settings.companyName||"PTS SAFETY";
   // IMSP 29 F05 format — each feedback = 1 row, columns match the form layout
   return (DB.feedbackForms||[]).map(function(fb){
+    normalizeFeedback(fb);
     var qScores=[];for(var k in (fb.ratings||{})){var r=fb.ratings[k];if(r&&r.score)qScores.push(r.score);}
     var avgScore=qScores.length?Math.round(qScores.reduce(function(a,b){return a+b;},0)/qScores.length*10)/10:'—';
     var row={
@@ -9810,7 +9877,7 @@ function loadDBFromLocal(){
       });
       DB.customQuestions=saved.customQuestions;
     }
-    if(saved.feedbackForms&&Array.isArray(saved.feedbackForms))DB.feedbackForms=saved.feedbackForms;
+    if(saved.feedbackForms&&Array.isArray(saved.feedbackForms))DB.feedbackForms=saved.feedbackForms.map(normalizeFeedback);
     if(saved.messages&&Array.isArray(saved.messages))DB.messages=saved.messages;
     if(saved.correctiveActions&&Array.isArray(saved.correctiveActions))DB.correctiveActions=saved.correctiveActions;
     return true;
@@ -9865,6 +9932,11 @@ async function loadDBFromFirestore(){
     var localEmpMap=Object.fromEntries((DB.employees||[]).map(e=>[e.id,e]));
     var localTrnMap=Object.fromEntries((DB.trainings||[]).map(t=>[t.id,t]));
     var localSopMap=Object.fromEntries((DB.sops||[]).map(s=>[s.id,s]));
+    // Task 13: pre-pull maps for the outcome funnel — testResults (by id) and certificates (by num).
+    // The pull handlers below used to REPLACE these collections with the cloud copy wholesale;
+    // these maps let the handlers preserve local-only rows (same protection employees/trainings have).
+    var localTestMap=Object.fromEntries((DB.testResults||[]).filter(function(r){return r&&r.id;}).map(r=>[r.id,r]));
+    var localCertMap=Object.fromEntries((DB.certificates||[]).filter(function(c){return c&&c.num;}).map(c=>[c.num,c]));
 
     // Load each collection individually — one failure won't break the rest
     const cols=[
@@ -9882,8 +9954,29 @@ async function loadDBFromFirestore(){
         const localOnly=Object.values(localTrnMap).filter(t=>!cloudIds.has(t.id)&&t._localAddedAt&&(Date.now()-t._localAddedAt)<3600000);
         DB.trainings=[...cloudTrns,...localOnly];
       }],
-      ['testResults','id',d=>{if(d.size>0)DB.testResults=d.docs.map(x=>x.data());}],
-      ['certificates','num',d=>{if(d.size>0)DB.certificates=d.docs.map(x=>x.data());}],
+      ['testResults','id',d=>{
+        // Task 13 (user report: "Tests Passed shows correct, then drops to 9 after some time"):
+        // this handler used to REPLACE testResults with the cloud copy wholesale. The cloud can
+        // be stale — the auto-sync push is admin-only and silently skipped while the tab is
+        // hidden / a sync is busy / admin auth fails, and employee-side per-result writes can
+        // fail — so the moment ANY pull ran (visibilitychange tab switch, login, "Sync from
+        // Cloud"), every local pass not yet in the cloud was wiped and the dashboard fell back
+        // to the cloud's older count. Merge like employees/trainings: cloud wins for shared
+        // ids, local-only rows survive until the next auto-sync push converges the cloud.
+        // Tombstones (applied after this block) still prune permanently-deleted ids.
+        const cloudTests=d.docs.map(x=>x.data());
+        const cloudTestIds=new Set(cloudTests.map(r=>String(r.id)));
+        const localOnlyTests=Object.values(localTestMap).filter(r=>r.id&&!cloudTestIds.has(String(r.id)));
+        DB.testResults=d.size>0?[...cloudTests,...localOnlyTests]:DB.testResults;
+      }],
+      ['certificates','num',d=>{
+        // Task 13: same replace-to-stale bug — the Certificates card dropped together with
+        // Tests Passed. Merge by num; local-only certificates survive the pull.
+        const cloudCerts=d.docs.map(x=>x.data());
+        const cloudCertNums=new Set(cloudCerts.map(c=>String(c.num)));
+        const localOnlyCerts=Object.values(localCertMap).filter(c=>c.num&&!cloudCertNums.has(String(c.num)));
+        DB.certificates=d.size>0?[...cloudCerts,...localOnlyCerts]:DB.certificates;
+      }],
       ['sops','id',d=>{
         const cloudSops=d.docs.map(x=>x.data());
         const cloudIds=new Set(cloudSops.map(s=>s.id));
@@ -9894,7 +9987,7 @@ async function loadDBFromFirestore(){
       ['admins','username',d=>{if(d.size>0)DB.admins=d.docs.map(x=>x.data());}],
       ['customEquipment','id',d=>{if(d.size>0)DB.customEquipment=d.docs.map(x=>x.data());}],
       ['customQuestions','ts',d=>{if(d.size>0){DB.customQuestions=d.docs.map(x=>x.data());DB.customQuestions.forEach(cq=>{if(!QUESTION_BANK[cq.cat])QUESTION_BANK[cq.cat]=[];if(!QUESTION_BANK[cq.cat].find(q=>q.q===cq.q&&q.customFor===cq.customFor)){QUESTION_BANK[cq.cat].push({q:cq.q,o:cq.o,a:cq.a,customFor:cq.customFor});}});}}],
-      ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>x.data());}],
+      ['feedbackForms','id',d=>{if(d.size>0)DB.feedbackForms=d.docs.map(x=>normalizeFeedback(x.data()));}],
       ['messages','id',d=>{if(d.size>0)DB.messages=d.docs.map(x=>x.data());}],
       ['correctiveActions','id',d=>{if(d.size>0)DB.correctiveActions=d.docs.map(x=>x.data());}]
     ];
