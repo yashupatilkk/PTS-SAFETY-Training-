@@ -280,6 +280,12 @@ select option{background:var(--sur);}
 .card:hover{box-shadow:var(--card-hover);transform:translateY(-2px);}
 .card-body{padding:16px;}
 .stat-card{background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;}
+.dash-card-scroll{max-height:96px;overflow-y:auto;margin-top:10px;padding-right:2px;}
+.dash-card-scroll::-webkit-scrollbar{width:5px;}
+.dash-card-scroll::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:99px;}
+/* Task 16: card rows are clickable — hover feedback so the admin can see they open data */
+.dash-card-scroll>div{cursor:pointer;border-radius:3px;transition:background .12s ease;}
+.dash-card-scroll>div:hover{background:rgba(139,109,232,.12);}
 .stat-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
 .stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;font-size:20px;}
 .stat-num{font-family:'Oswald',sans-serif;font-size:32px;font-weight:700;line-height:1;margin-bottom:3px;}
@@ -3119,6 +3125,103 @@ function getTotalAttendancesForTrainings(trainings){
   });
   return {total:total,per:per,unique:getAttendedPersonsForTrainings(trainings).length};
 }
+// Task 15: per-training breakdown behind the five dashboard cards — the scrollable lists inside
+// the cards are built from the SAME per-training funnels that produce the card totals, so the
+// big number, the list rows and the drill-downs can never disagree (no data mismatch).
+function getDashboardPerTrainingCardStats(trainings){
+  return (trainings||[]).map(function(t){
+    if(!t)return null;
+    var best=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+    var p=0,f=0;
+    best.forEach(function(r){if(isOfficialResultPass(r))p++;else f++;});
+    var roster=getDashboardTrainingEmployees(t);
+    var off=(t.offlineTrained||[]);
+    return {id:t.id,name:t.name||('Training '+(t.id||'')),isR2:!!t._isR2Training,trainer:t.trainer||'',
+      assigned:roster.length,passed:p,failed:f,
+      pending:getDashboardPendingForTraining(t),
+      offline:roster.filter(function(e){return off.indexOf(e.id)>=0;}).length};
+  }).filter(Boolean);
+}
+// Task 15: scrollable per-training rows inside a dashboard card (training names always visible;
+// the row of the currently selected training is highlighted amber).
+// Task 16: every row is CLICKABLE — clicking opens THAT training's related data for the card's
+// metric (openCardTrnDrill below). event.stopPropagation() keeps the card's own aggregate drill
+// from firing underneath the row click.
+function dashCardTrainingRows(stats,field,selId){
+  if(!stats||!stats.length)return'';
+  return '<div class="dash-card-scroll">'+stats.map(function(s){
+    var sel=selId&&s.id===selId;
+    var v=field==='name'?'':(s[field]||0);
+    return '<div onclick="event.stopPropagation();openCardTrnDrill(\''+field+'\',\''+_jsArg(s.name)+'\')" title="Click to see the related data" style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:10.5px;padding:2px 0;border-bottom:1px dashed var(--bdr);cursor:pointer;'+(sel?'color:var(--amber);font-weight:700;':'color:var(--muted);')+'">'
+      +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+String(s.name).replace(/</g,'&lt;')+(s.isR2?' — R2':'')+'</span>'
+      +(field==='name'?'':'<b style="color:'+(sel?'var(--amber)':'var(--txt)')+';">'+v+'</b>')
+      +'</div>';
+  }).join('')+'</div>';
+}
+// Task 16: clicking a per-training row inside a dashboard card opens THAT training's related
+// data for the clicked metric. The card lists always show ALL trainings (Task 15), so the
+// training is looked up across getDashboardTrainings() — INDEPENDENT of the dashboard filter —
+// and every count comes from the SAME funnels that built the card row (getDashboardTrainingEmployees,
+// bestResultsByPersonTrn(getDashboardResultsForTraining) + isOfficialResultPass,
+// getDashboardPendingForTraining), so the modal can never disagree with the row the admin clicked.
+function openCardTrnDrill(field,trnName){
+  var t=getDashboardTrainings().filter(function(x){return x&&(x.name===trnName||('Training '+x.id)===trnName);})[0];
+  if(!t){toast('Training not found: '+trnName,'warning',3000);return;}
+  var roster=getDashboardTrainingEmployees(t);
+  var best=bestResultsByPersonTrn(getDashboardResultsForTraining(t));
+  var passed=best.filter(isOfficialResultPass).sort(function(a,b){return Number(b.score||0)-Number(a.score||0);});
+  var failed=best.filter(function(r){return !isOfficialResultPass(r);}).sort(function(a,b){return Number(a.score||0)-Number(b.score||0);});
+  var m=makeRosterTesterMatcher(t);
+  var off=(t.offlineTrained||[]);
+  var pendList=roster.filter(function(e){return !m.tested(e)&&off.indexOf(e.id)<0;});
+  var offList=roster.filter(function(e){return off.indexOf(e.id)>=0;});
+  var FIELD_LABELS={name:'Training',assigned:'Roster',pending:'Pending',passed:'Passed',failed:'Failed'};
+  var CARD_NAMES={name:'Total Number of Trainings Assigned',assigned:'Total Trainings Assigned to Individuals',pending:'Employee Training Progress',passed:'Total test pass',failed:'Total test fail'};
+  var title=_escDrill((FIELD_LABELS[field]||'Training')+' — '+t.name)+(t._isR2Training?' (Round 2)':'');
+  var badges='<span class="badge badge-info">Enrolled: '+roster.length+'</span>'
+    +'<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Passed: '+passed.length+'</span>'
+    +'<span class="badge badge-danger">Failed: '+failed.length+'</span>'
+    +'<span class="badge badge-amber">Pending: '+pendList.length+'</span>'
+    +(offList.length?'<span class="badge badge-info">Offline: '+offList.length+'</span>':'')
+    +(t.trainer?'<span class="badge badge-amber" style="margin-left:auto;">Trainer: '+_escDrill(t.trainer)+'</span>':'');
+  var rosterTable=function(){
+    var rows=roster.map(function(e){
+      var b=m.best(e),status;
+      var allRows=m.rows(e);
+      if(b&&isOfficialResultPass(b))status='<span class="badge badge-active">PASS '+Number(b.score||0)+'%</span>';
+      else if(b)status='<span class="badge badge-danger">FAIL '+Number(b.score||0)+'%</span>';
+      else if(off.indexOf(e.id)>=0)status='<span class="badge badge-info">Offline training</span>';
+      else status='<span class="badge badge-amber">Pending</span>';
+      var doneDate=(b&&isOfficialResultPass(b))?getLastPassDate(allRows):'';
+      return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id)+'</td><td><b>'+_escDrill(e.name)+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td style="text-align:center;">'+allRows.length+'</td><td>'+status+'</td><td style="white-space:nowrap;">'+(doneDate?formatDate(doneDate):'—')+'</td></tr>';
+    }).join('');
+    return '<div class="table-wrap" style="max-height:380px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Attempts</th><th>Status</th><th>Completed On</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  };
+  var nameTable=function(list,badge){
+    var rows=list.map(function(e){
+      return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id)+'</td><td><b>'+_escDrill(e.name)+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td>'+badge+'</td></tr>';
+    }).join('');
+    return '<div class="table-wrap" style="max-height:380px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  };
+  var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+badges+'</div>';
+  var emptyMsg={name:'No employees are assigned to this training yet.',assigned:'No employees are assigned to this training yet.',
+    pending:'Nobody is pending in this training — every assigned person has tested or attended offline.',
+    passed:'Nobody has passed this training yet.',failed:'Nobody has failed this training — everyone who tested passed.'};
+  if(field==='passed'){
+    body+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--green);margin:4px 0 8px;">Passed — best score at or above the pass mark ('+(t.passing||70)+'%)</div>'
+      +(passed.length?_drillOutTable(passed):'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg.passed+'</p>');
+  }else if(field==='failed'){
+    body+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--red);margin:4px 0 8px;">Failed — best score below the pass mark</div>'
+      +(failed.length?_drillOutTable(failed):'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg.failed+'</p>');
+  }else if(field==='pending'){
+    body+=(pendList.length?nameTable(pendList,'<span class="badge badge-amber">Pending</span>'):'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg.pending+'</p>')
+      +(offList.length?'<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Offline training — attended, NOT pending</div>'+nameTable(offList,'<span class="badge badge-info">Offline training</span>'):'');
+  }else{ // 'name' (training overview) and 'assigned' (full roster) — both show every person + status
+    body+=(roster.length?rosterTable():'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg[field]+'</p>');
+  }
+  body+='<div style="font-size:11px;color:var(--muted);margin-top:10px;">Opened from the '+_escDrill(CARD_NAMES[field]||'dashboard')+' card — the numbers match the row you clicked, independent of the dashboard training filter.</div>';
+  _drillModal(title,body);
+}
 // Task 14: one-click dashboard refresh for admin monitoring — pushes the outcome funnel first so
 // the merge-pull below can never show data older than local (Task 13 pairing), then re-renders
 // the dashboard and stamps the time so the admin always knows how fresh the numbers are.
@@ -3219,6 +3322,11 @@ function renderDashboard(){
       +(_dupEmps.length?'<button class="btn btn-sm btn-amber" onclick="reviewDuplicateEmployees()"><span class="mat-ico" style="font-size:12px;">person_search</span> Review duplicates</button>':'')
       +'</div>';
   }
+  // Task 15: per-training card breakdowns — computed once, reused by all five scroll lists
+  // (always ALL trainings with names, so the admin can scroll other trainings' data in every box;
+  // the big card numbers keep following the "Show dashboard data for training" filter).
+  var _cardStats=getDashboardPerTrainingCardStats(officialTrainings);
+  var _selCardId=selectedTraining?selectedTraining.id:null;
   const el=document.getElementById("view-dashboard");
   el.innerHTML=`
     <div class="dash-greeting"><h2>Good ${getGreeting()}, <span style="color:var(--amber)">${(currentUser.name||"Admin").split(" ")[0]}</span></h2>
@@ -3234,13 +3342,14 @@ function renderDashboard(){
       ${_dashLastRefresh?'<span id="dashRefreshTime" style="font-size:11px;color:var(--muted);">Updated '+_dashLastRefresh+'</span>':''}
     </div>
     ${_dataHealth}
-    <div class="stat-grid" style="margin-bottom:18px;">
-      ${statCard("how_to_reg","Training Attended",attendedCount,"#2dd4bf",attendedSub,"openAttendedDrill()","See every attendance behind this number")}
-      ${statCard("people",selectedTraining?"Employees Attending":"Total Employees",total,"#3ea0e8",selectedTraining?"Selected training":"All Departments","openEmployeesDrill()","See the people behind this number")}
-      ${statCard("school","Total Trainings",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2","openTrainingsDrill()","See every training with its numbers")}
-      ${statCard("check_circle","Tests Passed",completed,"#3ecf8e","Official training pass count","openPassFailDrill(0)","See everyone who passed")}
-      ${statCard("pending","Pending",pending,"#f0883e","Awaiting training","openPendingDrill()","See everyone still pending")}
-      ${statCard("cancel","Tests Failed",failed,"#e8483a","Official training fail count","openPassFailDrill(1)","See everyone who failed")}
+    <div class="stat-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:18px;">
+      ${statCard("school","Total Number of Trainings Assigned",totalTrn,"#8b6de8",selectedTraining?"Selected training":"Scheduled + Round 2","openTrainingsDrill()","See every training with its numbers",dashCardTrainingRows(_cardStats,"name",_selCardId))}
+      ${statCard("how_to_reg","Total Trainings Assigned to Individuals",attendedCount,"#2dd4bf",attendedSub,"openAttendedDrill()","See every attendance behind this number",dashCardTrainingRows(_cardStats,"assigned",_selCardId))}
+      ${statCard("pending","Employee Training Progress",pending,"#f0883e",selectedTraining?"Awaiting completion":"Awaiting training","openPendingDrill()","See everyone still pending",dashCardTrainingRows(_cardStats,"pending",_selCardId))}
+      ${statCard("check_circle","Total test pass",completed,"#3ecf8e","Official training pass count","openPassFailDrill(0)","See everyone who passed",dashCardTrainingRows(_cardStats,"passed",_selCardId))}
+      ${statCard("cancel","Total test fail",failed,"#e8483a","Official training fail count","openPassFailDrill(1)","See everyone who failed",dashCardTrainingRows(_cardStats,"failed",_selCardId))}
+    </div>
+    <div class="stat-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:18px;">
       ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library","openEquipmentDrill()","See the full equipment library")}
       ${statCard("workspace_premium","Certificates",certCount,"#c084fc",certSub,"openCertsDrill()","See the issued certificates")}
       ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%","openAvgScoreDrill()","See every score behind the average")}
@@ -3421,13 +3530,14 @@ function renderEmpDashboard(){
 function getGreeting(){const h=new Date().getHours();return h<12?"Morning":h<17?"Afternoon":"Evening";}
 // onclick (optional): the whole card becomes clickable and opens the data behind the number —
 // same drill contract as the graphs (user: "I click the box and its data must show").
-function statCard(icon,label,val,color,sub,onclick,hint){
+function statCard(icon,label,val,color,sub,onclick,hint,extra){
   const clickAttrs=onclick?` onclick="${onclick}" title="${hint||"Click to see the data behind this number"}" style="border-left:4px solid ${color};cursor:pointer;"`:` style="border-left:4px solid ${color}"`;
   return`<div class="stat-card"${clickAttrs}>
     <div class="stat-icon" style="background:${color}22"><span class="mat-ico" style="color:${color};font-size:18px;">${icon}</span></div>
     <div class="stat-num" data-target="${parseInt(val)||0}" ${String(val).includes("%")?'data-suffix="%"':''}>${val}</div>
     <div class="stat-label">${label}</div>
     <div class="stat-sub">${sub}</div>
+    ${extra||""}
     ${onclick?`<span class="mat-ico" style="position:absolute;top:8px;right:8px;font-size:15px;color:var(--muted);opacity:.55;">zoom_in</span>`:""}
   </div>`;
 }
