@@ -3356,7 +3356,8 @@ function renderDashboard(){
     <div class="stat-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:18px;">
       ${statCard("build","Equipment Items",EQUIPMENT_DATA.length,"#ffb020","In library","openEquipmentDrill()","See the full equipment library")}
       ${statCard("workspace_premium","Certificates",certCount,"#c084fc",certSub,"openCertsDrill()","See the issued certificates")}
-      ${statCard("percent","Avg Score",avgScore+"%","#3ecf8e","Pass rate "+compPct+"%","openAvgScoreDrill()","See every score behind the average")}
+      ${/* Task 20 — user request: Pass rate is the HEADLINE (big number), Avg Score moves to the small sub label. */""}
+      ${statCard("percent","Pass Rate",compPct+"%","#3ecf8e","Avg Score "+avgScore+"%","openAvgScoreDrill()","See every score behind the average")}
     </div>
     <div class="quick-actions" style="margin-bottom:18px;">
       <div class="quick-action" onclick="openAddEmpModal()">
@@ -3971,7 +3972,9 @@ function openAvgScoreDrill(){
       '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
     (list.length?_drillOutTable(list):'<p style="color:var(--muted);text-align:center;padding:24px;">No test results in this scope yet.</p>')+
     '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Pass rate = Total test pass ÷ Total Trainings Assigned to Individuals × 100 — the exact numbers the Total test pass and Total Trainings Assigned to Individuals cards show. The average is the BEST score per person per training, sorted high to low.</div>';
-  _drillModal('Average Score — '+avg+'%',body);
+  // Task 20 — the dashboard card now headlines the PASS RATE, so the drill title matches it
+  // (the Average badge inside still shows the avg score, which is now the card's sub label).
+  _drillModal('Pass Rate — '+compPct+'%',body);
 }
 function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   // Scope by RESOLVED training id (loose name matching) so name variants and Round 2 trainings
