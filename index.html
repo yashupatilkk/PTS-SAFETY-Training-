@@ -3197,11 +3197,11 @@ function openCardTrnDrill(field,trnName){
     }).join('');
     return '<div class="table-wrap" style="max-height:380px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Attempts</th><th>Status</th><th>Completed On</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   };
-  var nameTable=function(list,badge){
+  var nameTable=function(list,badge,withActions){
     var rows=list.map(function(e){
-      return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id)+'</td><td><b>'+_escDrill(e.name)+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td>'+badge+'</td></tr>';
+      return '<tr><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id)+'</td><td><b>'+_escDrill(e.name)+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td>'+badge+'</td>'+(withActions?'<td style="white-space:nowrap;">'+offlineMarkBtns(t.id,e.id,'dash')+'</td>':'')+'</tr>';
     }).join('');
-    return '<div class="table-wrap" style="max-height:380px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    return '<div class="table-wrap" style="max-height:380px;overflow-y:auto;"><table><thead><tr><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th>'+(withActions?'<th>Mark Result</th>':'')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
   };
   var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+badges+'</div>';
   var emptyMsg={name:'No employees are assigned to this training yet.',assigned:'No employees are assigned to this training yet.',
@@ -3215,7 +3215,7 @@ function openCardTrnDrill(field,trnName){
       +(failed.length?_drillOutTable(failed):'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg.failed+'</p>');
   }else if(field==='pending'){
     body+=(pendList.length?nameTable(pendList,'<span class="badge badge-amber">Pending</span>'):'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg.pending+'</p>')
-      +(offList.length?'<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Offline training — attended, NOT pending</div>'+nameTable(offList,'<span class="badge badge-info">Offline training</span>'):'');
+      +(offList.length?'<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Offline training — attended, NOT pending · mark the outcome</div>'+nameTable(offList,'<span class="badge badge-info">Offline training</span>',true):'');
   }else{ // 'name' (training overview) and 'assigned' (full roster) — both show every person + status
     body+=(roster.length?rosterTable():'<p style="color:var(--muted);text-align:center;padding:12px;">'+emptyMsg[field]+'</p>');
   }
@@ -3374,7 +3374,7 @@ function renderDashboard(){
     </div>
     <!-- GROUPED BAR CHARTS -->
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openMonthlyTestDetails(-1)"><canvas id="chartMonthly"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar for that month, or click anywhere on the graph to see all tests.</div></div>
+      <div class="chart-card"><div class="chart-card-title" style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Monthly Training Activity (Real Data)<button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 10px;font-size:11px;" onclick="openMonthlyTestDetails(-1)"><span class="mat-ico" style="font-size:12px;">list_alt</span> View tests</button></div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openMonthlyTestDetails(-1)"><canvas id="chartMonthly"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Months = when trainings were ADDED: each month shows the total trainings added + Round 1 / Round 2 / Offline pass-fail progress of those trainings. Click a bar to see the people behind it.</div></div>
       <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Department-wise Completion</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openDeptDrill(-1)"><canvas id="chartDept"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a bar for that department, or click anywhere on the graph to see all departments.</div></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
@@ -3382,7 +3382,7 @@ function renderDashboard(){
       <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Training-wise Completion (Grouped)</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openTrnCompDrill(-1)"><canvas id="chartTrnCompletion"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a training for its full completion list, or click anywhere on the graph to see all trainings.</div></div>
     </div>
     <div class="chart-grid" style="margin-bottom:18px;">
-      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openScoreDistDrill(-1)"><canvas id="chartScoreDist"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Click a score band to see who scored there, or click anywhere on the graph to see all scores.</div></div>
+      <div class="chart-card"><div class="chart-card-title"><span class="dot"></span>Score Distribution</div><div class="chart-box" style="cursor:pointer;" onclick="if(event&&event.target&&event.target.tagName!=='CANVAS')openScoreDistDrill(-1)"><canvas id="chartScoreDist"></canvas></div><div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Pass range only (70-100%). Click a band to see who scored there, or click anywhere on the graph to see all scores.</div></div>
       <div class="chart-card">
         <div class="chart-card-title"><span class="dot"></span>Recent Test Activities</div>
         <div class="activity-list">
@@ -3541,18 +3541,30 @@ function statCard(icon,label,val,color,sub,onclick,hint,extra){
     ${onclick?`<span class="mat-ico" style="position:absolute;top:8px;right:8px;font-size:15px;color:var(--muted);opacity:.55;">zoom_in</span>`:""}
   </div>`;
 }
-// Drill-down data for the Monthly Training Activity chart: which tests are behind each bar.
-// Buckets mirror the chart's last-6-months window; rebuilt on every dashboard render.
-function buildMonthlyDrillBuckets(chartResults){
+// Drill-down data for the Monthly Training Activity chart — REWORKED (Task 17): the months are
+// now bucketed by the month each TRAINING WAS ADDED (createdAt, falling back to its scheduled
+// date), not by test date. Each bucket carries that month's trainings AND every official result
+// belonging to them, so the chart can show "trainings added" next to the pass/fail progress of
+// exactly those trainings (Round 1 / Round 2 / Offline split in drawCharts + the drill modal).
+function buildMonthlyDrillBuckets(trainings,results){
   var monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   var now=new Date();
   var buckets=[];
   for(var mi=5;mi>=0;mi--){
     var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
     var mKey=md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0');
-    buckets.push({label:monthNames[md.getMonth()]+' '+String(md.getFullYear()).slice(2),mKey:mKey,
-      results:chartResults.filter(function(r){return r.date&&r.date.startsWith(mKey);})});
+    buckets.push({label:monthNames[md.getMonth()]+' '+String(md.getFullYear()).slice(2),mKey:mKey,trainings:[],results:[]});
   }
+  (trainings||[]).forEach(function(t){
+    if(!t)return;
+    var key=String(t.createdAt||t.date||'').slice(0,7);
+    var b=buckets.find(function(x){return x.mKey===key;});
+    if(b)b.trainings.push(t);
+  });
+  buckets.forEach(function(b){
+    var ids={};b.trainings.forEach(function(t){ids[t.id]=1;});
+    b.results=(results||[]).filter(function(r){return ids[resultTrnId(r)];});
+  });
   return buckets;
 }
 // Attempt number per test in a drill-down list (oldest first), keyed by the result object.
@@ -3567,39 +3579,71 @@ function computeAttemptNumbers(list){
   return attOf;
 }
 function _escDrill(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-// Modal listing the tests behind the Monthly Training Activity chart. idx = month bucket index,
-// or -1 for all visible months.
-function openMonthlyTestDetails(idx){
-  if(!window._monthlyDrillData){window._monthlyDrillData={buckets:buildMonthlyDrillBuckets(getDashboardOfficialResults()),scope:'All official results'};}
-  var D=window._monthlyDrillData,buckets=D.buckets||[],list=[],title;
-  if(idx>=0&&buckets[idx]){list=buckets[idx].results.slice();title='Tests — '+buckets[idx].label;}
-  else{buckets.forEach(function(b){list=list.concat(b.results);});title='Tests — Last 6 Months';}
-  list.sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''));});
-  var passed=list.filter(isOfficialResultPass).length,failed=list.length-passed;
-  var attOf=computeAttemptNumbers(list);
-  var rowsHtml=list.map(function(r){
-    var pass=isOfficialResultPass(r),att=attOf.get(r)||1;
-    return '<tr>'+
-      '<td style="font-weight:600;white-space:nowrap;">'+formatDate(r.date)+'</td>'+
-      '<td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(r.empId)+'</td>'+
-      '<td><b>'+_escDrill(r.empName)+'</b>'+(att>1?' <span class="badge badge-info" style="font-size:9px;">Attempt #'+att+'</span>':'')+'</td>'+
-      '<td>'+_escDrill(r.training)+'</td>'+
-      '<td style="font-weight:700;color:'+(pass?'var(--green)':'var(--red)')+';">'+Number(r.score||0)+'%</td>'+
-      '<td><span class="badge badge-'+(pass?'active':'danger')+'">'+(pass?'PASS':'FAIL')+'</span></td>'+
-    '</tr>';
-  }).join('');
-  var body=list.length?
-    '<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Date</th><th>Employee ID</th><th>Name</th><th>Training</th><th>Score</th><th>Result</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'
-    :'<p style="color:var(--muted);text-align:center;padding:24px;">No tests recorded for this period.</p>';
-  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>'+title+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
-      '<span class="badge badge-amber">Total Tests: '+list.length+'</span>'+
-      '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Passed: '+passed+'</span>'+
-      '<span class="badge badge-danger">Failed: '+failed+'</span>'+
-      '<span class="badge badge-info" style="margin-left:auto;">'+_escDrill(D.scope)+'</span>'+
-    '</div>'+body+
-    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">This list counts every official test attempt (retakes included, shown as "Attempt #2" etc.). The dashboard Tests Passed / Tests Failed cards count each person once by best score — that is why Total Tests can be higher than Passed + Failed.</div>'+
-  '</div>','860px');
+// Modal behind the Monthly Training Activity chart (Task 17): dsIdx selects what to show for the
+// clicked month — 0 = the trainings ADDED that month, 1/2 = Round 1 pass/fail progress, 3/4 =
+// Round 2 pass/fail progress, 5/6 = Offline training pass/fail progress. Called with no dsIdx
+// (View tests button / empty click) it still lists every official test attempt of the window.
+function openMonthlyTestDetails(idx,dsIdx){
+  if(!window._monthlyDrillData){window._monthlyDrillData={buckets:buildMonthlyDrillBuckets(getDashboardTrainings(),getDashboardOfficialResults()),scope:'All Trainings (incl. Round 2)'};}
+  var D=window._monthlyDrillData,buckets=D.buckets||[],title,body='';
+  var r2Of=function(r){var tr=findTrainingLoose(r.training);return !!(tr&&tr._isR2Training);};
+  var hasBucket=idx>=0&&buckets[idx];
+  if(hasBucket&&dsIdx===0){
+    var b=buckets[idx];
+    title='Trainings Added — '+b.label;
+    var rows=b.trainings.map(function(t){
+      return '<tr onclick="openTrainingDetail(\''+_jsArg(t.id)+'\')" style="cursor:pointer;"><td><b>'+_escDrill(t.name)+'</b>'+(t._isR2Training?' <span class="badge badge-info" style="font-size:9px;">Round 2</span>':'')+'</td><td style="white-space:nowrap;">'+formatDate(t.date)+'</td><td>'+_escDrill(t.trainer||'')+'</td><td style="text-align:center;">'+getDashboardTrainingEmployees(t).length+'</td><td style="text-align:center;"><span class="mat-ico" style="font-size:14px;color:var(--muted);">chevron_right</span></td></tr>';
+    }).join('');
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'
+      +'<span class="badge badge-amber">Trainings added: '+b.trainings.length+'</span>'
+      +'<span class="badge badge-info" style="margin-left:auto;">'+_escDrill(D.scope)+'</span></div>'
+      +(rows?'<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Date</th><th>Trainer</th><th>Enrolled</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:24px;">No trainings were added in this month.</p>')
+      +'<div style="font-size:11px;color:var(--muted);margin-top:10px;">Bucketed by the month each training was added. Click a training to open it.</div>';
+  }else if(hasBucket&&dsIdx>=1){
+    var b2=buckets[idx];
+    var best=bestResultsByPersonTrn(b2.results);
+    var SETS={
+      1:{list:best.filter(function(r){return isOfficialResultPass(r)&&!r.offline&&!r2Of(r);}),label:'Round 1 Pass',color:'var(--green)',cls:'badge-active',tag:'PASS'},
+      2:{list:best.filter(function(r){return !isOfficialResultPass(r)&&!r.offline&&!r2Of(r);}),label:'Round 1 Fail',color:'var(--red)',cls:'badge-danger',tag:'FAIL'},
+      3:{list:best.filter(function(r){return isOfficialResultPass(r)&&!r.offline&&r2Of(r);}),label:'Round 2 Pass',color:'var(--green)',cls:'badge-active',tag:'PASS'},
+      4:{list:best.filter(function(r){return !isOfficialResultPass(r)&&!r.offline&&r2Of(r);}),label:'Round 2 Fail',color:'var(--red)',cls:'badge-danger',tag:'FAIL'},
+      5:{list:best.filter(function(r){return isOfficialResultPass(r)&&r.offline;}),label:'Offline Pass',color:'var(--green)',cls:'badge-active',tag:'PASS'},
+      6:{list:best.filter(function(r){return !isOfficialResultPass(r)&&r.offline;}),label:'Offline Fail',color:'var(--red)',cls:'badge-danger',tag:'FAIL'}
+    };
+    var S=SETS[dsIdx]||SETS[1];
+    title=S.label+' — '+b2.label;
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'
+      +'<span class="badge badge-info">Person + training outcomes: '+S.list.length+'</span>'
+      +'<span class="badge badge-info" style="margin-left:auto;">'+_escDrill(D.scope)+'</span></div>'
+      +(S.list.length?_drillOutTable(S.list):'<p style="color:var(--muted);text-align:center;padding:24px;">Nobody here for this month.</p>')
+      +'<div style="font-size:11px;color:var(--muted);margin-top:10px;">These are the trainings ADDED in '+_escDrill(b2.label)+' — best outcome per person, split Round 1 / Round 2 / Offline exactly like the chart bar you clicked.</div>';
+  }else{
+    var list=[];
+    buckets.forEach(function(b){list=list.concat(b.results);});
+    list.sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''));});
+    var passed=list.filter(isOfficialResultPass).length,failed=list.length-passed;
+    var attOf=computeAttemptNumbers(list);
+    var rowsHtml=list.map(function(r){
+      var pass=isOfficialResultPass(r),att=attOf.get(r)||1;
+      return '<tr>'
+        +'<td style="font-weight:600;white-space:nowrap;">'+formatDate(r.date)+'</td>'
+        +'<td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(r.empId)+'</td>'
+        +'<td><b>'+_escDrill(r.empName)+'</b>'+(att>1?' <span class="badge badge-info" style="font-size:9px;">Attempt #'+att+'</span>':'')+'</td>'
+        +'<td>'+_escDrill(r.training)+'</td>'
+        +'<td style="font-weight:700;color:'+(pass?'var(--green)':'var(--red)')+';">'+Number(r.score||0)+'%</td>'
+        +'<td><span class="badge badge-'+(pass?'active':'danger')+'">'+(pass?'PASS':'FAIL')+'</span></td>'
+        +'</tr>';
+    }).join('');
+    title='Tests — Last 6 Months';
+    body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'
+      +'<span class="badge badge-amber">Total Tests: '+list.length+'</span>'
+      +'<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Passed: '+passed+'</span>'
+      +'<span class="badge badge-danger">Failed: '+failed+'</span>'
+      +'<span class="badge badge-info" style="margin-left:auto;">'+_escDrill(D.scope)+'</span></div>'
+      +(list.length?'<div class="table-wrap" style="max-height:420px;overflow-y:auto;"><table><thead><tr><th>Date</th><th>Employee ID</th><th>Name</th><th>Training</th><th>Score</th><th>Result</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:24px;">No tests recorded for this period.</p>')
+      +'<div style="font-size:11px;color:var(--muted);margin-top:10px;">This list counts every official test attempt (retakes included, shown as "Attempt #2" etc.). The dashboard Tests Passed / Tests Failed cards count each person once by best score — that is why Total Tests can be higher than Passed + Failed.</div>';
+  }
+  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>'+title+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'+body+'</div>','860px');
 }
 // ---------- DASHBOARD GRAPH DRILL-DOWNS (user: click a graph box anywhere -> see the related data) ----------
 // Every dashboard chart opens the data behind it: click a BAR for that exact slice, click anywhere
@@ -3750,8 +3794,10 @@ function openTrnCompDrill(idx,byName){
 // 4) SCORE DISTRIBUTION — click a score band -> everybody whose best score falls in that band.
 function openScoreDistDrill(idx){
   var S=_drillScope();
-  var ranges=["0-39%","40-59%","60-69%","70-79%","80-89%","90-100%"];
-  var bandOf=function(r){var s=Number(r.score||0);return s<=39?0:s<=59?1:s<=69?2:s<=79?3:s<=89?4:5;};
+  // Task 17: only the LAST 3 bands — 70-79 / 80-89 / 90-100 (the pass region). Lower bands were
+  // removed from the chart; the "All scores" view below still lists every best outcome.
+  var ranges=["70-79%","80-89%","90-100%"];
+  var bandOf=function(r){var s=Number(r.score||0);if(s<70)return -1;return s<=79?0:s<=89?1:2;};
   var title='Score Distribution',body='';
   if(idx<0||!ranges[idx]){
     var all=S.outcomes.slice().sort(function(a,b){return Number(b.score||0)-Number(a.score||0);});
@@ -3854,7 +3900,8 @@ function openPendingDrill(){
         total++;
         rows+='<tr><td>'+_escDrill(t.name)+'</td><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td><span class="badge badge-amber">Pending</span></td></tr>';
       }else if(off.indexOf(e.id)>=0){
-        offRows+='<tr><td>'+_escDrill(t.name)+'</td><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td><span class="badge badge-info">Offline training</span></td></tr>';
+        // Task 17: offline rows carry the PASS / FAIL marking buttons right in the drill
+        offRows+='<tr><td>'+_escDrill(t.name)+'</td><td class="mono" style="color:var(--amber);font-weight:700;">'+_escDrill(e.id||'(no ID)')+'</td><td><b>'+_escDrill(e.name||'')+'</b></td><td>'+_escDrill(e.dept||'')+'</td><td><span class="badge badge-info">Offline training</span></td><td style="white-space:nowrap;">'+offlineMarkBtns(t.id,e.id,'dash')+'</td></tr>';
       }
     });
   });
@@ -3862,8 +3909,8 @@ function openPendingDrill(){
       '<span class="badge badge-amber">Pending: '+total+'</span>'+
       '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
     (rows?'<div class="table-wrap" style="max-height:360px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p style="color:var(--muted);text-align:center;padding:16px;">Nobody is pending in this scope — everyone assigned has tested or attended offline.</p>')+
-    (offRows?'<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Offline training — attended, NOT pending</div><div class="table-wrap" style="max-height:200px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th></tr></thead><tbody>'+offRows+'</tbody></table></div>':'')+
-    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Pending = assigned to the training, never tested and not marked offline-trained. These are the exact people behind the Pending card (a person who tested and failed is NOT pending — they appear under Tests Failed).</div>';
+    (offRows?'<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;">Offline training — attended, NOT pending · mark the outcome</div><div class="table-wrap" style="max-height:200px;overflow-y:auto;"><table><thead><tr><th>Training</th><th>Employee ID</th><th>Name</th><th>Dept</th><th>Status</th><th>Mark Result</th></tr></thead><tbody>'+offRows+'</tbody></table></div>':'')+
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Pending = assigned to the training, never tested and not marked offline-trained. These are the exact people behind the Pending card (a person who tested and failed is NOT pending — they appear under Tests Failed). Mark an offline person PASS or FAIL to record their offline training outcome.</div>';
   _drillModal('Pending — '+total+' person'+(total===1?'':'s'),body);
 }
 // 9) EQUIPMENT ITEMS card -> the full library grouped by category.
@@ -3930,17 +3977,34 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   const isDark=document.documentElement.getAttribute("data-theme")==="dark";
   const gridColor=isDark?"rgba(255,255,255,.05)":"rgba(0,0,0,.05)";
   const textColor=isDark?"#7d8590":"#656d76";
-  // === MONTHLY CHART — REAL DATA from testResults ===
-  // Buckets double as drill-down data: clicking a bar opens the list of THAT month's tests.
-  var monthlyDrillBuckets=buildMonthlyDrillBuckets(chartResults);
+  // === MONTHLY CHART — REWORKED (Task 17), REAL DATA ===
+  // Months are bucketed by when each TRAINING WAS ADDED; each month shows the total trainings
+  // added + the pass/fail progress of exactly those trainings, split into Round 1 (online test),
+  // Round 2 (R2 trainings) and Offline (offline-marked results). Best outcome per person, the
+  // same funnel the cards use, so chart and cards can never disagree.
+  var monthlyDrillBuckets=buildMonthlyDrillBuckets(chartTrainings,chartResults);
   window._monthlyDrillData={buckets:monthlyDrillBuckets,scope:selectedTrn?('Training: '+selectedTrn.name):'All Trainings (incl. Round 2)'};
   var monthLabels=monthlyDrillBuckets.map(function(b){return b.label;});
-  var monthTestData=monthlyDrillBuckets.map(function(b){return b.results.length;});
-  var monthPassedData=monthlyDrillBuckets.map(function(b){return b.results.filter(isOfficialResultPass).length;});
-  var monthFailedData=monthlyDrillBuckets.map(function(b){return b.results.filter(function(r){return !isOfficialResultPass(r);}).length;});
+  var mBest=monthlyDrillBuckets.map(function(b){return bestResultsByPersonTrn(b.results);});
+  var mR2Of=function(r){var tr=findTrainingLoose(r.training);return !!(tr&&tr._isR2Training);};
+  var mTrnAdded=monthlyDrillBuckets.map(function(b){return b.trainings.length;});
+  var mR1Pass=mBest.map(function(best){return best.filter(function(r){return isOfficialResultPass(r)&&!r.offline&&!mR2Of(r);}).length;});
+  var mR1Fail=mBest.map(function(best){return best.filter(function(r){return !isOfficialResultPass(r)&&!r.offline&&!mR2Of(r);}).length;});
+  var mR2Pass=mBest.map(function(best){return best.filter(function(r){return isOfficialResultPass(r)&&!r.offline&&mR2Of(r);}).length;});
+  var mR2Fail=mBest.map(function(best){return best.filter(function(r){return !isOfficialResultPass(r)&&!r.offline&&mR2Of(r);}).length;});
+  var mOffPass=mBest.map(function(best){return best.filter(function(r){return isOfficialResultPass(r)&&r.offline;}).length;});
+  var mOffFail=mBest.map(function(best){return best.filter(function(r){return !isOfficialResultPass(r)&&r.offline;}).length;});
   destroyChart("chartMonthly");
   var mCtx=document.getElementById("chartMonthly");
-  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[{label:"Total Tests",data:monthTestData,backgroundColor:"rgba(255,176,32,.7)",borderRadius:6},{label:"Passed",data:monthPassedData,backgroundColor:"rgba(62,207,142,.7)",borderRadius:6},{label:"Failed",data:monthFailedData,backgroundColor:"rgba(232,72,58,.7)",borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:30}},onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index);}else{openMonthlyTestDetails(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{labels:{color:textColor,font:{size:11}}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see which tests';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});}
+  if(mCtx){charts.monthly=new Chart(mCtx,{type:"bar",data:{labels:monthLabels,datasets:[
+    {label:"Trainings Added",data:mTrnAdded,backgroundColor:"rgba(139,109,232,.85)",borderRadius:4},
+    {label:"R1 Pass",data:mR1Pass,backgroundColor:"rgba(62,207,142,.8)",borderRadius:4},
+    {label:"R1 Fail",data:mR1Fail,backgroundColor:"rgba(232,72,58,.8)",borderRadius:4},
+    {label:"R2 Pass",data:mR2Pass,backgroundColor:"rgba(45,212,191,.8)",borderRadius:4},
+    {label:"R2 Fail",data:mR2Fail,backgroundColor:"rgba(240,136,62,.8)",borderRadius:4},
+    {label:"Offline Pass",data:mOffPass,backgroundColor:"rgba(62,160,232,.8)",borderRadius:4},
+    {label:"Offline Fail",data:mOffFail,backgroundColor:"rgba(255,176,32,.8)",borderRadius:4}
+  ]},options:{responsive:true,maintainAspectRatio:false,datasets:{bar:{maxBarThickness:14}},onClick:function(evt,els){if(els&&els.length){openMonthlyTestDetails(els[0].index,els[0].datasetIndex);}else{openMonthlyTestDetails(-1);}},onHover:function(evt){if(evt.native)evt.native.target.style.cursor="pointer";},plugins:{legend:{labels:{color:textColor,font:{size:10},boxWidth:12}},tooltip:{callbacks:{afterBody:function(items){return 'Click to see the people/trainings behind this bar';}}}},scales:{x:{grid:{color:gridColor},ticks:{color:textColor,font:{size:10}}},y:{grid:{color:gridColor},ticks:{color:textColor,precision:0},beginAtZero:true}}}});}
   // === DEPARTMENT CHART — REAL DATA ===
   // Dept of a result = the employee's CURRENT department (lookup by empId, fallback to the dept
   // recorded on the result). Dept list is dynamic: every dept that actually has employees or
@@ -3986,8 +4050,10 @@ function drawCharts(dashPassed,dashFailed,selectedTrainingName){
   destroyChart("chartScoreDist");
   var sdCtx=document.getElementById("chartScoreDist");
   if(sdCtx){
-    var ranges=["0-39%","40-59%","60-69%","70-79%","80-89%","90-100%"];
-    var rangeColors=["#e8483a","#f0883e","#ffb020","#3ea0e8","#3ecf8e","#8b6de8"];
+    // Task 17: keep only the LAST 3 score bands (70-79 / 80-89 / 90-100) — everything below the
+    // pass range was removed at the user's request, so the chart shows the pass region only.
+    var ranges=["70-79%","80-89%","90-100%"];
+    var rangeColors=["#3ea0e8","#3ecf8e","#8b6de8"];
     var rangeCounts=ranges.map(function(rng){
       var parts=rng.replace('%','').split('-').map(Number);
       return chartOutcomeResults.filter(function(r){return Number(r.score)>=parts[0]&&Number(r.score)<=parts[1];}).length;
@@ -5796,6 +5862,9 @@ function openTrainingDetail(id){
             // so any failed employee can be sent to offline training immediately (Step 3).
             if(!offlineTrained){actionBtns+='<button class="btn btn-sm" style="background:var(--blue);color:#fff;" onclick="sendOfflineNotice(\''+t.id+'\',\''+e.id+'\',\''+e.name.replace(/\'/g,"\\\'")+'\')" title="Send Offline Training Notice — required for every failed person"><span class="mat-ico" style="font-size:11px;">assignment</span> Offline</button>';}
           }
+          // Task 17: offline-trained people (not yet passed) get a PASS / FAIL marking option —
+          // recording the outcome counts it in the dashboard pass/fail cards and charts.
+          if(offlineTrained&&!done){actionBtns+=offlineMarkBtns(t.id,e.id,'trn');}
           // FIX: Certificate column replaced by Pass/Fail result badge (same table position)
           var resultBadge=bestPass?'<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:800;letter-spacing:.04em;">PASS</span>':(attempts>0?'<span class="badge" style="background:rgba(232,72,58,.15);color:var(--red);font-weight:800;letter-spacing:.04em;">FAIL</span>':'<span style="color:var(--muted);">—</span>');
           var aiAssign=getAssignmentInfo(t,e.id);
@@ -6061,6 +6130,85 @@ function sendOfflineNotice(trnId,empId,empName){
   // Re-render
   var trn=DB.trainings.find(function(x){return x.id===trnId;});
   if(trn)setTimeout(function(){openTrainingDetail(trn.id);},300);
+}
+// ---------- TASK 17: OFFLINE TRAINING PASS / FAIL MARKING ----------
+// Offline-trained people (t.offlineTrained) previously never appeared in any pass/fail number.
+// The admin can now record the OUTCOME of the offline training: PASS or FAIL. Choosing PASS asks
+// for the training (dropdown, pre-selected) and the score — the result is saved as a REAL official
+// test result flagged offline:true, so the dashboard pass/fail cards, the per-training card rows,
+// the monthly chart (Offline Pass/Fail bars) and the certificates (score 75%+) all pick it up
+// through the existing funnels with zero double-counting.
+function offlineMarkBtns(trnId,empId,from){
+  if(!trnId||!empId)return'';
+  return ' <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:1px 8px;font-size:10px;" onclick="openOfflineResultModal(\''+trnId+'\',\''+empId+'\',\'pass\',\''+(from||'dash')+'\')" title="Mark offline training PASS — asks for the training, counts in the dashboard pass counts"><span class="mat-ico" style="font-size:10px;">check</span> Pass</button>'
+    +' <button class="btn btn-sm btn-red" style="padding:1px 8px;font-size:10px;" onclick="openOfflineResultModal(\''+trnId+'\',\''+empId+'\',\'fail\',\''+(from||'dash')+'\')" title="Mark offline training FAIL"><span class="mat-ico" style="font-size:10px;">close</span> Fail</button>';
+}
+var _offlineMarkCtx=null;
+function openOfflineResultModal(trnId,empId,outcome,from){
+  var t=DB.trainings.find(function(x){return x&&x.id===trnId;});
+  var e=DB.employees.find(function(x){return x&&x.id===empId;});
+  if(!t||!e){toast('Employee or training not found','warning',3000);return;}
+  _offlineMarkCtx={trnId:trnId,empId:empId,empName:e.name||empId,outcome:outcome==='fail'?'fail':'pass',from:from==='trn'?'trn':'dash'};
+  var trnOpts=getDashboardTrainings().map(function(x){
+    return '<option value="'+_escDrill(x.id)+'"'+(x.id===trnId?' selected':'')+'>'+_escDrill(x.name)+(x._isR2Training?' — Round 2':'')+'</option>';
+  }).join('');
+  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Mark Offline Training Result</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'
+    +'<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:14px;font-size:13px;"><b>'+_escDrill(e.name)+'</b> ('+_escDrill(e.id)+')'+(e.dept?' <span class="badge badge-info">'+_escDrill(e.dept)+'</span>':'')+' attended <b>Offline Training</b>. Select the outcome and confirm the training, so the result counts everywhere.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">'
+    +'<div><span style="font-size:12px;font-weight:700;">Outcome</span><select id="off_outcome" class="form-control-sm" style="width:100%;margin-top:4px;"><option value="pass"'+(outcome!=='fail'?' selected':'')+'>PASS — counts in Total test pass</option><option value="fail"'+(outcome==='fail'?' selected':'')+'>FAIL — counts in Total test fail</option></select></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Training</span><select id="off_trn" class="form-control-sm" style="width:100%;margin-top:4px;">'+trnOpts+'</select></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Score %</span><input id="off_score" type="number" min="0" max="100" class="form-control-sm" value="'+(outcome==='fail'?'50':'100')+'" style="width:100%;margin-top:4px;"></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Date</span><input id="off_date" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;margin-top:4px;"></div>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--muted);">PASS records an official pass for the selected training — it counts in the dashboard pass cards and the monthly chart, and a score of 75%+ auto-issues a certificate. FAIL records an official fail. Scores are auto-adjusted to match the outcome against the pass mark. The offline marking itself is kept.</div>'
+    +'</div><div class="modal-foot"><button class="btn btn-amber" onclick="confirmOfflineResult()"><span class="mat-ico">check</span> Save Result</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
+}
+function confirmOfflineResult(){
+  var ctx=_offlineMarkCtx;if(!ctx){toast('Nothing to save — open the marking option first','warning',3000);return;}
+  var el=function(id){return document.getElementById(id);};
+  var outcome=(el('off_outcome')||{}).value==='fail'?'fail':'pass';
+  var trnId=(el('off_trn')||{}).value||ctx.trnId;
+  var score=Math.max(0,Math.min(100,parseInt((el('off_score')||{}).value,10)||0));
+  var date=(el('off_date')||{}).value||new Date().toISOString().split('T')[0];
+  var t=DB.trainings.find(function(x){return x&&x.id===trnId;});
+  if(!t){toast('Select a training','warning',3000);return;}
+  var passing=Number(t.passing)||70;
+  // ONE TRUTH: the funnels decide PASS purely by score vs the pass mark, so the recorded score
+  // is clamped to agree with the chosen outcome (PASS -> at least the pass mark, FAIL -> below it).
+  if(outcome==='pass'&&score<passing)score=passing;
+  if(outcome==='fail'&&score>=passing)score=passing-1;
+  var pass=outcome==='pass';
+  var e=DB.employees.find(function(x){return x&&x.id===ctx.empId;});
+  var empName=e?e.name:ctx.empName;
+  var result={id:genId('TST'),empId:ctx.empId,empName:empName,dept:(e&&e.dept)||'',training:t.name,cat:t.cat||'',score:score,pass:pass,offline:true,method:'Offline Training',date:date,
+    attempt:DB.testResults.filter(function(r){return r&&!r.practice&&r.empId===ctx.empId&&r.training===t.name;}).length+1,
+    trainer:t.trainer||'',passing:passing,
+    failureReason:pass?'Offline training completed — pass confirmed by admin':'Offline training outcome marked FAIL by admin (score '+score+'% below '+passing+'% pass mark).'};
+  // same double-submit guard as the quiz: drop an identical same-day row before pushing
+  DB.testResults=DB.testResults.filter(function(r){return !(r&&!r.practice&&r.empId===ctx.empId&&r.training===t.name&&r.date===date&&Number(r.score)===score);});
+  DB.testResults.push(result);
+  if(pass){
+    if(!t.completed)t.completed=[];
+    if(!t.completedDates)t.completedDates={};
+    if(!t.completed.includes(ctx.empId))t.completed.push(ctx.empId);
+    t.completedDates[ctx.empId]=date;
+  }
+  DB.notifications.unshift({id:genId('N'),msg:empName+' — offline training for '+t.name+' marked '+(pass?'PASS':'FAIL')+' ('+score+'%)',time:'Just now',read:false,icon:pass?'check_circle':'cancel',forEmp:ctx.empId});
+  updateBadges();saveDB();
+  if(typeof firebaseReady!=="undefined"&&firebaseReady&&typeof fbDB!=="undefined"&&fbDB){
+    (async function(){try{
+      if(typeof isAdmin==="undefined"||!isAdmin){try{await authAsAdmin();}catch(e){}}
+      await fbDB.collection('testResults').doc(String(result.id)).set(sanitizeForFirestore(result),{merge:true});
+      if(pass)await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});
+      console.log('Offline training result saved to Firebase');
+    }catch(err){console.warn('Firebase offline result save error:',err);}})();
+  }
+  try{queueSheetSync(['Trainings','Certificates']);}catch(err){}
+  if(pass){try{autoIssueCertificates();}catch(err){}}
+  toast(empName+' — offline training marked '+(pass?'PASS':'FAIL')+' for '+t.name,'success',4000);
+  var from=ctx.from;_offlineMarkCtx=null;closeModal();
+  if(from==='trn'){setTimeout(function(){openTrainingDetail(t.id);},250);}
+  else{try{renderDashboard();}catch(err){}}
 }
 function uploadOfflineNCR_ToDrive(rec,trn,emp){
   try{
