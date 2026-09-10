@@ -3305,7 +3305,11 @@ function renderDashboard(){
   const _minCert=Number(DB.settings.minCertScore)||75;
   const certCount=getOfficialTrainingCertificates().filter(function(c){return !selectedTraining||resultTrnId(c)===selectedTraining.id;}).length;
   const certSub="Passed test · score ≥ "+_minCert+"% · one per person & training";
-  const compPct=outcomeResults.length?Math.round(completed/outcomeResults.length*100):0;
+  // Task 18 — Pass rate formula (user request): Total test pass / Total Trainings Assigned to
+  // Individuals x 100. The denominator is the SAME number the "Total Trainings Assigned to
+  // Individuals" card shows (sum of per-training rosters), and the numerator is the SAME number
+  // the "Total test pass" card shows — so the pass rate can never disagree with the cards.
+  const compPct=attendedCount>0?Math.round(completed/attendedCount*100):0;
   // DATA HEALTH strip: when employee rows > unique persons, show the reasons + one-click review
   // directly on the dashboard (duplicate rows merged / rows without ID). This is THE answer to
   // "I assigned everyone — why does Training Attended show fewer?"
@@ -3954,14 +3958,19 @@ function openAvgScoreDrill(){
   var scoreSum=0;S.outcomes.forEach(function(r){scoreSum+=Number(r.score||0);});
   var avg=S.outcomes.length?Math.round(scoreSum/S.outcomes.length):0;
   var passed=S.outcomes.filter(isOfficialResultPass).length;
-  var compPct=S.outcomes.length?Math.round(passed/S.outcomes.length*100):0;
+  // Task 18 — SAME formula as the card: Total test pass / Total Trainings Assigned to Individuals x 100.
+  // The denominator is the attendance total of THIS scope (selected training or all trainings),
+  // so the badge always matches the card sub label.
+  var _attD=getTotalAttendancesForTrainings(S.trainings);
+  var compPct=_attD.total>0?Math.round(passed/_attD.total*100):0;
   var body='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">'+
       '<span class="badge badge-amber">Average: '+avg+'%</span>'+
       '<span class="badge" style="background:rgba(62,207,142,.15);color:var(--green);font-weight:700;">Pass rate: '+compPct+'%</span>'+
+      '<span class="badge badge-info">Total test pass '+passed+' ÷ Assigned '+_attD.total+' × 100</span>'+
       '<span class="badge badge-info">Results: '+S.outcomes.length+'</span>'+
       '<span class="badge badge-amber" style="margin-left:auto;">'+_escDrill(S.scopeLabel)+'</span></div>'+
     (list.length?_drillOutTable(list):'<p style="color:var(--muted);text-align:center;padding:24px;">No test results in this scope yet.</p>')+
-    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">The average of the BEST score per person per training, sorted high to low — the exact set the Avg Score card and the pass rate use.</div>';
+    '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Pass rate = Total test pass ÷ Total Trainings Assigned to Individuals × 100 — the exact numbers the Total test pass and Total Trainings Assigned to Individuals cards show. The average is the BEST score per person per training, sorted high to low.</div>';
   _drillModal('Average Score — '+avg+'%',body);
 }
 function drawCharts(dashPassed,dashFailed,selectedTrainingName){
@@ -5883,8 +5892,8 @@ function openTrainingDetail(id){
         }).join("")}</tbody></table></div>`:"<p style='color:var(--muted);font-size:12px;'>No employees assigned yet.</p>"}
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)${trnFeedbacks.length?`<button class="btn btn-sm btn-outline" style="margin-left:auto;border-color:var(--green);color:var(--green);" onclick="downloadAllFeedbackDocs('${_jsArg(t.name)}')"><span class="mat-ico" style="font-size:11px;">download</span> Download All as .doc</button>`:''}</div>
       ${trnFeedbacks.length?`<div class="table-wrap" style="max-height:280px;overflow-y:auto;"><table>
-        <thead><tr><th>Emp ID</th><th>Name</th><th>Date</th><th>Overall</th><th>Q1-Q10 Avg</th><th>Enjoyed</th><th>Details</th></tr></thead>
-        <tbody>${trnFeedbacks.map(function(fb){normalizeFeedback(fb);var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=Number(fb.overallRating)||0;var olColor=overallScore>0&&overallScore<=2?'var(--green)':overallScore===3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
+        <thead><tr><th>Emp ID</th><th>Name</th><th>Date</th><th>Overall</th><th>Q1-Q10 Avg</th><th>Enjoyed</th><th>Drive</th><th>Details</th></tr></thead>
+        <tbody>${trnFeedbacks.map(function(fb){normalizeFeedback(fb);var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=Number(fb.overallRating)||0;var olColor=overallScore>0&&overallScore<=2?'var(--green)':overallScore===3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td style="white-space:nowrap;">${fb.driveStatus==='sent'?'<span class="badge badge-active" title="PDF sent to the Drive folder">Sent</span>':fb.driveStatus==='failed'?'<span class="badge badge-danger" title="Last upload failed — click Send to retry">Not sent</span>':'<span class="badge" style="background:rgba(139,109,232,.15);color:var(--purple);" title="No Drive record — use Send to upload">—</span>'} <button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="sendFeedbackToDrive('${fb.id}')" title="Send this feedback PDF to the Drive folder now"><span class="mat-ico" style="font-size:11px;">cloud_upload</span></button></td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
     </div>
   `,"900px");
 }
@@ -7335,9 +7344,12 @@ if(fb.date){var dp=fb.date.split('-');if(dp.length===3)fmtDate=dp[2]+'/'+dp[1]+'
 var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:65px;height:65px;" />';
 var likertRows='';
 FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?Number(r.score):0;
+// Task 19 — the numeric MARK is printed next to the circles (max 5): "4/5", "3/5" ... so the
+// mark each employee gave is readable in the Drive PDF at a glance, not just via the dot.
+var _markTxt=r?(sc+'/5'):'\u2014';
 var circles='';
 for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
-likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'</tr>';});
+likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:9.5px;font-weight:bold;width:12%;">'+_markTxt+'</td></tr>';});
 var overallCircles='';
 for(var c=0;c<5;c++){var v=c+1;var filled=v===Number(fb.overallRating);overallCircles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
 var html='<!DOCTYPE html><html><head><meta charset="UTF-8">';
@@ -7373,17 +7385,20 @@ html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
 html+='</tr>';
 html+=likertRows;
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>How do you rate the training overall?</b></td></tr>';
 html+='<tr>';
+html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>';
 html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
 html+='</tr>';
-html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'</tr>';
+html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:9.5px;font-weight:bold;width:12%;">'+(Number(fb.overallRating)||0)+'/5</td></tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:170px;">'+(fb.enjoy||'')+'</td></tr>';
 html+='<tr><td colspan="6" style="border:1px solid #000;border-top:1px solid #ccc;padding:4px 6px;font-size:7pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
@@ -7441,10 +7456,24 @@ try{
 var htmlContent=generateFeedbackPDF_HTML(fb);
 var fileName='IMSP_29_F05_Feedback_'+String(fb.empName||'Employee').replace(/\s+/g,'_')+'_'+String(fb.training||'Unknown').replace(/\s+/g,'_')+'_'+String(fb.date||'');
 uploadToDrive(getDriveFolder(),fileName,htmlContent,function(ok){
+  // Task 19 — remember per-feedback Drive outcome so the admin can SEE which feedback forms
+  // reached the Drive folder and which need a re-send (the send button on each feedback row).
+  fb.driveStatus=ok?'sent':'failed';
+  if(ok)fb.driveSentAt=new Date().toISOString();
+  try{if(typeof saveDB==='function')saveDB();}catch(e){}
   if(ok){toast('Feedback PDF sent to Drive folder','success',5000);}
-  else{toast('Drive upload had an issue — feedback saved locally','warning',5000);}
+  else{toast('Drive upload had an issue — feedback saved locally. Use Send to Drive on the feedback row to retry.','warning',5000);}
 });
-}catch(e){console.warn('Drive PDF upload error:',e);toast('Drive upload failed — feedback saved locally','warning',5000);}
+}catch(e){fb.driveStatus='failed';console.warn('Drive PDF upload error:',e);toast('Drive upload failed — feedback saved locally','warning',5000);}
+}
+// Task 19 — admin re-send: any feedback that never reached Drive (offline at submit time,
+// Drive not connected yet, transient error) can be pushed to the Drive folder again with one
+// click from the training modal's feedback table.
+function sendFeedbackToDrive(fbId){
+  var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});
+  if(!fb){toast('Feedback not found','error');return;}
+  toast('Sending feedback PDF to Drive...','info',2500);
+  uploadFeedbackPDFToDrive(fb);
 }
 function fallbackDownloadFeedback(htmlContent,fileName){
 // Save as .doc file (Word can open HTML .doc files)
