@@ -1963,12 +1963,24 @@ function startAutoSync(){
           const fbCerts=fbCertSnap.docs.map(d=>d.data());
           let newCerts=0;
           fbCerts.forEach(fbC=>{if(!DB.certificates.find(c=>c.num===fbC.num)){DB.certificates.push(fbC);newCerts++;}});
+          // Task 23 — also pull employee feedback forms here (previously only loaded on tab-switch/login),
+          // so the Feedback sheet tab stays current without the admin touching anything.
+          let newFbs=0;
+          try{
+            const fbFbSnap=await fbDB.collection('feedbackForms').get();
+            const fbFbs=fbFbSnap.docs.map(d=>d.data());
+            fbFbs.forEach(fbR=>{if(fbR&&fbR.id&&!((DB.feedbackForms||[]).find(f=>f.id===fbR.id))){(DB.feedbackForms=DB.feedbackForms||[]).push(normalizeFeedback(fbR));newFbs++;}});
+          }catch(e2){console.warn('Admin feedback pull error:',e2);}
           // Reconcile training completed arrays from all testResults (source of truth)
           const trainingsUpdated=reconcileTrainingsFromResults()>0;
           // Save merged data to localStorage (don't re-push to avoid loop)
-          if(newTests||newCerts||trainingsUpdated){
+          if(newTests||newCerts||newFbs||trainingsUpdated){
             try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
             if(typeof renderAll==='function')renderAll();
+            // Task 23 — THE FIX: merged employee data must reach Google Sheets automatically.
+            // Previously this merge updated the app + Firebase but the Sheet stayed stale
+            // until the admin made another change by hand.
+            queueSheetSync();
           }
         }catch(e){console.warn('Admin pull merge error:',e);}
       }
@@ -1983,6 +1995,8 @@ function startAutoSync(){
       try{
         // ALWAYS auth as admin before reading Firestore — employees don't have read permission
         try{await authAsAdmin();}catch(e){console.warn('Visibility sync auth failed:',e);return;}
+        // Task 23 — snapshot the sheet-relevant data BEFORE the pull so we can tell whether it changed
+        const _preSheetSig=(typeof _sheetDataSignature==='function')?_sheetDataSignature():'';
         const loadResult=await loadDBFromFirestore();
         // If cloud load failed, restore local backup
         if(loadResult&&loadResult.failed&&loadResult.failed.length>0&&_localBackup){
@@ -1995,6 +2009,9 @@ function startAutoSync(){
         // Save to localStorage only (don't push back to cloud — cloud is source of truth)
         try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
         if(typeof renderAll==='function')renderAll();
+        // Task 23 — if the cloud pull changed anything (new employee results, feedback, certs),
+        // push the updated data to Google Sheets automatically instead of waiting for a manual action.
+        try{if(_preSheetSig&&(typeof _sheetDataSignature==='function')&&_sheetDataSignature()!==_preSheetSig)queueSheetSync();}catch(e2){}
         _lastSyncTime=Date.now();
         updateSyncUI('idle');
       }catch(e){console.warn('Visibility sync error:',e);}
@@ -9257,7 +9274,7 @@ function renderSettings(){
       <div class="form-section" style="grid-column:1/-1;border:1px solid rgba(62,207,142,.25);background:rgba(62,207,142,.04);">
         <div class="form-section-title" style="color:var(--green);"><span class="mat-ico">table_chart</span> Google Sheets Auto-Sync <span id="sheetSyncIndicator" style="font-size:11px;font-weight:400;margin-left:8px;"></span></div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;">
-          Automatically pushes ALL data to Google Sheets whenever anything changes (employee added, quiz taken, certificate issued, etc.). Creates <b style="color:var(--txt);">6 tabs</b>: Training Data, Employees, Trainings, Certificates, Equipment, SOPs.
+          Automatically pushes ALL data to Google Sheets whenever anything changes (employee added, quiz taken, certificate issued, etc.). Creates <b style="color:var(--txt);">7 tabs</b>: Training Data, Employees, Trainings, Certificates, Equipment, SOPs, Feedback. Employee test results and feedback pulled from the cloud are pushed to the sheet automatically too (within ~30 seconds while this page is open) — no manual button needed.
         </div>
         <!-- Auto-Sync Toggle -->
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);border:1px solid var(--bdr);">
@@ -9637,9 +9654,27 @@ function queueSheetSync(sheetNames){
   _sheetSyncTimer=setTimeout(function(){_sheetSyncTimer=null;executeSheetSync();},2000);
 }
 
+// Task 23 — cheap fingerprint of everything the Google Sheet tabs contain.
+// Used to decide whether a cloud pull actually changed data (then we auto-sync the sheet).
+function _sheetDataSignature(){
+  try{
+    return JSON.stringify([
+      (DB.employees||[]).length,
+      (DB.sops||[]).length,
+      (DB.trainings||[]).map(function(t){return (t.id||'')+':'+((t.completed||[]).length);}).join(','),
+      (DB.testResults||[]).map(function(r){return (r.id||'')+':'+(r.score==null?'':r.score)+':'+(r.pass?'P':'F');}).join(','),
+      (DB.certificates||[]).map(function(c){return c.num||'';}).join(','),
+      (DB.feedbackForms||[]).map(function(f){return (f.id||'')+':'+(f.driveStatus||'');}).join(',')
+    ]);
+  }catch(e){return '';}
+}
+
 // Execute the actual sync for all queued sheets
 async function executeSheetSync(){
-  if(_sheetSyncRunning) return; // Prevent concurrent syncs
+  if(_sheetSyncRunning){ // Task 23 — a sync is already in flight: RETRY shortly instead of dropping the queued sheets
+    if(window._pendingSheetSyncs&&window._pendingSheetSyncs.size>0){setTimeout(function(){executeSheetSync();},3000);}
+    return;
+  }
   var url=DB.settings.sheetUrl||"";
   if(!url){toast('Auto-sync: No Sheet URL','error');return;}
   if(!window._pendingSheetSyncs||window._pendingSheetSyncs.size===0) return;
@@ -9678,10 +9713,24 @@ async function executeSheetSync(){
     if(si){si.style.color='var(--green)';si.innerHTML='<span class="mat-ico" style="font-size:12px;">check_circle</span> Sheet synced';setTimeout(function(){si.innerHTML='';},3000);}
   }catch(err){
     console.warn('[Sheet Auto-Sync] Error:',err);
+    // Task 23 — put the failed sheets back into the queue and retry in 30s.
+    // Previously the queue was cleared BEFORE the push, so one failed push silently
+    // dropped those sheets until the next unrelated data change.
+    try{(sheetsToSync||[]).forEach(function(s){window._pendingSheetSyncs.add(s);});}catch(e2){}
+    try{if(!_sheetSyncTimer)_sheetSyncTimer=setTimeout(function(){_sheetSyncTimer=null;executeSheetSync();},30000);}catch(e3){}
     // Silent — background auto-sync, don't show error to user
   }
   _sheetSyncRunning=false;
 }
+
+// Task 23 — safety sweep: if anything is still queued and nothing is scheduled or running,
+// sync it now (catches debounced timers lost to throttling, orphaned queues, etc.)
+setInterval(function(){
+  if(!isAdmin)return;
+  if(DB.settings.sheetAutoSync===false)return;
+  if(!(DB.settings.sheetUrl||""))return;
+  if(window._pendingSheetSyncs&&window._pendingSheetSyncs.size>0&&!_sheetSyncTimer&&!_sheetSyncRunning)executeSheetSync();
+},60000);
 
 // Legacy: Auto-sync on admin login (full sync)
 function autoSyncToSheet(){
