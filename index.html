@@ -5607,7 +5607,7 @@ function openAddTrnModal(){
     <div class="modal-body">
       <div class="form-section"><div class="form-grid">
         <div class="form-group" style="grid-column:1/-1;"><label class="form-label-sm">Training Name *</label><input class="form-control-sm" id="nt_name" placeholder="e.g. Fire Safety Induction"></div>
-        <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}</select></div>
+        <div class="form-group"><label class="form-label-sm">Category *</label><select class="form-control-sm" id="nt_cat" onchange="var v=this.value;if(v==='__custom__'){document.getElementById('nt_cat_custom').style.display='block';document.getElementById('nt_cat_custom').focus();}else{document.getElementById('nt_cat_custom').value='';document.getElementById('nt_cat_custom').style.display='none';}">${TRAINING_CATS.map(c=>`<option>${c}</option>`).join("")}<option value="__custom__">+ Custom Category...</option></select><input class="form-control-sm" id="nt_cat_custom" placeholder="Type new category name" style="margin-top:4px;display:none;"></div>
         <div class="form-group"><label class="form-label-sm">Department</label><select class="form-control-sm" id="nt_dept"><option>All</option>${DEPARTMENTS.map(d=>`<option>${d}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Trainer</label><select class="form-control-sm" id="nt_trainer">${DB.settings.trainerList.map(t=>`<option>${t}</option>`).join("")}</select></div>
         <div class="form-group"><label class="form-label-sm">Manager</label><select class="form-control-sm" id="nt_manager_select" onchange="var v=this.value;if(v==='__custom__'){document.getElementById('nt_manager').value='';document.getElementById('nt_manager').style.display='block';document.getElementById('nt_manager').focus();}else{document.getElementById('nt_manager').value=v;document.getElementById('nt_manager').style.display=v?'none':'block';}"><option value="">-- Select Manager --</option>${(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(DB.settings.defaultManager||'')?' selected':'')+'>'+m+'</option>';}).join('')}<option value="__custom__">+ Custom...</option></select><input class="form-control-sm" id="nt_manager" placeholder="Type custom manager name" style="margin-top:4px;display:${DB.settings.defaultManager?'none':'block'};" value="${DB.settings.defaultManager||''}"></div>
@@ -5628,11 +5628,20 @@ function openAddTrnModal(){
       </div>
       <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);">Custom Quiz Questions (Optional)</div>
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);">Test Questions</div>
           <button class="btn btn-sm btn-outline" onclick="addCustomQuestion()"><span class="mat-ico" style="font-size:11px;">add</span> Add Question</button>
         </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label-sm">Question Option</label>
+          <select class="form-control-sm" id="nt_qmode" onchange="toggleCustomQHint()">
+            <option value="auto">Auto Generate — questions from the category bank</option>
+            <option value="mix">Mix All — my questions + category bank questions</option>
+            <option value="custom">Only My Questions — exactly what I add below</option>
+          </select>
+          <div id="nt_qmode_hint" style="font-size:10.5px;color:var(--muted);margin-top:4px;">The test auto-generates from the category question bank. Questions you add below are kept but not shown in this test.</div>
+        </div>
         <div id="customQuestionsList"></div>
-        <div style="font-size:10.5px;color:var(--muted);margin-top:6px;">If no custom questions are added, questions will be auto-generated from the question bank for this category.</div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Auto Generate = category bank questions · Mix All = your questions + bank (up to 10, shuffled) · Only My Questions = exactly the questions you add (add at least one).</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -5642,6 +5651,14 @@ function openAddTrnModal(){
   `,"740px");
 }
 let customQCount=0;
+// Task 22 — per-option hint under the Question Option selector
+function toggleCustomQHint(){
+  var m=(document.getElementById('nt_qmode')||{}).value||'auto';
+  var h=document.getElementById('nt_qmode_hint');if(!h)return;
+  if(m==='auto')h.textContent='The test auto-generates from the category question bank. Questions you add below are kept but not shown in this test.';
+  else if(m==='mix')h.textContent='The test mixes your questions below with the category bank questions (up to 10, shuffled).';
+  else h.textContent='The test shows ONLY the questions you add below — add at least one question.';
+}
 function previewTrnVideo(val){const ytId=extractYoutubeId(val);const wrap=document.getElementById('trnVideoPreview');const frame=document.getElementById('trnVideoFrame');if(ytId&&wrap&&frame){wrap.style.display='block';frame.src='https://www.youtube.com/embed/'+ytId+'?rel=0';}else if(wrap){wrap.style.display='none';}}
 function refreshOptionSelect(prefix,qid,selected){
   var sel=document.getElementById(prefix+'_a_'+qid);if(!sel)return;
@@ -5711,7 +5728,17 @@ async function saveTraining(){
   var name=document.getElementById('nt_name').value.trim();
   if(!name){toast('Training name required','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var cat=document.getElementById('nt_cat').value;
+  // Task 21 — "+ Custom Category...": admins can type a brand-new category at training creation
+  if(cat==='__custom__'){
+    cat=(document.getElementById('nt_cat_custom')||{}).value||'';
+    cat=cat.trim();
+    if(!cat){toast('Please type the new category name','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
+  }
+  // Task 22 — the Question Option selector decides where the test questions come from:
+  // auto = category bank/generator, mix = added questions + bank, custom = added questions only
+  var qMode=document.getElementById('nt_qmode')?document.getElementById('nt_qmode').value:'auto';
   var customQs=getCustomQuestions();
+  if(qMode==='custom'&&!customQs.length){toast('Only My Questions is selected — add at least one question below, or pick Auto Generate / Mix All','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   if(customQs.length){
     if(!QUESTION_BANK[cat])QUESTION_BANK[cat]=[];
     customQs.forEach(function(cq){cq.customFor=name;QUESTION_BANK[cat].push(cq);});
@@ -5725,7 +5752,7 @@ async function saveTraining(){
   var ytId=extractYoutubeId(ytUrl);
   if(!ytUrl){toast('YouTube video link is required!','error');if(btn){btn.disabled=false;btn.innerHTML='<span class="mat-ico">save</span> Create Training';}return;}
   var trnId=genId('TRN');
-  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,manager:(document.getElementById('nt_manager')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,youtubeLink:ytUrl,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||currentUser.username||'Admin',modifiedAt:new Date().toISOString(),modifiedBy:currentUser.name||currentUser.username||'Admin'};
+  var t={id:trnId,name:name,cat:cat,dept:document.getElementById('nt_dept').value,trainer:document.getElementById('nt_trainer').value,manager:(document.getElementById('nt_manager')||{}).value||'',date:document.getElementById('nt_date').value,duration:document.getElementById('nt_dur').value||'4 hrs',passing:parseInt(document.getElementById('nt_pass').value)||75,validity:'1 Year',cert:document.getElementById('nt_cert').value==='true',desc:document.getElementById('nt_desc').value,enrolled:[],completed:[],completedDates:{},customQuestions:customQs.length,questions:customQs,questionMode:qMode,youtubeLink:ytUrl,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),createdBy:currentUser.name||currentUser.username||'Admin',modifiedAt:new Date().toISOString(),modifiedBy:currentUser.name||currentUser.username||'Admin'};
 
   // 1. Add to local array
   DB.trainings.push(t);
@@ -5754,7 +5781,7 @@ async function saveTraining(){
         catch(writeErr){console.warn('[saveTraining] Direct write failed:',writeErr.message);}
         if(!writeOk){
           // Fallback: minimal write
-          try{await fbDB.collection('trainings').doc(String(t.id)).set({id:t.id,name:t.name,cat:t.cat,youtubeLink:t.youtubeLink,trainer:t.trainer,dept:t.dept,date:t.date,duration:t.duration,passing:t.passing,validity:t.validity,cert:t.cert,desc:t.desc,enrolled:[],completed:[],completedDates:{},_localAddedAt:t._localAddedAt,createdAt:t.createdAt,createdBy:t.createdBy,customQuestions:t.customQuestions,questions:t.questions,manager:t.manager||''},{merge:true});writeOk=true;console.log('[saveTraining] Minimal cloud write OK');}catch(minErr){console.warn('[saveTraining] Minimal write also failed:',minErr.message);}
+          try{await fbDB.collection('trainings').doc(String(t.id)).set({id:t.id,name:t.name,cat:t.cat,youtubeLink:t.youtubeLink,trainer:t.trainer,dept:t.dept,date:t.date,duration:t.duration,passing:t.passing,validity:t.validity,cert:t.cert,desc:t.desc,enrolled:[],completed:[],completedDates:{},_localAddedAt:t._localAddedAt,createdAt:t.createdAt,createdBy:t.createdBy,customQuestions:t.customQuestions,questions:t.questions,questionMode:t.questionMode||'auto',manager:t.manager||''},{merge:true});writeOk=true;console.log('[saveTraining] Minimal cloud write OK');}catch(minErr){console.warn('[saveTraining] Minimal write also failed:',minErr.message);}
         }
         // Then do a full DB sync for all other collections
         await saveDB();
@@ -6573,6 +6600,26 @@ function initTrnVideoTracker(ytVideoId,trnId,empId){
 /* ============================================================
    START QUIZ FOR A SPECIFIC TRAINING (Employee)
 ============================================================ */
+// Task 22 — THREE admin-selectable question options (questionMode) chosen at training creation:
+//   'auto'   -> Auto Generate: standard category bank questions — and when the bank has none
+//               (e.g. a brand-new "+ Custom Category...") the generic generator builds a set
+//   'mix'    -> Mix All: the questions the admin added + standard bank questions, shuffled together
+//   'custom' -> Only My Questions: EXACTLY the questions the admin added — bank never consulted
+// Legacy trainings saved before the selector keep their old behaviour via derivation:
+// questions present -> 'custom', none -> 'auto'. customFor-tagged bank questions (added by OTHER
+// trainings) never leak into any pool.
+function buildTrainingQuizPool(t){
+  var mode=t.questionMode||(t.questions&&t.questions.length?'custom':'auto');
+  var customs=[];
+  (t.questions||[]).forEach(function(q){customs.push({q:q.q,o:[...q.o],a:q.a});});
+  var bank=[];
+  var cat=resolveQuizCategory(t.cat);
+  (QUESTION_BANK[cat]||[]).forEach(function(q){if(!q.customFor)bank.push({q:q.q,o:[...q.o],a:q.a});});
+  if(mode==='custom')return customs;
+  if(mode==='mix')return customs.concat(bank);
+  if(bank.length)return bank;
+  return generateCategoryQuestions(t.cat);
+}
 function startQuizForTrn(trnId){
   var t=DB.trainings.find(function(x){return x.id===trnId;});
   if(!t){toast('Training not found','error');return;}
@@ -6593,24 +6640,15 @@ function startQuizForTrn(trnId){
   if(!ytId){toast('A training video is required before taking this test.','error');return;}
   var vp=((t.videoProgress||{})[empId])||0;
   if(vp<95){toast('Watch at least 95% of the video first! Current: '+vp+'%','error');return;}
-  // Build question pool: custom questions first, then from bank
-  var allQs=[];
-  // Add custom questions stored in the training object
-  if(t.questions&&t.questions.length){
-    t.questions.forEach(function(q){allQs.push({q:q.q,o:[...q.o],a:q.a});});
-  }
-  // Add from QUESTION_BANK for this category
-  var cat=resolveQuizCategory(t.cat);
-  var bankQs=QUESTION_BANK[cat]||[];
-  // Filter out duplicates already in custom questions
-  var customTexts=new Set((t.questions||[]).map(function(q){return q.q;}));
-  bankQs.forEach(function(q){if(!customTexts.has(q.q))allQs.push({q:q.q,o:[...q.o],a:q.a});});
-  // If still no questions, auto-generate
-  if(!allQs.length){allQs=generateCategoryQuestions(t.cat);}
+  // Task 22 — pool per the Question Option: auto = bank/generator, mix = added + bank,
+  // custom = ONLY the added questions. Legacy trainings derive their old behaviour.
+  var allQs=buildTrainingQuizPool(t);
   if(!allQs.length){toast('No questions available for this training','error');return;}
-  // Shuffle and pick up to 10
+  var qMode=t.questionMode||(t.questions&&t.questions.length?'custom':'auto');
   var shuffled=shuffle(allQs);
-  var questions=shuffled.slice(0,Math.min(10,shuffled.length));
+  // Admin-authored papers (Only My Questions) show EVERY question the admin added;
+  // auto/mix pools cap at 10 questions to keep the test time reasonable.
+  var questions=qMode==='custom'?shuffled:shuffled.slice(0,Math.min(10,shuffled.length));
   // Randomize options for each question
   var processedQs=questions.map(function(q){
     var opts=[...q.o];
@@ -8789,7 +8827,7 @@ function confirmAssignR2(){
     trainer:r2TrainerVal,manager:r2ManagerVal,date:r2DateVal,duration:r2DurVal||'Not set',
     passing:r2PassVal,validity:'1 Year',cert:false,desc:r2DescVal,
     enrolled:[empId],completed:[],completedDates:{},
-    customQuestions:r2Questions.length,questions:r2Questions,
+    customQuestions:r2Questions.length,questions:r2Questions,questionMode:r2Questions.length?(r2CustomQs.length?'custom':(failedTrn.questionMode||'custom')):'auto',
     youtubeLink:r2VideoLink,_localAddedAt:Date.now(),createdAt:new Date().toISOString(),
     createdBy:currentUser.name||'Admin',modifiedAt:new Date().toISOString(),
     modifiedBy:currentUser.name||'Admin',
