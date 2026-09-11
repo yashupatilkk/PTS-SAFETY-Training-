@@ -2407,6 +2407,22 @@ function startApp(){
   updateBadges();
   gotoView("dashboard");
   startAutoSync();
+  // Task 27 — EMPLOYEE POST-LOGIN CLOUD PULL: employees log in against STALE localStorage
+  // (auto-login is disabled by design), so an offline-training assignment or message the admin
+  // sent earlier stayed invisible until a manual sync. Pull the cloud once in the background
+  // right after login so new trainings + notifications are visible from the first paint.
+  if(!isAdmin&&firebaseReady){
+    (async function(){
+      try{
+        await new Promise(function(res){setTimeout(res,800);});
+        var ok=await authAsAdmin();if(!ok)return;
+        await loadDBFromFirestore();
+        try{localStorage.setItem(DB_STORAGE_KEY,JSON.stringify(JSON.parse(JSON.stringify(DB))));}catch(e){}
+        if(typeof renderAll==='function')renderAll();
+        console.log('[startApp] Employee post-login cloud pull done');
+      }catch(e){console.warn('[startApp] Employee post-login cloud pull failed:',e);}
+    })();
+  }
   // Auto-sync all data to Google Sheet when admin logs in
   if(isAdmin)autoSyncToSheet();
   // Auto-detect and fix employees missing from cloud (fixes phone login)
@@ -2478,6 +2494,15 @@ setInterval(updateLoginClock,1000);updateLoginClock();
 /* ============================================================
    NAVIGATION
 ============================================================ */
+// Task 27 — REAL renderAll: every cloud-pull path called the guarded
+// `if(typeof renderAll==='function')renderAll();` but NO such function existed, so freshly
+// pulled data (new offline trainings, messages) was rendered only after manual navigation.
+// Re-render the CURRENT view (gotoView re-runs its renderer) + badges; skipped mid-quiz.
+function renderAll(){
+  try{updateBadges();}catch(e){}
+  try{if(typeof quizState!=='undefined'&&quizState&&quizState.active)return;}catch(e){}
+  try{gotoView((typeof currentView!=='undefined'&&currentView)?currentView:'dashboard');}catch(e){}
+}
 function gotoView(v){
   currentView=v;
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
@@ -5940,7 +5965,7 @@ function openTrainingDetail(id){
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--muted);margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">Training Feedback (IMSP 29 F05) — ${trnFeedbacks.length} response(s)${trnFeedbacks.length?`<button class="btn btn-sm btn-outline" style="margin-left:auto;border-color:var(--green);color:var(--green);" onclick="downloadAllFeedbackDocs('${_jsArg(t.name)}')"><span class="mat-ico" style="font-size:11px;">download</span> Download All as .doc</button>`:''}</div>
       ${trnFeedbacks.length?`<div class="table-wrap" style="max-height:280px;overflow-y:auto;"><table>
         <thead><tr><th>Emp ID</th><th>Name</th><th>Date</th><th>Overall</th><th>Q1-Q10 Avg</th><th>Enjoyed</th><th>Drive</th><th>Details</th></tr></thead>
-        <tbody>${trnFeedbacks.map(function(fb){normalizeFeedback(fb);var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=Number(fb.overallRating)||0;var olColor=overallScore>0&&overallScore<=2?'var(--green)':overallScore===3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td style="white-space:nowrap;">${fb.driveStatus==='sent'?'<span class="badge badge-active" title="PDF sent to the Drive folder">Sent</span>':fb.driveStatus==='failed'?'<span class="badge badge-danger" title="Last upload failed — click Send to retry">Not sent</span>':'<span class="badge" style="background:rgba(139,109,232,.15);color:var(--purple);" title="No Drive record — use Send to upload">—</span>'} <button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="sendFeedbackToDrive('${fb.id}')" title="Send this feedback PDF to the Drive folder now"><span class="mat-ico" style="font-size:11px;">cloud_upload</span></button></td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
+        <tbody>${trnFeedbacks.map(function(fb){normalizeFeedback(fb);var ratings=fb.ratings||{};var scores=[];for(var k in ratings){if(ratings[k]&&ratings[k].score)scores.push(ratings[k].score);}var avg=scores.length?Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length*10)/10:'—';var overallScore=Number(fb.overallRating)||0;var olColor=overallScore>=4?'var(--green)':overallScore===3?'var(--amber)':'var(--red)';return`<tr><td class="mono" style="color:var(--amber);font-size:11px;">${fb.empId||''}</td><td style="font-size:12px;"><b>${fb.empName||''}</b></td><td style="font-size:11px;">${fb.date||''}</td><td><span class="badge" style="background:${olColor}20;color:${olColor};font-size:11px;">${fb.overallLabel||''} (${overallScore}/5)</span></td><td style="font-size:12px;"><b>${avg}</b>/5</td><td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fb.enjoy||'—'}</td><td style="white-space:nowrap;">${fb.driveStatus==='sent'?'<span class="badge badge-active" title="PDF sent to the Drive folder">Sent</span>':fb.driveStatus==='failed'?'<span class="badge badge-danger" title="Last upload failed — click Send to retry">Not sent</span>':'<span class="badge" style="background:rgba(139,109,232,.15);color:var(--purple);" title="No Drive record — use Send to upload">—</span>'} <button class="btn btn-sm btn-outline" style="border-color:var(--green);color:var(--green);" onclick="sendFeedbackToDrive('${fb.id}')" title="Send this feedback PDF to the Drive folder now"><span class="mat-ico" style="font-size:11px;">cloud_upload</span></button></td><td><button class="btn btn-sm btn-outline" onclick="showFeedbackDetail('${fb.id}')"><span class="mat-ico" style="font-size:11px;">visibility</span></button></td></tr>`;}).join("")}</tbody></table></div>`:`<p style='color:var(--muted);font-size:12px;'>No feedback submitted yet.</p>`}
     </div>
   `,"900px");
 }
@@ -5951,7 +5976,7 @@ function filterTrainingEmployees(query){
     row.style.display=(!q||text.indexOf(q)>=0)?'':'none';
   });
 }
-function showFeedbackDetail(fbId){var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});if(!fb){toast('Feedback not found','error');return;}normalizeFeedback(fb);var ratings=fb.ratings||{};var rows='';for(var i=1;i<=10;i++){var rk='q'+i;var r=ratings[rk];if(r){var _sc=Number(r.score);var color=_sc<=2?'var(--green)':_sc<=3?'var(--amber)':'var(--red)';rows+='<tr><td style="padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bdr);">'+i+'. '+r.text+'</td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);"><span style="color:'+color+';font-weight:700;">'+r.label+'</span></td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);">'+r.score+'/5</td></tr>';}}var _ov=Number(fb.overallRating)||0;var olColor=_ov>0&&_ov<=2?'var(--green)':_ov===3?'var(--amber)':'var(--red)';openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Feedback Detail — '+fb.empName+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px;"><div><span style="color:var(--muted);">Employee</span><div><b>'+fb.empName+'</b> ('+fb.empId+')</div></div><div><span style="color:var(--muted);">Department</span><div><b>'+fb.dept+'</b></div></div><div><span style="color:var(--muted);">Designation</span><div><b>'+(fb.desig||'—')+'</b></div></div><div><span style="color:var(--muted);">Training</span><div><b>'+fb.training+'</b></div></div><div><span style="color:var(--muted);">Trainer</span><div><b>'+(fb.trainer||'—')+'</b></div></div><div><span style="color:var(--muted);">Date</span><div><b>'+fb.date+'</b></div></div></div><div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Responses</div><div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th style="text-align:left;">Statement</th><th>Rating</th><th>Score</th></tr></thead><tbody>'+(rows||'<tr><td colspan="3" style="text-align:center;padding:10px;color:var(--muted);">No responses recorded for this feedback.</td></tr>')+'</tbody></table></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;"><div><span style="font-size:12px;font-weight:700;color:var(--txt);">Overall Rating</span><div style="margin-top:4px;"><span class="badge" style="background:'+olColor+'20;color:'+olColor+';font-size:14px;padding:6px 14px;">'+fb.overallLabel+' ('+fb.overallRating+'/5)</span></div></div></div>'+(fb.enjoy?'<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:700;color:var(--txt);">What did you enjoy most?</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.enjoy+'</div></div>':'')+(fb.suggestions?'<div><span style="font-size:12px;font-weight:700;color:var(--txt);">Suggestions</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.suggestions+'</div></div>':'')+'</div>','700px');}
+function showFeedbackDetail(fbId){var fb=(DB.feedbackForms||[]).find(function(f){return f.id===fbId;});if(!fb){toast('Feedback not found','error');return;}normalizeFeedback(fb);var ratings=fb.ratings||{};var rows='';for(var i=1;i<=10;i++){var rk='q'+i;var r=ratings[rk];if(r){var _sc=Number(r.score);var color=_sc>=4?'var(--green)':_sc===3?'var(--amber)':'var(--red)';rows+='<tr><td style="padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bdr);">'+i+'. '+r.text+'</td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);"><span style="color:'+color+';font-weight:700;">'+r.label+'</span></td><td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--bdr);">'+r.score+'/5</td></tr>';}}var _ov=Number(fb.overallRating)||0;var olColor=_ov>=4?'var(--green)':_ov===3?'var(--amber)':'var(--red)';openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Feedback Detail — '+fb.empName+'</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px;"><div><span style="color:var(--muted);">Employee</span><div><b>'+fb.empName+'</b> ('+fb.empId+')</div></div><div><span style="color:var(--muted);">Department</span><div><b>'+fb.dept+'</b></div></div><div><span style="color:var(--muted);">Designation</span><div><b>'+(fb.desig||'—')+'</b></div></div><div><span style="color:var(--muted);">Training</span><div><b>'+fb.training+'</b></div></div><div><span style="color:var(--muted);">Trainer</span><div><b>'+(fb.trainer||'—')+'</b></div></div><div><span style="color:var(--muted);">Date</span><div><b>'+fb.date+'</b></div></div></div><div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px;">Responses</div><div class="table-wrap" style="margin-bottom:14px;"><table><thead><tr><th style="text-align:left;">Statement</th><th>Rating</th><th>Score</th></tr></thead><tbody>'+(rows||'<tr><td colspan="3" style="text-align:center;padding:10px;color:var(--muted);">No responses recorded for this feedback.</td></tr>')+'</tbody></table></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;"><div><span style="font-size:12px;font-weight:700;color:var(--txt);">Overall Rating</span><div style="margin-top:4px;"><span class="badge" style="background:'+olColor+'20;color:'+olColor+';font-size:14px;padding:6px 14px;">'+fb.overallLabel+' ('+fb.overallRating+'/5)</span></div></div></div>'+(fb.enjoy?'<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:700;color:var(--txt);">What did you enjoy most?</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.enjoy+'</div></div>':'')+(fb.suggestions?'<div><span style="font-size:12px;font-weight:700;color:var(--txt);">Suggestions</span><div style="margin-top:4px;padding:10px 14px;background:var(--sur2);border-radius:var(--r-sm);font-size:13px;border:1px solid var(--bdr);">'+fb.suggestions+'</div></div>':'')+'</div>','700px');}
 function assignEmployees(trnId){
   const t=DB.trainings.find(x=>x.id===trnId);if(!t)return;
   const available=DB.employees.filter(e=>!(t.enrolled||[]).includes(e.id));
@@ -6175,11 +6200,11 @@ function sendOfflineNotice(trnId,empId,empName){
   if(!t.offlineRecords)t.offlineRecords=[];
   var offlineRecord={empId:empId,empName:empName,dept:emp?emp.dept:'',desig:emp?emp.desig:'',training:t.name,trainer:t.trainer,manager:t.manager||'',trnId:trnId,date:new Date().toISOString().split('T')[0],timestamp:Date.now(),previousAttempts:allResults.length,previousBest:bestScore,passMark:t.passing||70,action:'Offline Training Assigned',reason:'Failed online test '+failCount+' times (max score: '+bestScore+'% against '+t.passing+'% pass mark). BSC corrective action Step 3 — offline/face-to-face training required.',doneBy:currentUser.name||'Admin'};
   t.offlineRecords.push(offlineRecord);
-  DB.notifications.unshift({id:genId('N'),msg:'Offline training assigned for '+t.name+'. Contact your manager.',read:false,time:'Just now',icon:'assignment',forEmp:empId});
+  var _notif={id:genId('N'),msg:'Offline training assigned for '+t.name+'. Contact your manager.',read:false,time:'Just now',icon:'assignment',forEmp:empId};DB.notifications.unshift(_notif);
   toast(empName+' — Offline training notice generated. Uploading to Drive...','info',5000);
   updateBadges();saveDB();
   // Save to Firebase
-  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});console.log('Offline training saved to Firebase');}catch(e){console.warn('Firebase offline training save error:',e);}})();}
+  if(firebaseReady){(async function(){try{var adminOk=await authAsAdmin();if(!adminOk)return;await fbDB.collection('trainings').doc(String(trnId)).set(JSON.parse(JSON.stringify(t)),{merge:true});if(_notif)await fbDB.collection('notifications').doc(String(_notif.id)).set(JSON.parse(JSON.stringify(_notif)),{merge:true});console.log('Offline training saved to Firebase');}catch(e){console.warn('Firebase offline training save error:',e);}})();}
   // Generate and upload NCR PDF to Drive
   setTimeout(function(){uploadOfflineNCR_ToDrive(offlineRecord,t,emp);},500);
   queueSheetSync(['Trainings']);
@@ -6194,6 +6219,28 @@ function sendOfflineNotice(trnId,empId,empName){
 // test result flagged offline:true, so the dashboard pass/fail cards, the per-training card rows,
 // the monthly chart (Offline Pass/Fail bars) and the certificates (score 75%+) all pick it up
 // through the existing funnels with zero double-counting.
+// Task 27 — MANUAL RESULT ENTRY: upload an offline-training result by hand. Pick the employee,
+// select PASS or FAIL, confirm the training, score and date — the result is saved as a REAL
+// official result (offline:true) and counts everywhere (dashboard, monthly chart, certificates).
+function openManualResultEntry(){
+  if(!isAdmin){toast('Admin only','warning',3000);return;}
+  if(!DB.employees.length){toast('Add employees first','warning',3000);return;}
+  var trns=getDashboardTrainings();if(!trns.length){toast('Create a training first','warning',3000);return;}
+  _offlineMarkCtx={trnId:trns[0].id,empId:DB.employees[0].id,empName:DB.employees[0].name||'',outcome:'pass',from:'dash',manual:true};
+  var empOpts=DB.employees.map(function(e){return '<option value="'+escAttr(e.id)+'"'+(e.id===_offlineMarkCtx.empId?' selected':'')+'>'+escAttr(e.name||e.id)+' ('+escAttr(e.id)+')'+(e.dept?' - '+escAttr(e.dept):'')+'</option>';}).join('');
+  var trnOpts=trns.map(function(x){return '<option value="'+escAttr(x.id)+'"'+(x.id===_offlineMarkCtx.trnId?' selected':'')+'>'+escAttr(x.name)+(x._isR2Training?' - Round 2':'')+'</option>';}).join('');
+  openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Manual Result Entry - Offline Training</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'
+    +'<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:14px;font-size:13px;">Conducted the training in person? Select the employee, choose the result and save - it uploads as an official result and counts in the dashboard, monthly chart and certificates.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">'
+    +'<div><span style="font-size:12px;font-weight:700;">Employee</span><select id="off_emp" class="form-control-sm" style="width:100%;margin-top:4px;">'+empOpts+'</select></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Training</span><select id="off_trn" class="form-control-sm" style="width:100%;margin-top:4px;">'+trnOpts+'</select></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Result</span><select id="off_outcome" class="form-control-sm" style="width:100%;margin-top:4px;"><option value="pass">PASS - counts in Total test pass</option><option value="fail">FAIL - counts in Total test fail</option></select></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Score %</span><input id="off_score" type="number" min="0" max="100" class="form-control-sm" value="100" style="width:100%;margin-top:4px;"></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Date</span><input id="off_date" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;margin-top:4px;"></div>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--muted);">PASS records an official pass for the selected training (a score of 75%+ auto-issues a certificate); FAIL records an official fail. Scores are auto-adjusted to match the outcome against the pass mark.</div>'
+    +'</div><div class="modal-foot"><button class="btn btn-amber" onclick="confirmOfflineResult()"><span class="mat-ico">check</span> Upload Result</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
+}
 function offlineMarkBtns(trnId,empId,from){
   if(!trnId||!empId)return'';
   return ' <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:1px 8px;font-size:10px;" onclick="openOfflineResultModal(\''+trnId+'\',\''+empId+'\',\'pass\',\''+(from||'dash')+'\')" title="Mark offline training PASS — asks for the training, counts in the dashboard pass counts"><span class="mat-ico" style="font-size:10px;">check</span> Pass</button>'
@@ -6222,6 +6269,10 @@ function openOfflineResultModal(trnId,empId,outcome,from){
 function confirmOfflineResult(){
   var ctx=_offlineMarkCtx;if(!ctx){toast('Nothing to save — open the marking option first','warning',3000);return;}
   var el=function(id){return document.getElementById(id);};
+  // Task 27 — MANUAL RESULT ENTRY: the Offline Training page modal also carries an employee
+  // selector; adopt the selected employee before saving.
+  var _empSel=el('off_emp');
+  if(_empSel&&_empSel.value){ctx.empId=_empSel.value;var _me=DB.employees.find(function(x){return x&&x.id===_empSel.value;});if(_me)ctx.empName=_me.name;}
   var outcome=(el('off_outcome')||{}).value==='fail'?'fail':'pass';
   var trnId=(el('off_trn')||{}).value||ctx.trnId;
   var score=Math.max(0,Math.min(100,parseInt((el('off_score')||{}).value,10)||0));
@@ -6249,12 +6300,13 @@ function confirmOfflineResult(){
     if(!t.completed.includes(ctx.empId))t.completed.push(ctx.empId);
     t.completedDates[ctx.empId]=date;
   }
-  DB.notifications.unshift({id:genId('N'),msg:empName+' — offline training for '+t.name+' marked '+(pass?'PASS':'FAIL')+' ('+score+'%)',time:'Just now',read:false,icon:pass?'check_circle':'cancel',forEmp:ctx.empId});
+  var _notif={id:genId('N'),msg:empName+' — offline training for '+t.name+' marked '+(pass?'PASS':'FAIL')+' ('+score+'%)',time:'Just now',read:false,icon:pass?'check_circle':'cancel',forEmp:ctx.empId};DB.notifications.unshift(_notif);
   updateBadges();saveDB();
   if(typeof firebaseReady!=="undefined"&&firebaseReady&&typeof fbDB!=="undefined"&&fbDB){
     (async function(){try{
       if(typeof isAdmin==="undefined"||!isAdmin){try{await authAsAdmin();}catch(e){}}
       await fbDB.collection('testResults').doc(String(result.id)).set(sanitizeForFirestore(result),{merge:true});
+      try{if(_notif)await fbDB.collection('notifications').doc(String(_notif.id)).set(JSON.parse(JSON.stringify(_notif)),{merge:true});}catch(e3){}
       if(pass)await fbDB.collection('trainings').doc(String(t.id)).set(JSON.parse(JSON.stringify(t)),{merge:true});
       console.log('Offline training result saved to Firebase');
     }catch(err){console.warn('Firebase offline result save error:',err);}})();
@@ -7254,8 +7306,10 @@ var trnMatch=quizState.trnMatch||DB.trainings.find(function(t){return t.name===q
 var today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'});
 var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:60px;height:60px;" />';
 var managerHtml='<select id="fb_manager_select" style="padding:2px 4px;border:1px solid #999;font-size:10pt;font-family:Calibri,Arial,sans-serif;max-width:120px;" onchange="var v=this.value;if(v===\'__custom__\'){document.getElementById(\'fb_manager\').value=\'\';document.getElementById(\'fb_manager\').style.display=\'inline-block\';document.getElementById(\'fb_manager\').focus();}else{document.getElementById(\'fb_manager\').value=v;document.getElementById(\'fb_manager\').style.display=v?\'none\':\'inline-block\';}"><option value="">-- Select --</option>'+(DB.settings.managerList||[]).map(function(m){return '<option value="'+m+'"'+(m===(trnMatch?trnMatch.manager||DB.settings.defaultManager:'')?' selected':'')+'>'+m+'</option>';}).join('')+'<option value="__custom__">+ Custom...</option></select><input id="fb_manager" value="'+(trnMatch?trnMatch.manager||DB.settings.defaultManager||'':'')+ '" placeholder="Type name" style="display:'+(trnMatch&&trnMatch.manager?'none':'inline-block')+';margin-left:4px;padding:2px 4px;border:none;border-bottom:1px solid #000;background:transparent;font-size:10pt;width:90px;font-family:Calibri,Arial,sans-serif;">';
-var likertRows='';for(var qi=0;qi<FB_QUESTIONS.length;qi++){var q=FB_QUESTIONS[qi];likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(qi+1)+'. '+q+'</td>';for(var si=0;si<5;si++){var sv=si+1;likertRows+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbRating('+qi+','+sv+')"><span class="fb_likert_'+qi+'" data-val="'+sv+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}likertRows+='</tr>';}
-var overallCircles='';for(var oi=0;oi<5;oi++){var ov=oi+1;overallCircles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbOverall('+ov+')"><span class="fb_overall_btn" data-val="'+ov+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}
+var likertRows='';for(var qi=0;qi<FB_QUESTIONS.length;qi++){var q=FB_QUESTIONS[qi];likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(qi+1)+'. '+q+'</td>';for(var si=0;si<5;si++){var sv=5-si;// Task 30: leftmost column (Strongly Agree) = score 5
+likertRows+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbRating('+qi+','+sv+')"><span class="fb_likert_'+qi+'" data-val="'+sv+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}likertRows+='</tr>';}
+var overallCircles='';for(var oi=0;oi<5;oi++){var ov=5-oi;// Task 30: leftmost (Excellent) = 5
+overallCircles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;cursor:pointer;" onclick="setFbOverall('+ov+')"><span class="fb_overall_btn" data-val="'+ov+'" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:#fff;vertical-align:middle;"></span></td>';}
 var div=document.createElement('div');div.id='feedbackOverlay';div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:10px;overflow-y:auto;';
 div.innerHTML=`
 <div style="background:#fff;border:2px solid #000;width:100%;max-width:850px;font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;">
@@ -7352,8 +7406,8 @@ const FB_QUESTIONS=[
   'Class participation and interaction were encouraged.',
   'Adequate time was provided for questions and discussion.'
 ];
-const FB_SCALE=['Strongly Agree','Agree','Neutral','Disagree','Strongly Disagree'];
-const FB_OVERALL=['Excellent','Good','Average','Poor','Very Poor'];
+const FB_SCALE=['Strongly Disagree','Disagree','Neutral','Agree','Strongly Agree'];
+const FB_OVERALL=['Very Poor','Poor','Average','Good','Excellent'];
 // TASK 12: Canonicalize ANY feedback record into the exact shape every admin surface reads
 // (ratings q1..q10 = {text,score:1-5 Number,label}, overallRating Number, overallLabel string).
 // Legacy/foreign records — numeric-key ratings {0:3,...}, arrays [3,4,...], string scores,
@@ -7377,12 +7431,18 @@ function normalizeFeedback(fb){
     if(!isFinite(sc))continue;
     sc=Math.max(1,Math.min(5,Math.round(sc)));
     var tv=(typeof v==='object')?v:{};
+    // Task 30 — scores run 5(best)..1(worst); legacy records stored the inverted pair,
+    // so a known scale label WINS and re-anchors the score.
+    var _li=tv.label?FB_SCALE.indexOf(tv.label):-1;
+    if(_li>=0)sc=_li+1;
     out['q'+(i+1)]={text:tv.text||FB_QUESTIONS[i],score:sc,label:tv.label||FB_SCALE[sc-1]||''};
   }
   fb.ratings=out;
   var ov=Number(fb.overallRating);
   fb.overallRating=isFinite(ov)?ov:0;
-  fb.overallLabel=fb.overallLabel||FB_OVERALL[fb.overallRating-1]||'';
+  // Task 30 — same label-wins migration for the overall rating (5 = Excellent .. 1 = Very Poor).
+  if(fb.overallLabel&&FB_OVERALL.indexOf(fb.overallLabel)>=0){fb.overallRating=FB_OVERALL.indexOf(fb.overallLabel)+1;}
+  else{fb.overallLabel=fb.overallLabel||FB_OVERALL[fb.overallRating-1]||'';}
   return fb;
 }
 function setFbRating(qIdx,val){_fbRatings[qIdx]=val;var circles=document.querySelectorAll('.fb_likert_'+qIdx);circles.forEach(function(c){if(parseInt(c.dataset.val)===val){c.style.background='#000';c.style.borderColor='#000';}else{c.style.background='#fff';c.style.borderColor='#000';}});}
@@ -7400,70 +7460,77 @@ var companyName='Prestige Office Management Private Limited';
 var fmtDate='';
 if(fb.date){var dp=fb.date.split('-');if(dp.length===3)fmtDate=dp[2]+'/'+dp[1]+'/'+dp[0];else fmtDate=fb.date;}
 var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:60px;height:60px;" />';
+// Task 28 — SAME-TO-SAME with the official IMSP 29 F05 Word form: square answer boxes (the
+// official sheet ticks Wingdings open squares, not round circles), plain unshaded scale labels,
+// "Very poor" lowercase, the #B4C5E7 left-aligned EMPLOYEE INFORMATION band, and full-width
+// separate tables so every section shares the same edges like the official document.
+function _sq(filled){return '<span style="display:inline-block;width:13px;height:13px;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';color:'+(filled?'#000':'#fff')+';font-size:8px;line-height:11px;vertical-align:middle;">&nbsp;</span>';}
 var likertRows='';
 FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?Number(r.score):0;
 // Task 19 — the numeric MARK is printed next to the boxes (max 5): "4/5", "3/5" ... so the
-// mark each employee gave is readable in the Drive PDF at a glance, not just via the dot.
+// mark each employee gave is readable in the Drive PDF at a glance, not just via the box.
 var _markTxt=r?(sc+'/5'):'\u2014';
-// Task 25 — SAME-TO-SAME with the employee fill-in form: numbered statements + the same round circles the employee sees on screen.
-var circles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;width:12%;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
-likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:10pt;font-weight:bold;width:12%;">'+_markTxt+'</td></tr>';});
-var overallCircles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===Number(fb.overallRating);overallCircles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;width:12%;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
+var boxes='';
+for(var c=0;c<5;c++){var v=c+1;boxes+='<td style="border:none;text-align:center;padding:5px 2px;">'+_sq((6-v)===sc)+'</td>';}
+likertRows+='<tr><td style="border:none;border-left:1px solid #000;padding:5px 8px;font-size:10pt;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+boxes+'<td style="border:none;border-right:1px solid #000;text-align:center;padding:5px 2px;font-size:10pt;font-weight:bold;">'+_markTxt+'</td></tr>';});
+var overallBoxes='';
+for(var c=0;c<5;c++){var v=c+1;var filled=(6-v)===Number(fb.overallRating);overallBoxes+='<td style="border:none;text-align:center;padding:5px 2px;">'+_sq(filled)+'</td>';}
+// The official form draws ONE rectangle around the whole impressions section with NO inner
+// gridlines — edge cells carry the box side, interior cells carry no border at all.
 var html='<!DOCTYPE html><html><head><meta charset="UTF-8">';
-html+='<style>@page{size:A4;margin:6mm 8mm;}body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}</style>';
+html+='<style>@page{size:A4;margin:8mm 10mm;}body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}</style>';
 html+='</head><body>';
-html+='<table style="border:2px solid #000;width:100%;">';
+// --- header: logo | merged company cell (3 lines, like the Word form) | one-line 8pt doc refs ---
+html+='<table style="border-collapse:collapse;width:100%;">';
 html+='<tr>';
-html+='<td style="border:1px solid #000;width:17%;padding:6px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 10px;vertical-align:middle;text-align:center;font-weight:bold;font-size:12px;letter-spacing:0.3px;">'+companyName+'</td>';
-html+='<td style="border:1px solid #000;width:30%;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>';
+html+='<td style="border:1px solid #000;width:17%;padding:8px 6px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
+html+='<td style="border:1px solid #000;width:45%;padding:4px 8px;vertical-align:middle;text-align:center;" rowspan="4;"><div style="font-weight:bold;font-size:11pt;">'+companyName+'</div><div style="font-size:11pt;margin-top:2px;">Integrated Management System</div><div style="font-size:8pt;margin-top:3px;">Training Feedback Form</div></td>';
+html+='<td style="border:1px solid #000;width:38%;padding:4px 8px;font-size:8pt;vertical-align:middle;">Document Number: IMSP 29 F05</td>';
 html+='</tr>';
+html+='<tr><td style="border:1px solid #000;width:38%;padding:4px 8px;font-size:8pt;vertical-align:middle;">Issued Date: 01/06/2024</td></tr>';
+html+='<tr><td style="border:1px solid #000;width:38%;padding:4px 8px;font-size:8pt;vertical-align:middle;">Rev.02</td></tr>';
+html+='<tr><td style="border:1px solid #000;width:38%;padding:4px 8px;font-size:8pt;vertical-align:middle;">Revision Date: 01/08/2025</td></tr>';
+html+='</table>';
+html+='<div style="height:6px;font-size:1px;line-height:6px;">&nbsp;</div>';
+// --- employee information: official #B4C5E7 band, bold, LEFT aligned, full width ---
+html+='<table style="border-collapse:collapse;width:100%;">';
+html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10pt;padding:6px 10px;text-align:left;">EMPLOYEE INFORMATION</td></tr>';
+html+='<tr><td style="border:1px solid #000;width:44%;padding:8px 10px;font-size:10pt;vertical-align:middle;">Name: <b>'+(fb.empName||'')+'</b></td><td style="border:1px solid #000;width:28%;padding:8px 10px;font-size:10pt;vertical-align:middle;">Employee ID: <b>'+(fb.empId||'')+'</b></td><td style="border:1px solid #000;width:28%;padding:8px 10px;font-size:10pt;vertical-align:middle;">Department: <b>'+(fb.dept||'')+'</b></td></tr>';
+html+='<tr><td style="border:1px solid #000;padding:8px 10px;font-size:10pt;vertical-align:middle;">Job Title: <b>'+(fb.desig||'')+'</b></td><td style="border:1px solid #000;padding:8px 10px;font-size:10pt;vertical-align:middle;">Date: <b>'+fmtDate+'</b></td><td style="border:1px solid #000;padding:8px 10px;font-size:10pt;vertical-align:middle;">Manager: <b>'+(fb.manager||'')+'</b></td></tr>';
+html+='<tr><td colspan="2" style="border:1px solid #000;padding:8px 10px;font-size:10pt;vertical-align:middle;">Training Course: <b>'+(fb.training||'')+'</b></td><td style="border:1px solid #000;padding:8px 10px;font-size:10pt;vertical-align:middle;">Trainer: <b>'+(fb.trainer||'')+'</b></td></tr>';
+html+='</table>';
+html+='<div style="height:6px;font-size:1px;line-height:6px;">&nbsp;</div>';
+// --- impressions section: one outer rectangle, borderless interior (official layout) ---
+html+='<table style="border-collapse:collapse;width:100%;">';
+html+='<tr><td colspan="7" style="border:1px solid #000;border-bottom:none;padding:6px 10px;font-size:11pt;">Please indicate your impressions of the items listed below.</td></tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1px;color:#333;font-weight:bold;">Integrated Management System</td>';
-html+='<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Issued Date:<br/><b>01/06/2024</b></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:11pt;text-decoration:underline;font-weight:bold;">Training Feedback Form</td>';
-html+='<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Rev.<b>02</b></td>';
-html+='</tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;"></td>';
-html+='<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>';
-html+='</tr>';
-html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Name: <b>'+(fb.empName||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Employee ID: <b>'+(fb.empId||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Department: <b>'+(fb.dept||'')+'</b></td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Job Title: <b>'+(fb.desig||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Date: <b>'+fmtDate+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Manager: <b>'+(fb.manager||'')+'</b></td></tr>';
-html+='<tr><td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Training Course: <b>'+(fb.training||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Trainer: <b>'+(fb.trainer||'')+'</b></td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
-html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Agree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Agree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
+html+='<td style="border:none;border-left:1px solid #000;width:35%;padding:4px 4px;"></td>';
+html+='<td style="border:none;width:10%;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Strongly Agree</td>';
+html+='<td style="border:none;width:10%;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Agree</td>';
+html+='<td style="border:none;width:10%;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Neutral</td>';
+html+='<td style="border:none;width:10%;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Disagree</td>';
+html+='<td style="border:none;width:10%;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Strongly Disagree</td>';
+html+='<td style="border:none;border-right:1px solid #000;width:15%;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Marks out of 5</td>';
 html+='</tr>';
 html+=likertRows;
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;"><b>How do you rate the training overall?</b></td></tr>';
+html+='<tr><td colspan="7" style="border:none;border-left:1px solid #000;border-right:1px solid #000;padding:6px 10px;font-size:11pt;">How do you rate the training overall?</td></tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
+html+='<td style="border:none;border-left:1px solid #000;padding:4px 4px;"></td>';
+html+='<td style="border:none;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Excellent</td>';
+html+='<td style="border:none;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Good</td>';
+html+='<td style="border:none;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Average</td>';
+html+='<td style="border:none;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Poor</td>';
+html+='<td style="border:none;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Very poor</td>';
+html+='<td style="border:none;border-right:1px solid #000;font-size:11pt;text-align:center;padding:4px 2px;vertical-align:bottom;">Marks out of 5</td>';
 html+='</tr>';
-html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:10pt;font-weight:bold;width:12%;">'+(Number(fb.overallRating)||0)+'/5</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
+html+='<tr><td style="border:none;border-left:1px solid #000;padding:2px 4px 8px 4px;"></td>'+overallBoxes+'<td style="border:none;border-right:1px solid #000;text-align:center;padding:2px 2px 8px 2px;font-size:10pt;font-weight:bold;">'+(Number(fb.overallRating)||0)+'/5</td></tr>';
+html+='<tr><td colspan="7" style="border:none;border-left:1px solid #000;border-right:1px solid #000;padding:8px 10px 2px 10px;font-size:11pt;">What did you enjoy most about the training?</td></tr>';
 // Task 24 — mirror the official form's ruled writing lines under the answer
-var _rule='____________________________________________________________________________________________________________';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:6px 8px;font-size:10pt;min-height:170px;">'+(fb.enjoy||'')+'<div style="margin-top:16px;color:#000;letter-spacing:2px;">'+_rule+'</div><div style="margin-top:14px;color:#000;letter-spacing:2px;">'+_rule+'</div></td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:8pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
+var _rule='________________________________________________________________________________________';
+html+='<tr><td colspan="7" style="border:1px solid #000;border-top:none;padding:4px 10px 10px 10px;font-size:10pt;">'+(fb.enjoy||'')+'<div style="margin-top:10px;color:#000;letter-spacing:2px;">'+_rule+'</div><div style="margin-top:8px;color:#000;letter-spacing:2px;">'+_rule+'</div></td></tr>';
 html+='</table>';
+// footer like the Word form: small page line under the form, outside the boxes
+html+='<div style="font-size:8pt;color:#000;margin-top:8px;">Page 1 of 1</div>';
 html+='</body></html>';
 return html;}
 // Track Drive connection status — set by testDriveConnection()
@@ -8582,12 +8649,12 @@ function renderOfflineTraining(){
       rows.push({empId:eid,empName:emp.name,dept:emp.dept,desig:emp.desig,origTrnName:t.name,origTrnId:t.id,origCat:t.cat,origTrainer:t.trainer||'',origManager:t.manager||'',r2TrnName:r2Trn.name,r2TrnId:r2Trn.id,r2Trainer:r2Record.r2Trainer||r2Trn.trainer||'',origScore:firstFail.score,origBest:best1,origTries:att.length,origDate:firstFail.date||'',origPassing:t.passing||70,origReason:firstReason,r2Score:r2Fail.score,r2Best:best2,r2Tries:r2Att.length,r2Date:r2Fail.date||'',r2Passing:r2Trn.passing||70,r2Reason:r2Reason,assignmentReason:r2Record.reason||'',r2Video:r2Record.r2Video||'',r2YtId:r2YtId,r2Deadline:r2Record.r2Deadline||''});
     });
   });
-  var h='<div class="section-header"><div class="section-title">Offline <span>Training</span></div></div>';
+  var h='<div class="section-header"><div class="section-title">Offline <span>Training</span></div><div style="display:flex;gap:6px;"><button class="btn btn-amber btn-sm" onclick="openManualResultEntry()"><span class="mat-ico" style="font-size:13px;">upload_file</span> Manual Result Entry</button></div></div>';
   h+='<div style="background:rgba(231,76,60,.06);border:1px solid rgba(231,76,60,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:#e74c3c;font-size:20px;">emergency</span><div><b>2x Failed Employees</b> \u2014 Failed both 1st test and Round 2. Need <b>offline/in-person training</b>. Send message to schedule.</div></div>';
   var totalCases=rows.length;
   var totalEmps=new Set(rows.map(function(r){return r.empId;})).size;
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;"><div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid #e74c3c;"><div style="font-size:28px;font-weight:800;color:#e74c3c;">'+totalEmps+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Employees</div></div><div style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;text-align:center;border-top:3px solid var(--orange);"><div style="font-size:28px;font-weight:800;color:var(--orange);">'+totalCases+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Failed Cases</div></div></div>';
-  if(rows.length===0){h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Cases!</h3><p>All R2 trainings passed.</p></div>';el.innerHTML=h;return;}
+  if(rows.length===0){h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Cases!</h3><p>All R2 trainings passed.</p></div><div style="text-align:center;margin-bottom:14px;"><button class="btn btn-amber btn-sm" onclick="openManualResultEntry()"><span class="mat-ico" style="font-size:13px;">upload_file</span> Manual Result Entry - upload a pass/fail result by hand</button></div>';el.innerHTML=h;return;}
   rows.sort(function(a,b){return a.origTrnName.localeCompare(b.origTrnName)||a.empName.localeCompare(b.empName);});
   var offlineGroupOpen=false,offlineGroupName='';
   rows.forEach(function(r){
@@ -8609,6 +8676,7 @@ function renderOfflineTraining(){
     h+='<div style="font-size:10.5px;color:var(--muted);padding:6px 8px;background:rgba(240,136,62,.06);border-radius:5px;margin-top:5px;"><b style="color:var(--orange);">Why Round 2 failed:</b> '+escAttr(r.r2Reason)+'</div>'+(r.assignmentReason?'<div style="font-size:10.5px;color:var(--muted);padding:6px 8px;background:rgba(139,109,232,.06);border-radius:5px;margin-top:5px;"><b style="color:var(--purple);">Why Round 2 was assigned:</b> '+escAttr(r.assignmentReason)+'</div>':'')+'</div>';
     if(r.r2YtId){h+='<div style="margin-bottom:8px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--bdr);"><iframe src="https://www.youtube.com/embed/'+r.r2YtId+'?rel=0" style="width:100%;height:140px;" allowfullscreen></iframe></div>';}
     h+='<button class="btn btn-sm" style="background:#e74c3c;color:#fff;font-size:11px;width:100%;justify-content:center;" data-e="'+r.empId+'" data-n="'+escAttr(r.empName)+'" data-o="'+escAttr(r.origTrnName)+'" data-r="'+escAttr(r.r2TrnName)+'" onclick="openOfflineMsg(this.dataset.e,this.dataset.n,this.dataset.o,this.dataset.r)"><span class="mat-ico" style="font-size:13px;">mail</span> Send Offline Training Message</button>';
+    h+='<div style="margin-top:8px;font-size:10.5px;color:var(--muted);text-align:center;">After the offline session, upload the result:</div><div style="display:flex;gap:6px;justify-content:center;">'+offlineMarkBtns(r.origTrnId,r.empId,'dash')+'</div>';
     h+='</div></div>';
   });
   if(offlineGroupOpen)h+='</div>';
@@ -8644,8 +8712,11 @@ function sendOfflineMsg(){
   var d=window._offlineMsgData;if(!d){toast('Error','error');return;}
   var msg=(document.getElementById('offlineMsgText').value||'').trim();
   if(!msg){toast('Enter a message','error');return;}
-  DB.notifications.unshift({id:genId('N'),msg:'[Offline Training Required — '+d.origTrnName+' → '+d.r2TrnName+'] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId});
+  var _notif={id:genId('N'),msg:'[Offline Training Required — '+d.origTrnName+' → '+d.r2TrnName+'] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId};DB.notifications.unshift(_notif);
   closeModal();saveDB();updateBadges();
+  // Task 27 — push the message doc itself to Firestore so the employee device receives it
+  // immediately (the bulk saveDB push can be skipped while a sync is busy).
+  if(firebaseReady){(async function(){try{await authAsAdmin();await fbDB.collection('notifications').doc(String(_notif.id)).set(JSON.parse(JSON.stringify(_notif)),{merge:true});console.log('Offline training message saved to Firebase');}catch(e){console.warn('Offline message cloud save error:',e);}})();}
   toast('Offline training message sent to '+d.empName,'success');
 }
 
@@ -9288,28 +9359,52 @@ function renderSettings(){
           <span style="font-size:11px;color:var(--muted);margin-left:auto;">${DB.settings.sheetAutoSync!==false?'<span style=\'color:var(--green);\'>ON</span> — Data auto-updates on every change':'<span style=\'color:var(--red);\'>OFF</span> — Only manual sync'}  </span>
         </div>
         <div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.7;overflow-x:auto;max-height:260px;overflow-y:auto;">
-          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script):</div>
+          <div style="font-size:11px;color:var(--amber);font-weight:600;margin-bottom:6px;font-family:Inter,sans-serif;">STEP 1: Google Sheets Apps Script (paste this in Extensions > Apps Script) — v2: feedback rows now APPEND continuously (must re-paste &amp; Save):</div>
 function doPost(e){<br>
-&nbsp;&nbsp;try{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var body=JSON.parse(e.postData.contents);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var sheetName=body.sheet||"Data";<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var data=body.data||[];<br>
-&nbsp;&nbsp;&nbsp;&nbsp;if(!Array.isArray(data)||data.length===0)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;if(!sheet) sheet=ss.insertSheet(sheetName);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;// Clear old data and rewrite (keeps sheet in sync with app)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;if(sheet.getLastRow()>0) sheet.deleteRows(1,sheet.getLastRow());<br>
-&nbsp;&nbsp;&nbsp;&nbsp;var headers=Object.keys(data[0]);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers);<br>
+&nbsp;try{<br>
+&nbsp;&nbsp;var body=null;<br>
+&nbsp;&nbsp;try{if(e.postData&&e.postData.contents)body=JSON.parse(e.postData.contents);}catch(err1){}<br>
+&nbsp;&nbsp;if(!body&&e&&e.parameter&&e.parameter.json)body=JSON.parse(e.parameter.json);<br>
+&nbsp;&nbsp;if(!body||(!body.data&&!body.ping))return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
+&nbsp;&nbsp;if(body.ping)return ContentService.createTextOutput(JSON.stringify({status:"OK",pong:true})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;var sheetName=body.sheet||"Data";<br>
+&nbsp;&nbsp;var data=body.data||[];<br>
+&nbsp;&nbsp;if(!Array.isArray(data)||data.length===0)return ContentService.createTextOutput(JSON.stringify({status:"no data"}));<br>
+&nbsp;&nbsp;var ss=SpreadsheetApp.getActiveSpreadsheet();<br>
+&nbsp;&nbsp;var sheet=ss.getSheetByName(sheetName);<br>
+&nbsp;&nbsp;if(!sheet)sheet=ss.insertSheet(sheetName);<br>
+&nbsp;&nbsp;var headers=Object.keys(data[0]);<br>
+&nbsp;&nbsp;if(body.append){<br>
+&nbsp;&nbsp;&nbsp;// CONTINUOUS ROW SAVING: add only rows that are not already in the sheet, never delete.<br>
+&nbsp;&nbsp;&nbsp;var lastRow=sheet.getLastRow();<br>
+&nbsp;&nbsp;&nbsp;if(lastRow===0){sheet.appendRow(headers);lastRow=1;}<br>
+&nbsp;&nbsp;&nbsp;var headVals=sheet.getRange(1,1,1,Math.max(1,sheet.getLastColumn())).getValues()[0];<br>
+&nbsp;&nbsp;&nbsp;var idBased=String(headVals[0]||"").toLowerCase().indexOf("id")!==-1;<br>
+&nbsp;&nbsp;&nbsp;if(idBased){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var existing={};<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if(lastRow>1){<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var ids=sheet.getRange(2,1,lastRow-1,1).getValues();<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for(var i=0;i<ids.length;i++){var k=String(ids[i][0]);if(k)existing[k]=true;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;var appended=0;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;data.forEach(function(r){<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(k){return r[k]||"";}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var key=String(r[headers[0]]==null?"":r[headers[0]]);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(key&&!existing[key]){sheet.appendRow(headers.map(function(c){return r[c]==null?"":r[c];}));existing[key]=true;appended++;}<br>
 &nbsp;&nbsp;&nbsp;&nbsp;});<br>
-&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
-&nbsp;&nbsp;}catch(err){<br>
-&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"error",msg:err.toString()}));<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,mode:"append",rows:data.length,appended:appended,total:Math.max(sheet.getLastRow()-1,0)})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;// Sheet layout has no ID column (legacy): fall through to a one-time full rewrite below.<br>
 &nbsp;&nbsp;}<br>
+&nbsp;&nbsp;// FULL SYNC (state mirror for non-append sheets): clear old data and rewrite.<br>
+&nbsp;&nbsp;if(sheet.getLastRow()>0)sheet.deleteRows(1,sheet.getLastRow());<br>
+&nbsp;&nbsp;sheet.appendRow(headers);<br>
+&nbsp;&nbsp;data.forEach(function(r){<br>
+&nbsp;&nbsp;&nbsp;sheet.appendRow(headers.map(function(c){return r[c]==null?"":r[c];}));<br>
+&nbsp;&nbsp;});<br>
+&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"OK",sheet:sheetName,rows:data.length})).setMimeType(ContentService.MimeType.JSON);<br>
+&nbsp;}catch(err){<br>
+&nbsp;&nbsp;return ContentService.createTextOutput(JSON.stringify({status:"error",msg:err.toString()}));<br>
+&nbsp;}<br>
 }<br>
 function doGet(e){return ContentService.createTextOutput("PTS Safety Sheet API is running. Use POST to sync data.");}
         </div>
@@ -9543,6 +9638,7 @@ function buildFeedbackPayload(){
     var qScores=[];for(var k in (fb.ratings||{})){var r=fb.ratings[k];if(r&&r.score)qScores.push(r.score);}
     var avgScore=qScores.length?Math.round(qScores.reduce(function(a,b){return a+b;},0)/qScores.length*10)/10:'—';
     var row={
+      'Feedback ID':fb.id||('FBX-'+String(fb.empId||fb.empName||'ANON')+'-'+String(fb.timestamp||fb.date||'')+'-'+String(fb.training||'').slice(0,24)),
       'Company':company,
       'Name':fb.empName||'',
       'Employee ID':fb.empId||'',
@@ -9568,9 +9664,13 @@ function buildFeedbackPayload(){
     return row;
   });
 }
-async function pushToSheet(url,payload,sheetName){
-  if(!payload.length)return {sent:0};
-  var json=JSON.stringify({sheet:sheetName,data:payload});
+async function pushToSheet(url,payload,sheetName,opts){
+  opts=opts||{};
+  if(!payload.length&&!opts.ping)return {sent:0};
+  var body={sheet:sheetName,data:payload||[]};
+  if(opts.append)body.append=true;
+  if(opts.ping)body.ping=true;
+  var json=JSON.stringify(body);
   // Form POST — only method that works with Google Apps Script
   return new Promise(function(resolve){
     var fname='_gsf_'+Date.now()+'_'+Math.random().toString(36).substr(2,5);
@@ -9587,7 +9687,7 @@ async function pushToSheet(url,payload,sheetName){
       if(done)return;done=true;
       try{document.body.removeChild(iframe);}catch(e){}
       try{document.body.removeChild(form);}catch(e){}
-      resolve({sent:payload.length});
+      resolve({sent:(payload||[]).length});
     }
     iframe.onload=cleanup;
     setTimeout(cleanup,6000);
@@ -9624,7 +9724,7 @@ async function syncToGoogleSheet(){
     if(sopPayload.length>0){var r6=await pushToSheet(url,sopPayload,"SOPs");totalSent+=r6.sent;details.push(sopPayload.length+' SOPs');}
     // 7. Feedback
     var fbPayload=buildFeedbackPayload();
-    if(fbPayload.length>0){var r7=await pushToSheet(url,fbPayload,"Feedback");totalSent+=r7.sent;details.push(fbPayload.length+' feedback');}
+    if(fbPayload.length>0){var r7=await pushToSheet(url,fbPayload,"Feedback",{append:true});totalSent+=r7.sent;details.push(fbPayload.length+' feedback');}
     _lastSheetSync=Date.now();
     if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Sync complete on '+new Date().toLocaleString()+' — '+totalSent+' records across '+details.length+' sheets ('+details.join(', ')+'). Check your Google Sheet tabs.</span>';
     toast('All data synced to Google Sheet! ('+totalSent+' records in 7 tabs)','success',4000);
@@ -9707,7 +9807,7 @@ async function executeSheetSync(){
       var p=buildSopPayload();if(p.length>0){await pushToSheet(url,p,"SOPs");totalSent+=p.length;}
     }
     if(sheetsToSync.includes("Feedback")){
-      var p=buildFeedbackPayload();if(p.length>0){await pushToSheet(url,p,"Feedback");totalSent+=p.length;}
+      var p=buildFeedbackPayload();if(p.length>0){await pushToSheet(url,p,"Feedback",{append:true});totalSent+=p.length;}
     }
     _lastSheetSync=Date.now();
     console.log('[Sheet Auto-Sync] Done: '+totalSent+' records across '+sheetsToSync.length+' sheets');
@@ -9813,7 +9913,7 @@ async function testSheetConnection(){
   const statusEl=document.getElementById("syncStatus");
   if(statusEl)statusEl.innerHTML='<span style="color:var(--amber);">Testing connection...</span>';
   try{
-    await pushToSheet(url,[{test:true}],"Training Data");
+    await pushToSheet(url,[],"Training Data",{ping:true});
     if(statusEl)statusEl.innerHTML='<span style="color:var(--green);">Connection OK! Apps Script is reachable. Enable "Auto-Sync" toggle and run "Sync Now" to push all data.</span>';
     toast("Connection test OK","success");
   }catch{
