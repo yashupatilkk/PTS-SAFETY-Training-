@@ -2448,6 +2448,7 @@ function updateBadges(){
   var offCount=0;var empIdSet2=DB.employees.map(function(e){return e.id;});
   DB.trainings.filter(function(t){return !t._isR2Training;}).forEach(function(t){var enrolled=(t.enrolled||[]).filter(function(eid){return empIdSet2.indexOf(eid)>=0;});var trnRes=DB.testResults.filter(function(r){return !r.practice&&r.training===t.name&&empIdSet2.indexOf(r.empId)>=0;});var candidateIds=[].concat(enrolled,trnRes.map(function(r){return r.empId;})).filter(function(eid,i,a){return a.indexOf(eid)===i;});candidateIds.forEach(function(eid){var att=trnRes.filter(function(r){return r.empId===eid;});if(!att.length)return;var hasPass=att.some(function(r){return isOfficialResultPass(r);});if(hasPass)return;var r2Rec=findR2Assignment(t,eid);if(!r2Rec)return;var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Rec.r2TrnId;});if(!r2Trn)return;var r2Att=DB.testResults.filter(function(r){return !r.practice&&r.training===r2Trn.name&&r.empId===eid;});if(!r2Att.length)return;      if(r2Att.some(function(r){return isOfficialResultPass(r);}))return;offCount++;});});
   var offEl=document.getElementById("nb-offlinetraining");if(offEl)offEl.textContent=offCount;
+  if(!isAdmin&&typeof currentUser!=='undefined'&&currentUser&&currentUser.id&&offEl){var _myOffUnread=(DB.notifications||[]).filter(function(n){return n.forEmp===currentUser.id&&!n.read&&(n.otype==='offline_msg'||(n.icon==='groups'&&String(n.msg||'').indexOf('[Offline Training')===0));}).length;offEl.textContent=_myOffUnread;offEl.style.display=_myOffUnread>0?'inline-flex':'none';}
   // Employee: show unread Help Desk messages badge
   if(!isAdmin&&currentUser&&currentUser.id){
     var empMsgUnread=DB.messages.filter(function(m){return m.toId===currentUser.id&&!m.read;}).length;
@@ -6236,10 +6237,11 @@ function openManualResultEntry(){
     +'<div><span style="font-size:12px;font-weight:700;">Training</span><select id="off_trn" class="form-control-sm" style="width:100%;margin-top:4px;">'+trnOpts+'</select></div>'
     +'<div><span style="font-size:12px;font-weight:700;">Result</span><select id="off_outcome" class="form-control-sm" style="width:100%;margin-top:4px;"><option value="pass">PASS - counts in Total test pass</option><option value="fail">FAIL - counts in Total test fail</option></select></div>'
     +'<div><span style="font-size:12px;font-weight:700;">Score %</span><input id="off_score" type="number" min="0" max="100" class="form-control-sm" value="100" style="width:100%;margin-top:4px;"></div>'
-    +'<div><span style="font-size:12px;font-weight:700;">Date</span><input id="off_date" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;margin-top:4px;"></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">Training Completion Date</span><input id="off_date" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;margin-top:4px;"></div>'
     +'</div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:12px;"><input type="checkbox" id="off_complete" checked style="width:15px;height:15px;accent-color:var(--green);"> Training was completed <span style="color:var(--muted);font-weight:400;">(required for PASS)</span></label>'
     +'<div style="font-size:11px;color:var(--muted);">PASS records an official pass for the selected training (a score of 75%+ auto-issues a certificate); FAIL records an official fail. Scores are auto-adjusted to match the outcome against the pass mark.</div>'
-    +'</div><div class="modal-foot"><button class="btn btn-amber" onclick="confirmOfflineResult()"><span class="mat-ico">check</span> Upload Result</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
+    +'</div><div class="modal-foot"><button class="btn btn-amber" onclick="confirmOfflineResult()"><span class="mat-ico">check</span> Submit Result</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
 }
 function offlineMarkBtns(trnId,empId,from){
   if(!trnId||!empId)return'';
@@ -6257,14 +6259,15 @@ function openOfflineResultModal(trnId,empId,outcome,from){
   }).join('');
   openModal('<div class="modal-accent"></div><div class="modal-head"><h2>Mark Offline Training Result</h2><button class="close-btn" onclick="closeModal()"><span class="mat-ico">close</span></button></div><div class="modal-body">'
     +'<div style="background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:14px;font-size:13px;"><b>'+_escDrill(e.name)+'</b> ('+_escDrill(e.id)+')'+(e.dept?' <span class="badge badge-info">'+_escDrill(e.dept)+'</span>':'')+' attended <b>Offline Training</b>. Select the outcome and confirm the training, so the result counts everywhere.</div>'
+    +(outcome!=='fail'?'<div style="background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.28);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:12px;"><div style="font-size:12.5px;font-weight:800;color:var(--green);display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span class="mat-ico" style="font-size:15px;">task_alt</span> Training Complete?</div><div style="font-size:11px;color:var(--muted);margin-bottom:8px;">You clicked PASS — confirm the offline training was completed, enter the completion date below, then click Submit.</div><label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;cursor:pointer;"><input type="checkbox" id="off_complete" checked style="width:15px;height:15px;accent-color:var(--green);"> Training was completed</label></div>':'')
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">'
     +'<div><span style="font-size:12px;font-weight:700;">Outcome</span><select id="off_outcome" class="form-control-sm" style="width:100%;margin-top:4px;"><option value="pass"'+(outcome!=='fail'?' selected':'')+'>PASS — counts in Total test pass</option><option value="fail"'+(outcome==='fail'?' selected':'')+'>FAIL — counts in Total test fail</option></select></div>'
     +'<div><span style="font-size:12px;font-weight:700;">Training</span><select id="off_trn" class="form-control-sm" style="width:100%;margin-top:4px;">'+trnOpts+'</select></div>'
     +'<div><span style="font-size:12px;font-weight:700;">Score %</span><input id="off_score" type="number" min="0" max="100" class="form-control-sm" value="'+(outcome==='fail'?'50':'100')+'" style="width:100%;margin-top:4px;"></div>'
-    +'<div><span style="font-size:12px;font-weight:700;">Date</span><input id="off_date" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;margin-top:4px;"></div>'
+    +'<div><span style="font-size:12px;font-weight:700;">'+(outcome!=='fail'?'Training Completion Date':'Date')+'</span><input id="off_date" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;margin-top:4px;"></div>'
     +'</div>'
     +'<div style="font-size:11px;color:var(--muted);">PASS records an official pass for the selected training — it counts in the dashboard pass cards and the monthly chart, and a score of 75%+ auto-issues a certificate. FAIL records an official fail. Scores are auto-adjusted to match the outcome against the pass mark. The offline marking itself is kept.</div>'
-    +'</div><div class="modal-foot"><button class="btn btn-amber" onclick="confirmOfflineResult()"><span class="mat-ico">check</span> Save Result</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
+    +'</div><div class="modal-foot"><button class="btn btn-amber" onclick="confirmOfflineResult()"><span class="mat-ico">check</span> Submit Result</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button></div>','560px');
 }
 function confirmOfflineResult(){
   var ctx=_offlineMarkCtx;if(!ctx){toast('Nothing to save — open the marking option first','warning',3000);return;}
@@ -6285,9 +6288,10 @@ function confirmOfflineResult(){
   if(outcome==='pass'&&score<passing)score=passing;
   if(outcome==='fail'&&score>=passing)score=passing-1;
   var pass=outcome==='pass';
+  var _cc=el('off_complete');if(pass&&_cc&&!_cc.checked){toast('Tick "Training was completed" and enter the completion date, then submit','warning',4000);return;}
   var e=DB.employees.find(function(x){return x&&x.id===ctx.empId;});
   var empName=e?e.name:ctx.empName;
-  var result={id:genId('TST'),empId:ctx.empId,empName:empName,dept:(e&&e.dept)||'',training:t.name,cat:t.cat||'',score:score,pass:pass,offline:true,method:'Offline Training',date:date,
+  var result={id:genId('TST'),empId:ctx.empId,empName:empName,dept:(e&&e.dept)||'',training:t.name,cat:t.cat||'',score:score,pass:pass,offline:true,method:'Offline Training',date:date,completionDate:date,
     attempt:DB.testResults.filter(function(r){return r&&!r.practice&&r.empId===ctx.empId&&r.training===t.name;}).length+1,
     trainer:t.trainer||'',passing:passing,
     failureReason:pass?'Offline training completed — pass confirmed by admin':'Offline training outcome marked FAIL by admin (score '+score+'% below '+passing+'% pass mark).'};
@@ -6300,7 +6304,7 @@ function confirmOfflineResult(){
     if(!t.completed.includes(ctx.empId))t.completed.push(ctx.empId);
     t.completedDates[ctx.empId]=date;
   }
-  var _notif={id:genId('N'),msg:empName+' — offline training for '+t.name+' marked '+(pass?'PASS':'FAIL')+' ('+score+'%)',time:'Just now',read:false,icon:pass?'check_circle':'cancel',forEmp:ctx.empId};DB.notifications.unshift(_notif);
+  var _notif={id:genId('N'),msg:empName+' — offline training for '+t.name+' marked '+(pass?'PASS':'FAIL')+' ('+score+'%)'+(pass?' — completed '+formatDate(date):''),otype:'offline_result',time:'Just now',read:false,icon:pass?'check_circle':'cancel',forEmp:ctx.empId};DB.notifications.unshift(_notif);
   updateBadges();saveDB();
   if(typeof firebaseReady!=="undefined"&&firebaseReady&&typeof fbDB!=="undefined"&&fbDB){
     (async function(){try{
@@ -8615,7 +8619,7 @@ function renderRetraining(){
 }
 
 function renderOfflineTraining(){
-  if(!isAdmin){document.getElementById('view-offlinetraining').innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  if(!isAdmin){renderOfflineTrainingEmp();return;}
   var el=document.getElementById('view-offlinetraining');
   var empIdSet=DB.employees.map(function(e){return e.id;});
   var rows=[];
@@ -8683,6 +8687,77 @@ function renderOfflineTraining(){
   el.innerHTML=h;
 }
 
+function renderOfflineTrainingEmp(){
+  var el=document.getElementById('view-offlinetraining');
+  if(typeof currentUser==='undefined'||!currentUser){el.innerHTML='<div class="empty-state"><span class="mat-ico">lock</span><h3>Admin Only</h3><p>This page is for administrators only.</p></div>';return;}
+  var myId=currentUser.id;
+  var nots=DB.notifications||[];
+  // Messages the admin sent for offline training (new structured + legacy format)
+  var msgs=nots.filter(function(n){if(n.forEmp!==myId)return false;if(n.otype==='offline_msg')return true;return n.icon==='groups'&&String(n.msg||'').indexOf('[Offline Training')===0;});
+  var notices=nots.filter(function(n){return n.forEmp===myId&&n.icon==='assignment'&&String(n.msg||'').indexOf('Offline training assigned')===0;});
+  // My 2x-failed offline cases (same funnel as the admin page, scoped to me)
+  var cases=[];
+  DB.trainings.forEach(function(t){
+    if(t._isR2Training)return;
+    var att=DB.testResults.filter(function(r){return !r.practice&&r.empId===myId&&r.training===t.name;});
+    if(!att.length)return;
+    if(att.some(function(r){return isOfficialResultPass(r);}))return;
+    var r2Record=findR2Assignment(t,myId);if(!r2Record)return;
+    var r2Trn=DB.trainings.find(function(rt){return rt.id===r2Record.r2TrnId;});if(!r2Trn)return;
+    var r2Att=DB.testResults.filter(function(r){return !r.practice&&r.training===r2Trn.name&&r.empId===myId;});
+    if(!r2Att.length)return;
+    if(r2Att.some(function(r){return isOfficialResultPass(r);}))return;
+    var offRes=DB.testResults.filter(function(r){return r.offline&&r.empId===myId&&r.training===t.name;}).sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));}).pop();
+    cases.push({t:t,r2:r2Trn,att:att,r2Att:r2Att,offRes:offRes,deadline:r2Record.r2Deadline||''});
+  });
+  var myOffResults=DB.testResults.filter(function(r){return r.offline&&r.empId===myId;}).sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''));});
+  var h='<div class="section-header"><div class="section-title">Offline <span>Training</span></div></div>';
+  h+='<div style="background:rgba(62,160,232,.07);border:1px solid rgba(62,160,232,.2);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:10px;"><span class="mat-ico" style="color:var(--blue);font-size:20px;">groups</span><div><b>Offline / in-person training</b> \u2014 messages from your admin, your session schedule (date &amp; time) and your offline results appear here.</div></div>';
+  var any=false;
+  if(msgs.length){any=true;
+    h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin:4px 0 8px;"><span class="mat-ico" style="font-size:14px;">mail</span> Messages from Admin</div>';
+    msgs.forEach(function(n){
+      h+='<div class="training-card" style="cursor:default;margin-bottom:10px;"><div class="training-body" style="padding:12px 14px;">';
+      h+='<div style="display:flex;align-items:flex-start;gap:10px;"><div style="width:34px;height:34px;border-radius:50%;background:rgba(62,160,232,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span class="mat-ico" style="color:var(--blue);font-size:18px;">mail</span></div><div style="min-width:0;flex:1;">';
+      h+='<div style="font-size:13.5px;font-weight:700;">'+escAttr(n.trnName||'Offline Training')+'</div>';
+      if(n.trnDate||n.trnTime){h+='<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:3px;">'+(n.trnDate?'<span><span class="mat-ico" style="font-size:12px;">event</span> Date: <b>'+formatDate(n.trnDate)+'</b></span>':'')+(n.trnTime?'<span><span class="mat-ico" style="font-size:12px;">schedule</span> Time: <b>'+escAttr(n.trnTime)+'</b></span>':'')+'</div>';}
+      if(n.body){h+='<div style="font-size:12px;line-height:1.5;margin-top:6px;padding:8px 10px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);">'+escAttr(n.body)+'</div>';}
+      else{h+='<div style="font-size:12px;line-height:1.5;margin-top:6px;color:var(--muted);">'+escAttr(String(n.msg||'').replace(/^\[Offline Training[^\]]*\]\s*/,''))+'</div>';}
+      h+='<div style="font-size:10px;color:var(--muted);margin-top:6px;">'+escAttr(n.time||'')+(n.read?'':' <span class="badge badge-amber" style="margin-left:4px;">New</span>')+'</div>';
+      h+='</div></div></div></div>';
+    });
+  }
+  if(notices.length){any=true;
+    h+='<div style="font-size:12px;font-weight:800;color:var(--amber);margin:10px 0 8px;"><span class="mat-ico" style="font-size:14px;">assignment</span> Offline Training Notices</div>';
+    notices.forEach(function(n){h+='<div style="background:rgba(255,176,32,.07);border:1px solid rgba(255,176,32,.25);border-left:4px solid var(--amber);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:8px;font-size:12px;"><b style="color:var(--amber);"><span class="mat-ico" style="font-size:13px;">assignment</span> Offline Training Assigned</b><div style="margin-top:4px;">'+escAttr(String(n.msg||''))+'</div></div>';});
+  }
+  if(cases.length){any=true;
+    h+='<div style="font-size:12px;font-weight:800;color:#e74c3c;margin:12px 0 8px;"><span class="mat-ico" style="font-size:14px;">emergency</span> You Must Attend Offline Training (2x Failed)</div>';
+    cases.forEach(function(c){
+      var best1=0;c.att.forEach(function(r){if(r.score>best1)best1=r.score;});
+      var best2=0;c.r2Att.forEach(function(r){if(r.score>best2)best2=r.score;});
+      h+='<div class="training-card" style="cursor:default;margin-bottom:10px;border-top:3px solid #e74c3c;"><div class="training-body">';
+      h+='<div style="font-size:14px;font-weight:800;">'+escAttr(c.t.name)+'</div>';
+      h+='<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">'+(c.t.trainer?'Trainer: '+escAttr(c.t.trainer)+' \u2022 ':'')+'Pass mark: '+(c.t.passing||70)+'%'+(c.deadline?' \u2022 Deadline: <b>'+formatDate(c.deadline)+'</b>':'')+'</div>';
+      h+='<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px;margin-bottom:8px;"><span style="background:rgba(231,76,60,.08);color:#e74c3c;border-radius:6px;padding:4px 8px;">1st test best: <b>'+best1+'%</b></span><span style="background:rgba(240,136,62,.1);color:var(--orange);border-radius:6px;padding:4px 8px;">Round 2 best: <b>'+best2+'%</b></span></div>';
+      h+='<div style="font-size:12px;padding:8px 10px;background:rgba(231,76,60,.06);border-left:3px solid #e74c3c;border-radius:0 6px 6px 0;"><b style="color:#e74c3c;">Online test failed 2 times</b> \u2014 please attend the offline/in-person training session. Check the schedule above (date &amp; time) or contact your manager.</div>';
+      if(c.offRes&&!isOfficialResultPass(c.offRes)){h+='<div style="margin-top:8px;font-size:12px;padding:8px 10px;background:rgba(231,76,60,.1);border-radius:6px;color:#e74c3c;"><b>Offline result: FAIL</b> ('+c.offRes.score+'%, '+formatDate(c.offRes.date)+') \u2014 please attend the offline session again.</div>';}
+      h+='</div></div>';
+    });
+  }
+  if(myOffResults.length){any=true;
+    h+='<div style="font-size:12px;font-weight:800;color:var(--green);margin:12px 0 8px;"><span class="mat-ico" style="font-size:14px;">fact_check</span> My Offline Training Results</div>';
+    myOffResults.forEach(function(r){
+      var p=isOfficialResultPass(r);
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--bdr);border-radius:var(--r-sm);margin-bottom:6px;font-size:12px;background:'+(p?'rgba(62,207,142,.06)':'rgba(231,76,60,.06)')+';"><span class="mat-ico" style="color:'+(p?'var(--green)':'#e74c3c')+';font-size:17px;">'+(p?'check_circle':'cancel')+'</span><div style="flex:1;min-width:0;"><b>'+escAttr(r.training)+'</b> \u2014 '+(p?'PASS':'FAIL')+' ('+r.score+'%)</div><div style="font-size:10.5px;color:var(--muted);">'+formatDate(r.date)+'</div></div>';
+    });
+  }
+  if(!any){h+='<div class="empty-state"><span class="mat-ico">verified</span><h3>No Offline Training Required!</h3><p>All your trainings are passed. Messages from the admin will appear here.</p></div>';}
+  var changed=false;msgs.concat(notices).forEach(function(n){if(!n.read){n.read=true;changed=true;}});
+  if(changed){try{saveDB();}catch(e2){}try{updateBadges();}catch(e3){}}
+  el.innerHTML=h;
+}
+
 function openOfflineMsg(empId,empName,origTrnName,r2TrnName){
   var sn=empName.replace(/"/g,'&quot;');
   var origTrn=DB.trainings.find(function(t){return t.name===origTrnName;});
@@ -8702,6 +8777,11 @@ function openOfflineMsg(empId,empName,origTrnName,r2TrnName){
     '<div><b style="font-size:14px;">'+sn+'</b> <span style="color:var(--muted);font-size:11px;">('+empId+')</span><br/><span style="font-size:11px;color:#e74c3c;">Failed 2x: '+escAttr(origTrnName)+' &rarr; '+escAttr(r2TrnName)+'</span></div></div>'+ 
     '<div style="margin-top:10px;padding:9px;background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r-sm);font-size:10.5px;color:var(--muted);"><b style="color:#e74c3c;">1st test:</b> '+window._offlineMsgData.origScore+'% — '+escAttr(window._offlineMsgData.origWhy)+'<br/><b style="color:var(--orange);">Round 2 test:</b> '+window._offlineMsgData.r2Score+'% — '+escAttr(window._offlineMsgData.r2Why)+'</div>'+ 
     '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">'+
+    '<div><label class="form-label-sm" style="margin-bottom:4px;display:block;">Training Name <span style="color:var(--red);">*</span></label><select id="offlineMsgTrn" class="form-control-sm" style="width:100%;"><option value="'+escAttr(origTrnName)+'">'+escAttr(origTrnName)+'</option><option value="'+escAttr(r2TrnName)+'">'+escAttr(r2TrnName)+' (Round 2)</option></select></div>'+
+    '<div><label class="form-label-sm" style="margin-bottom:4px;display:block;">Date</label><input id="offlineMsgDate" type="date" class="form-control-sm" value="'+new Date().toISOString().split('T')[0]+'" style="width:100%;"></div>'+
+    '<div><label class="form-label-sm" style="margin-bottom:4px;display:block;">Time</label><input id="offlineMsgTime" type="time" class="form-control-sm" value="10:00" style="width:100%;"></div>'+
+    '</div>'+
     '<div style="margin-bottom:12px;"><label class="form-label-sm" style="margin-bottom:6px;display:block;">Message <span style="color:var(--red);">*</span></label>'+
     '<textarea class="form-control-sm" id="offlineMsgText" rows="4" placeholder="Schedule offline/in-person training session..." style="font-size:13px;"></textarea></div>'+
     '</div>'+
@@ -8712,7 +8792,10 @@ function sendOfflineMsg(){
   var d=window._offlineMsgData;if(!d){toast('Error','error');return;}
   var msg=(document.getElementById('offlineMsgText').value||'').trim();
   if(!msg){toast('Enter a message','error');return;}
-  var _notif={id:genId('N'),msg:'[Offline Training Required — '+d.origTrnName+' → '+d.r2TrnName+'] '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId};DB.notifications.unshift(_notif);
+  var _trnSel=document.getElementById('offlineMsgTrn');var _sDate=(document.getElementById('offlineMsgDate')||{}).value||'';var _sTime=(document.getElementById('offlineMsgTime')||{}).value||'';
+  var _trnName=(_trnSel&&_trnSel.value)?_trnSel.value:d.origTrnName;
+  var _bracket='[Offline Training — '+_trnName+(_sDate?' — '+formatDate(_sDate):'')+(_sTime?' — '+_sTime:'')+']';
+  var _notif={id:genId('N'),msg:_bracket+' '+msg,read:false,time:'Just now',icon:'groups',forEmp:d.empId,otype:'offline_msg',trnName:_trnName,trnDate:_sDate,trnTime:_sTime,body:msg};DB.notifications.unshift(_notif);
   closeModal();saveDB();updateBadges();
   // Task 27 — push the message doc itself to Firestore so the employee device receives it
   // immediately (the bulk saveDB push can be skipped while a sync is busy).
