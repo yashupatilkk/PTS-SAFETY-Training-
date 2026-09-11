@@ -135,7 +135,7 @@ select option{background:var(--sur);}
 
 /* Safety Vehicle Container */
 .login-vehicle-scene{position:absolute;bottom:18px;left:0;width:100%;height:80px;pointer-events:none;z-index:1;}
-.login-vehicle{position:absolute;bottom:8px;animation:vehicleDrive 12s linear infinite;}
+.login-vehicle{position:absolute;bottom:8px;animation:vehicleDrive 12s linear infinite;transform:scaleX(-1);}
 @keyframes vehicleDrive{0%{left:-220px;}100%{left:calc(100% + 40px);}}
 
 /* Vehicle Body */
@@ -144,7 +144,7 @@ select option{background:var(--sur);}
 .veh-cabin::before{content:'';position:absolute;top:6px;left:5px;width:22px;height:18px;background:rgba(135,206,250,.25);border-radius:4px 2px 2px 4px;border:1px solid rgba(135,206,250,.15);}
 .veh-cabin::after{content:'';position:absolute;top:6px;left:32px;width:22px;height:18px;background:rgba(135,206,250,.25);border-radius:2px 4px 4px 2px;border:1px solid rgba(135,206,250,.15);}
 .veh-cargo{position:absolute;left:58px;top:6px;width:122px;height:46px;background:linear-gradient(180deg,#d43a2e 0%,#b33028 100%);border-radius:2px 6px 6px 2px;box-shadow:0 2px 12px rgba(232,72,58,.2);}
-.veh-cargo::before{content:'SAFETY';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;letter-spacing:4px;color:rgba(255,255,255,.7);text-transform:uppercase;}
+.veh-cargo::before{content:'SAFETY';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scaleX(-1);font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;letter-spacing:4px;color:rgba(255,255,255,.7);text-transform:uppercase;}
 .veh-cargo::after{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:repeating-linear-gradient(90deg,transparent 0 14px,rgba(0,0,0,.08) 14px 16px);border-radius:2px 6px 6px 2px;}
 .veh-stripe{position:absolute;left:58px;top:2px;width:122px;height:6px;background:repeating-linear-gradient(90deg,#ffb020 0 12px,#e8483a 12px 24px);border-radius:0 4px 0 0;}
 .veh-bumper-f{position:absolute;left:-4px;bottom:12px;width:8px;height:14px;background:#555;border-radius:2px 0 0 2px;}
@@ -170,7 +170,7 @@ select option{background:var(--sur);}
 .veh-wheel-f{left:8px;}
 .veh-wheel-r{right:10px;}
 .veh-wheel-m{left:90px;}
-@keyframes wheelSpin{to{transform:rotate(360deg);}}
+@keyframes wheelSpin{to{transform:rotate(-360deg);}}
 
 /* Exhaust particles */
 .veh-exhaust{position:absolute;left:-10px;bottom:10px;width:6px;height:6px;border-radius:50%;background:rgba(150,150,150,.3);animation:exhaustPuff 1.2s ease-out infinite;}
@@ -7399,67 +7399,70 @@ var ratings=fb.ratings||{};
 var companyName='Prestige Office Management Private Limited';
 var fmtDate='';
 if(fb.date){var dp=fb.date.split('-');if(dp.length===3)fmtDate=dp[2]+'/'+dp[1]+'/'+dp[0];else fmtDate=fb.date;}
-var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:65px;height:65px;" />';
+var logoImg='<img src="'+PTS_LOGO_B64+'" style="width:60px;height:60px;" />';
 var likertRows='';
 FB_QUESTIONS.forEach(function(q,i){var r=ratings['q'+(i+1)];var sc=r?Number(r.score):0;
-// Task 19 — the numeric MARK is printed next to the circles (max 5): "4/5", "3/5" ... so the
+// Task 19 — the numeric MARK is printed next to the boxes (max 5): "4/5", "3/5" ... so the
 // mark each employee gave is readable in the Drive PDF at a glance, not just via the dot.
 var _markTxt=r?(sc+'/5'):'\u2014';
+// Task 25 — SAME-TO-SAME with the employee fill-in form: numbered statements + the same round circles the employee sees on screen.
 var circles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
-likertRows+='<tr><td style="border:1px solid #000;padding:3px 5px;font-size:9.5px;width:40%;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:9.5px;font-weight:bold;width:12%;">'+_markTxt+'</td></tr>';});
+for(var c=0;c<5;c++){var v=c+1;var filled=v===sc;circles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;width:12%;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
+likertRows+='<tr><td style="border:1px solid #000;padding:4px 6px;font-size:10pt;vertical-align:middle;">'+(i+1)+'. '+q+'</td>'+circles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:10pt;font-weight:bold;width:12%;">'+_markTxt+'</td></tr>';});
 var overallCircles='';
-for(var c=0;c<5;c++){var v=c+1;var filled=v===Number(fb.overallRating);overallCircles+='<td style="border:1px solid #000;text-align:center;padding:4px 2px;width:12%;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
+for(var c=0;c<5;c++){var v=c+1;var filled=v===Number(fb.overallRating);overallCircles+='<td style="border:1px solid #000;text-align:center;padding:6px 2px;width:12%;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1.5px solid #000;background:'+(filled?'#000':'#fff')+';vertical-align:middle;"></span></td>';}
 var html='<!DOCTYPE html><html><head><meta charset="UTF-8">';
 html+='<style>@page{size:A4;margin:6mm 8mm;}body{font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#000;margin:0;padding:0;}table{border-collapse:collapse;width:100%;}</style>';
 html+='</head><body>';
 html+='<table style="border:2px solid #000;width:100%;">';
 html+='<tr>';
-html+='<td style="border:1px solid #000;width:17%;padding:4px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
-html+='<td style="border:1px solid #000;padding:4px 8px;vertical-align:middle;text-align:center;font-weight:bold;font-size:13px;letter-spacing:0.5px;">'+companyName+'</td>';
-html+='<td style="border:1px solid #000;width:30%;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>';
+html+='<td style="border:1px solid #000;width:17%;padding:6px;vertical-align:middle;text-align:center;" rowspan="4">'+logoImg+'</td>';
+html+='<td style="border:1px solid #000;padding:4px 10px;vertical-align:middle;text-align:center;font-weight:bold;font-size:12px;letter-spacing:0.3px;">'+companyName+'</td>';
+html+='<td style="border:1px solid #000;width:30%;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Document Number:<br/><b style="font-size:9pt;">IMSP 29 F05</b></td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px 8px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1.5px;color:#333;font-weight:bold;">Integrated Management System</td>';
-html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Issued Date:<br/><b>01/06/2024</b></td>';
+html+='<td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:10pt;letter-spacing:1px;color:#333;font-weight:bold;">Integrated Management System</td>';
+html+='<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Issued Date:<br/><b>01/06/2024</b></td>';
 html+='</tr>';
 html+='<tr>';
-html+='<td style="border:1px solid #000;padding:3px 8px;vertical-align:middle;text-align:center;font-size:11pt;text-decoration:underline;font-weight:bold;">Training Feedback Form</td>';
-html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Rev.<b>02</b></td>';
+html+='<td style="border:1px solid #000;padding:3px 10px;vertical-align:middle;text-align:center;font-size:11pt;text-decoration:underline;font-weight:bold;">Training Feedback Form</td>';
+html+='<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Rev.<b>02</b></td>';
 html+='</tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;"></td>';
-html+='<td style="border:1px solid #000;padding:3px 5px;font-size:8pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>';
+html+='<td style="border:1px solid #000;padding:3px 6px;font-size:8.5pt;text-align:right;vertical-align:top;">Revision Date:<br/><b>01/08/2025</b></td>';
 html+='</tr>';
-html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:left;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Name: <b>'+(fb.empName||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Employee ID: <b>'+(fb.empId||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Department: <b>'+(fb.dept||'')+'</b></td></tr>';
-html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Job Title: <b>'+(fb.desig||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Date: <b>'+fmtDate+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Manager: <b>'+(fb.manager||'')+'</b></td></tr>';
-html+='<tr><td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Training Course: <b>'+(fb.training||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;">Trainer: <b>'+(fb.trainer||'')+'</b></td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
+html+='<tr><td colspan="3" style="border:1px solid #000;background:#B4C5E7;font-weight:bold;font-size:10.5pt;padding:5px 8px;text-align:center;letter-spacing:1px;">EMPLOYEE INFORMATION</td></tr>';
+html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Name: <b>'+(fb.empName||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Employee ID: <b>'+(fb.empId||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Department: <b>'+(fb.dept||'')+'</b></td></tr>';
+html+='<tr><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Job Title: <b>'+(fb.desig||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Date: <b>'+fmtDate+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Manager: <b>'+(fb.manager||'')+'</b></td></tr>';
+html+='<tr><td colspan="2" style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Training Course: <b>'+(fb.training||'')+'</b></td><td style="border:1px solid #000;padding:7px 8px;font-size:9.5pt;vertical-align:middle;">Trainer: <b>'+(fb.trainer||'')+'</b></td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;"><b>Please indicate your impressions of the items listed below.</b></td></tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Agree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Agree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Agree</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Agree</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Neutral</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Disagree</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Strongly<br/>Disagree</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
 html+='</tr>';
 html+=likertRows;
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 6px;font-size:10pt;font-weight:bold;"><b>How do you rate the training overall?</b></td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:6px 6px 2px 6px;font-size:10pt;font-weight:bold;"><b>How do you rate the training overall?</b></td></tr>';
 html+='<tr>';
 html+='<td style="border:1px solid #000;padding:3px;font-size:8pt;"></td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>';
-html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:7.5pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Excellent</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Good</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Average</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Poor</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Very Poor</td>';
+html+='<td style="border:1px solid #000;background:#d9d9d9;font-weight:bold;font-size:8.5pt;text-align:center;padding:3px 2px;width:12%;">Marks<br/>out of 5</td>';
 html+='</tr>';
-html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:9.5px;font-weight:bold;width:12%;">'+(Number(fb.overallRating)||0)+'/5</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:9.5pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;padding:5px 8px;font-size:9.5pt;min-height:170px;">'+(fb.enjoy||'')+'</td></tr>';
-html+='<tr><td colspan="6" style="border:1px solid #000;border-top:1px solid #ccc;padding:4px 6px;font-size:7pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
+html+='<tr><td style="border:1px solid #000;"></td>'+overallCircles+'<td style="border:1px solid #000;text-align:center;padding:3px 2px;font-size:10pt;font-weight:bold;width:12%;">'+(Number(fb.overallRating)||0)+'/5</td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:10pt;font-weight:bold;background:#f2f7fc;">What did you enjoy most about the training?</td></tr>';
+// Task 24 — mirror the official form's ruled writing lines under the answer
+var _rule='____________________________________________________________________________________________________________';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:6px 8px;font-size:10pt;min-height:170px;">'+(fb.enjoy||'')+'<div style="margin-top:16px;color:#000;letter-spacing:2px;">'+_rule+'</div><div style="margin-top:14px;color:#000;letter-spacing:2px;">'+_rule+'</div></td></tr>';
+html+='<tr><td colspan="6" style="border:1px solid #000;padding:4px 8px;font-size:8pt;color:#888;text-align:left;">Page 1 of 1</td></tr>';
 html+='</table>';
 html+='</body></html>';
 return html;}
